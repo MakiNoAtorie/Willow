@@ -124,11 +124,16 @@ pub enum Input {
     /// Shift+motion: moves the caret and keeps the selection's other end.
     Select(Motion),
     SelectAll,
-    /// Deletes the text selection; the app has put `Session::selected_text` on the clipboard.
+    /// Deletes the text selection, or with nothing being edited the selected shapes as
+    /// Delete does; the app has put `Session::clipboard_text` on the clipboard.
     Cut,
     /// Plain text from the clipboard, replacing the text selection. Line breaks (`\r\n`, `\r`
-    /// or `\n`) become paragraph breaks; other control characters are dropped.
+    /// or `\n`) become paragraph breaks; other control characters are dropped. Willow text
+    /// inserts its shapes' texts, one per line. With nothing being edited it pastes shapes
+    /// (`Session::clipboard_text`'s format) or one shape holding the text.
     Paste(String),
+    /// Ctrl/Cmd+D with nothing being edited: copies the selected shapes beside them.
+    Duplicate,
     /// Delete or Backspace with nothing being edited: deletes the selected shapes, each
     /// reconnecting its neighbors (`Session::delete`).
     DeleteShapes,

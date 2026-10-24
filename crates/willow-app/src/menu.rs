@@ -72,7 +72,7 @@ fn row(
         .when(item.destructive, |d| d.text_color(color(m.destructive)))
         .when(item.enabled, |d| {
             d.hover(move |s| s.bg(hover))
-                .on_click(cx.listener(move |w, _, _, cx| w.input(Input::MenuChoose(action), cx)))
+                .on_click(cx.listener(move |w, _, _, cx| w.choose(action, cx)))
         })
         .when(!item.enabled, |d| d.opacity(m.disabled_opacity))
         .child(item.label)
@@ -132,6 +132,14 @@ fn colors(
 }
 
 fn shortcut(s: Shortcut) -> String {
+    if s == Shortcut::DELETE {
+        return if cfg!(target_os = "macos") {
+            s.key
+        } else {
+            "Del"
+        }
+        .into();
+    }
     match (cfg!(target_os = "macos"), s.shift) {
         (true, true) => format!("\u{21e7}\u{2318}{}", s.key),
         (true, false) => format!("\u{2318}{}", s.key),

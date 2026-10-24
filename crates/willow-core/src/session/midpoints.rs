@@ -22,7 +22,7 @@ pub(super) struct Midpoints {
 }
 
 /// The midpoint of `side` of shape `s`, `h` tall, in canvas units.
-fn edge_midpoint(s: &Shape, h: f32, side: Side) -> Point {
+pub(super) fn edge_midpoint(s: &Shape, h: f32, side: Side) -> Point {
     let (x, y, w) = (s.x as f32, s.y as f32, s.width as f32);
     match side {
         Side::Top => Point { x: x + w / 2.0, y },

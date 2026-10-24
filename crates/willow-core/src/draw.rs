@@ -31,6 +31,17 @@ pub struct Frame<'a> {
     pub midpoints: Vec<Point>,
     /// The marquee being drawn: top-left and bottom-right in canvas units.
     pub marquee: Option<(Point, Point)>,
+    /// A midpoint drag looking for a shape to link to; paint its band over every shape.
+    pub link_drag: Option<LinkDrag<'a>>,
+}
+
+/// A drag from a midpoint: a band from the midpoint to the pointer, canvas units, and the
+/// shape a drop there would link to (it shows the ring); refused shapes never show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinkDrag<'a> {
+    pub from: Point,
+    pub to: Point,
+    pub target: Option<&'a ShapeId>,
 }
 
 /// A shape fading in after its creation: paint it at `opacity`, `dy` canvas units off its
@@ -49,6 +60,8 @@ pub struct Connector {
     pub from_side: Side,
     pub to: Point,
     pub to_side: Side,
+    /// Under the pointer: paint it in the theme's hover style.
+    pub hovered: bool,
 }
 
 pub struct VisibleZone<'a> {
@@ -119,6 +132,8 @@ impl Session {
             (s, x, y)
         };
         let creating = self.creating(now);
+        let link_drag = self.link_drag();
+        let target = link_drag.and_then(|l| l.target);
         let mut connectors = Vec::new();
         for &(p, q) in self.link_ends().iter() {
             let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
@@ -159,6 +174,7 @@ impl Session {
                 from_side,
                 to,
                 to_side,
+                hovered: self.connector_hovered(&p.id, &q.id),
             });
         }
         let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
@@ -206,6 +222,7 @@ impl Session {
                     return None;
                 }
                 let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
+                let ring = if target == Some(&s.id) { 1.0 } else { ring };
                 let e = edited.filter(|e| e.id == s.id);
                 let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
                     opacity: k,
@@ -243,6 +260,7 @@ impl Session {
             grid: full,
             midpoints: self.midpoints(),
             marquee: self.marquee(),
+            link_drag,
         }
     }
 }

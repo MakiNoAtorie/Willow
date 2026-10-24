@@ -14,7 +14,7 @@ mod theme;
 mod zoom;
 
 pub use chain::{Link, Side, side};
-pub use draw::{Appear, Connector, Frame, Visible, VisibleZone};
+pub use draw::{Appear, Connector, Frame, LinkDrag, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};

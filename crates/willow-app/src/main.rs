@@ -35,6 +35,8 @@ actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Delete or Backspace on the canvas, with nothing being edited.
 actions!(willow, [DeleteShapes]);
+// Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
+actions!(willow, [Duplicate]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -232,11 +234,27 @@ impl Willow {
         }
     }
 
-    /// Puts the selected text on the system clipboard as plain text.
+    /// Puts the selected text, or else the selected shapes as Willow text, on the system
+    /// clipboard as plain text.
     fn copy(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.selected_text() {
+        if let Some(text) = self.session.clipboard_text() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         }
+    }
+
+    /// Runs a context-menu item, moving clipboard text for Cut, Copy and Paste first.
+    fn choose(&mut self, action: willow_core::MenuAction, cx: &mut Context<Self>) {
+        use willow_core::MenuAction::{Copy, Cut, Paste};
+        match action {
+            Cut | Copy => self.copy(cx),
+            Paste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    return self.input(Input::Paste(text), cx);
+                }
+            }
+            _ => {}
+        }
+        self.input(Input::MenuChoose(action), cx)
     }
 
     fn mouse_down(&mut self, e: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -363,6 +381,7 @@ impl Render for Willow {
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
+            .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -547,25 +566,14 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
+    let cs = &t.connector;
+    let (hover_width, hover) = ((cs.hover_width * z).max(cs.min_screen), color(cs.hover));
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
-        let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
-        if dx.max(dy) < 1.0 {
-            // Under a pixel long: nothing to see.
-            continue;
-        }
-        if dx < 1.0 || dy < 1.0 {
-            // Within a pixel of straight across or down: a quad is far cheaper than a path.
-            let half = point(px(width / 2.0), px(width / 2.0));
-            let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
-            window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
-            continue;
-        }
-        let mut path = gpui::PathBuilder::stroke(px(width));
-        path.move_to(p);
-        path.line_to(q);
-        if let Ok(path) = path.build() {
-            window.paint_path(path, ink);
+        if c.hovered {
+            line(window, p, q, hover_width, hover);
+        } else {
+            line(window, p, q, width, ink);
         }
     }
 
@@ -646,6 +654,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
     }
 
+    // A link drag's band over every shape, in the hovered connector's style.
+    if let Some(l) = frame.link_drag {
+        line(window, at(l.from), at(l.to), hover_width, hover);
+    }
+
     // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
     let m = &t.midpoint;
     let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
@@ -684,6 +697,34 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(sel.marquee),
             Default::default(),
         ));
+    }
+}
+
+/// A straight line from `p` to `q`, `width` screen pixels wide.
+fn line(
+    window: &mut Window,
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+    ink: Hsla,
+) {
+    let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
+    if dx.max(dy) < 1.0 {
+        // Under a pixel long: nothing to see.
+        return;
+    }
+    if dx < 1.0 || dy < 1.0 {
+        // Within a pixel of straight across or down: a quad is far cheaper than a path.
+        let half = point(px(width / 2.0), px(width / 2.0));
+        let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
+        window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
+        return;
+    }
+    let mut path = gpui::PathBuilder::stroke(px(width));
+    path.move_to(p);
+    path.line_to(q);
+    if let Ok(path) = path.build() {
+        window.paint_path(path, ink);
     }
 }
 
@@ -822,6 +863,8 @@ fn main() {
             KeyBinding::new("delete", Delete, ed),
             KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
             KeyBinding::new("delete", DeleteShapes, Some("!editing")),
+            KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
+            KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),
