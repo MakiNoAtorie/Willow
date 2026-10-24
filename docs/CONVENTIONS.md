@@ -23,10 +23,10 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 
 ## Files
 - Format: `format.rs` (`save(doc, heights)`, `load(bytes)`); heights come from `Session::heights()`, taken on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`; tests compare models order-free.
-- Loaded files go through `Session::open` / `disk_changed`, which place `Loaded.unplaced` via `format::place`. `Theme.creation_gap` is the one creation gap.
+- Loaded files go through `Session::open` / `disk_changed`, which apply `Loaded.unplaced` (missing layout, chain colors to settle in story order) via `format::place`. `Theme.creation_gap` is the one creation gap.
 - File state, disk-change decisions and recovery timing live in `session/file.rs`; the app only does I/O. App file I/O lives in `file.rs` (atomic `write_beside`, `file::alert`, `rfd` panels) and `recovery.rs` (off the UI thread; startup `launch` excepted).
-- `file::settle` is the one Save / Don't Save / Cancel routine for close and quit. Call `Willow::discard_recovery()` wherever unsaved changes are resolved.
-- Every `History` method that changes the document bumps `revision` (recovery timing). The recovery timer never calls `cx.notify`.
+- `file::settle` is the one Save / Don't Save / Cancel routine and never deletes; `file::close` / `quit` delete recovery once they go ahead, awaiting `discard_recovery(cx)`'s `Task`.
+- Every `History` method that changes the document bumps `revision` (recovery timing). `take_recovery` returns `Write` (marked text left out) or `Delete` (back to saved); call `arm_recovery` after anything that may change the session. Recovery I/O runs through `Autosave::run`; the UI thread never locks or calls `cx.notify` for it.
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
