@@ -148,6 +148,8 @@ pub struct SelectionStyle {
     /// Same layer count as `ShapeStyle::shadow`, so one can ease into the other.
     pub shadow: [Shadow; 2],
     pub fade: Duration,
+    /// Highlight behind selected text while editing.
+    pub text: Rgba,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -241,6 +243,7 @@ pub const PAPER: Theme = Theme {
         gap: 2.0,
         ring: 2.0,
         color: hex(0x8b7760),
+        text: rgba(139, 119, 96, 0.22),
         shadow: [
             Shadow {
                 x: 0.0,

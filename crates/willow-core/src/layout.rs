@@ -48,6 +48,8 @@ pub struct Layout {
     pub lines: Vec<Line>,
     /// Text height: at least one line, even for empty text.
     pub height: f32,
+    /// The width it was laid out in.
+    pub width: f32,
 }
 
 /// A caret position: a byte offset at a cluster boundary. At a soft wrap the line's end and
@@ -119,6 +121,40 @@ impl Layout {
             },
             None => Caret::default(),
         }
+    }
+
+    /// Text-local (top-left, bottom-right) of byte range `r` on each line it touches, each
+    /// `line_height` tall. A range going on past a line's end (its paragraph break, or across
+    /// a soft wrap) reaches the right edge; one ending at a soft wrap stops at that line's end.
+    pub fn selection_rects(&self, r: Range<usize>, line_height: f32) -> Vec<(Point, Point)> {
+        let x_of = |l: &Line, i: usize| {
+            (l.clusters.iter())
+                .find(|c| c.range.start == i)
+                .map_or(l.end_x, |c| c.x)
+        };
+        (self.lines.iter())
+            .filter_map(|l| {
+                let (lo, hi) = (r.start.max(l.range.start), r.end.min(l.range.end));
+                let on = r.end > l.range.end;
+                // At a wrap the line's end is the next line's start: the range begins there.
+                let starts_after = l.wraps && r.start >= l.range.end;
+                if lo > hi || starts_after || (lo == hi && !on) {
+                    return None;
+                }
+                let x1 = if on { self.width } else { x_of(l, hi) };
+                let top_left = Point {
+                    x: x_of(l, lo),
+                    y: l.y,
+                };
+                Some((
+                    top_left,
+                    Point {
+                        x: x1,
+                        y: l.y + line_height,
+                    },
+                ))
+            })
+            .collect()
     }
 
     /// The start and end of caret `c`'s line.
@@ -224,5 +260,6 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
     Layout {
         height: lines.len() as f32 * lh,
         lines,
+        width,
     }
 }

@@ -110,6 +110,14 @@ pub enum Input {
     Move(Motion),
     /// Deletes the text selection, or else from the caret to where the motion goes.
     Delete(Motion),
+    /// Shift+motion: moves the caret and keeps the selection's other end.
+    Select(Motion),
+    SelectAll,
+    /// Deletes the text selection; the app has put `Session::selected_text` on the clipboard.
+    Cut,
+    /// Plain text from the clipboard, replacing the text selection. Line breaks (`\r\n`, `\r`
+    /// or `\n`) become paragraph breaks; other control characters are dropped.
+    Paste(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -225,8 +233,7 @@ enum Gesture {
         from: Point,
         to: Option<(i32, i32)>,
     },
-    /// Left press in the text being edited: never moves the shape.
-    // ponytail: dragging will select text (#11).
+    /// Left press in the text being edited: dragging selects text, never moves the shape.
     Text,
     /// Left press on an edge of the shape at `index`. Once dragged, `to` is the previewed
     /// (x, width, extra height); release then resizes the shape to it.
@@ -490,6 +497,20 @@ impl Session {
         self.history.can_redo()
     }
 
+    /// Whether Cut and Copy have something to act on: text selected in the edited shape.
+    pub fn can_cut(&self) -> bool {
+        !self.text_selection().is_empty()
+    }
+
+    pub fn can_copy(&self) -> bool {
+        self.can_cut()
+    }
+
+    /// Whether Paste has somewhere to go: a shape being edited.
+    pub fn can_paste(&self) -> bool {
+        self.editing.is_some()
+    }
+
     pub fn viewport(&self) -> Viewport {
         self.viewport
     }
@@ -550,7 +571,11 @@ impl Session {
                     }
                     if hit.is_some_and(|i| self.doc.shapes[i].id == e.id) {
                         let caret = self.caret_at(pos);
-                        self.set_caret(caret);
+                        if mods.shift {
+                            self.extend_to(caret, None);
+                        } else {
+                            self.set_caret(caret);
+                        }
                         self.gesture = Some(Gesture::Text);
                         return self.respond(true);
                     }
@@ -613,7 +638,12 @@ impl Session {
                     ));
                     self.respond(true)
                 }
-                Some(Gesture::Text | Gesture::Resize { .. }) => self.respond(false),
+                Some(Gesture::Text) => {
+                    let caret = self.caret_at(pos);
+                    self.extend_to(caret, None);
+                    self.respond(true)
+                }
+                Some(Gesture::Resize { .. }) => self.respond(false),
                 None => {
                     let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
                     let edge = edge.map(|e| e.1);
@@ -736,12 +766,44 @@ impl Session {
                 self.stop_editing();
                 self.respond(was)
             }
+            Input::Select(m) => {
+                let Some((caret, goal)) = self.motion(m, true) else {
+                    return self.respond(false);
+                };
+                self.extend_to(caret, goal);
+                self.respond(true)
+            }
+            Input::Cut => {
+                let sel = self.text_selection();
+                if sel.is_empty() {
+                    return self.respond(false);
+                }
+                self.replace(sel, "");
+                self.respond(true)
+            }
+            Input::Paste(text) => {
+                if self.editing.is_none() {
+                    return self.respond(false);
+                }
+                let text: String = (text.replace("\r\n", "\n").replace('\r', "\n").chars())
+                    .filter(|&c| c == '\n' || !c.is_control())
+                    .collect();
+                self.replace(self.text_selection(), &text);
+                self.respond(true)
+            }
+            Input::SelectAll => {
+                let Some((_, s)) = self.edited() else {
+                    return self.respond(false);
+                };
+                self.set_text_selection(0..s.len());
+                self.respond(true)
+            }
             Input::ToggleBold | Input::ToggleItalic => {
                 self.toggle(input == Input::ToggleItalic);
                 self.respond(true)
             }
             Input::Move(m) => {
-                let Some((caret, goal)) = self.motion(m) else {
+                let Some((caret, goal)) = self.motion(m, false) else {
                     return self.respond(false);
                 };
                 self.set_caret(caret);
@@ -752,7 +814,7 @@ impl Session {
             }
             Input::Delete(m) => {
                 let sel = self.text_selection();
-                let range = match self.motion(m) {
+                let range = match self.motion(m, false) {
                     _ if !sel.is_empty() => sel,
                     Some((to, _)) => sel.start.min(to.offset)..sel.start.max(to.offset),
                     None => return self.respond(false),
@@ -829,17 +891,50 @@ impl Session {
         }
     }
 
+    /// Moves the caret to `c` keeping the anchor, so the selection grows or shrinks.
+    fn extend_to(&mut self, c: Caret, goal_x: Option<f32>) {
+        if let Some(e) = &mut self.editing {
+            (e.caret, e.goal_x, e.pending, e.since) = (c, goal_x, None, self.now);
+        }
+    }
+
+    /// Text selection highlight in canvas units, one (top-left, bottom-right) per line.
+    pub fn selection_rects(&self) -> Vec<(Point, Point)> {
+        let Some((shape, _)) = self.edited() else {
+            return Vec::new();
+        };
+        let (pad, lh) = (&self.theme.shape, self.theme.line_height());
+        let o = |p: Point| Point {
+            x: shape.x as f32 + pad.pad_x + p.x,
+            y: shape.y as f32 + pad.pad_y + p.y,
+        };
+        let rects = self
+            .layout(shape)
+            .selection_rects(self.text_selection(), lh);
+        rects.into_iter().map(|(a, b)| (o(a), o(b))).collect()
+    }
+
+    /// The selected text of the edited shape as plain text (`\n` between paragraphs);
+    /// `None` when nothing is selected. What Copy puts on the clipboard.
+    pub fn selected_text(&self) -> Option<String> {
+        let (_, s) = self.edited()?;
+        let r = self.text_selection();
+        (!r.is_empty()).then(|| s[r].to_string())
+    }
+
     fn text_selection(&self) -> Range<usize> {
         self.editing.as_ref().map_or(0..0, |e| {
             e.anchor.min(e.caret.offset)..e.anchor.max(e.caret.offset)
         })
     }
 
-    /// Where motion `m` takes the caret, and the column up/down keep.
-    fn motion(&self, m: Motion) -> Option<(Caret, Option<f32>)> {
+    /// Where motion `m` takes the caret, and the column up/down keep. Unless `extend`ing,
+    /// left and right collapse a selection to its edge.
+    fn motion(&self, m: Motion, extend: bool) -> Option<(Caret, Option<f32>)> {
         let e = self.editing.as_ref()?;
         let (shape, s) = self.edited()?;
-        let (i, sel) = (e.caret.offset, self.text_selection());
+        let i = e.caret.offset;
+        let sel = if extend { i..i } else { self.text_selection() };
         let at = |offset| Caret {
             offset,
             upstream: false,

@@ -20,7 +20,7 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
-// Edit menu. Cut, Copy and Paste have no handler yet, so their menu items stay disabled.
+// Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
@@ -42,6 +42,15 @@ actions!(
         WordDelete,
         ToggleBold,
         ToggleItalic,
+        SelectLeft,
+        SelectRight,
+        SelectWordLeft,
+        SelectWordRight,
+        SelectUp,
+        SelectDown,
+        SelectLineStart,
+        SelectLineEnd,
+        SelectAll,
     ]
 );
 
@@ -105,6 +114,13 @@ impl Willow {
         willow_core::Point {
             x: p.x.into(),
             y: p.y.into(),
+        }
+    }
+
+    /// Puts the selected text on the system clipboard as plain text.
+    fn copy(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = self.session.selected_text() {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         }
     }
 
@@ -227,6 +243,23 @@ impl Render for Willow {
             })
             .when(self.session.can_redo(), |d| {
                 d.on_action(cx.listener(|w, _: &Redo, _, cx| w.input(Input::Redo, cx)))
+            })
+            .when(self.session.can_copy(), |d| {
+                d.on_action(cx.listener(|w, _: &Copy, _, cx| w.copy(cx)))
+            })
+            .when(self.session.can_cut(), |d| {
+                d.on_action(cx.listener(|w, _: &Cut, _, cx| {
+                    w.copy(cx);
+                    w.input(Input::Cut, cx)
+                }))
+            })
+            .when(self.session.can_paste(), |d| {
+                d.on_action(cx.listener(|w, _: &Paste, _, cx| {
+                    let text = cx.read_from_clipboard().and_then(|c| c.text());
+                    if let Some(text) = text {
+                        w.input(Input::Paste(text), cx);
+                    }
+                }))
             });
         let root = editing_actions!(root, cx,
             StartEditing => Input::StartEditing,
@@ -245,6 +278,15 @@ impl Render for Willow {
             WordDelete => Input::Delete(Motion::WordRight),
             ToggleBold => Input::ToggleBold,
             ToggleItalic => Input::ToggleItalic,
+            SelectLeft => Input::Select(Motion::Left),
+            SelectRight => Input::Select(Motion::Right),
+            SelectWordLeft => Input::Select(Motion::WordLeft),
+            SelectWordRight => Input::Select(Motion::WordRight),
+            SelectUp => Input::Select(Motion::Up),
+            SelectDown => Input::Select(Motion::Down),
+            SelectLineStart => Input::Select(Motion::LineStart),
+            SelectLineEnd => Input::Select(Motion::LineEnd),
+            SelectAll => Input::SelectAll,
         );
         let body = div()
             .flex_1()
@@ -388,6 +430,14 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         ));
         // Text is gone where the grid is: it would be under about 7 px on screen.
         if z >= t.zoom.fade_end {
+            // The text selection, under the edited shape's text.
+            if session.editing().is_some_and(|e| e.id == shape.id) {
+                for (a, c) in session.selection_rects() {
+                    let tl = origin + point(px(a.x * z), px(a.y * z));
+                    let br = origin + point(px(c.x * z), px(c.y * z));
+                    window.paint_quad(gpui::fill(Bounds::from_corners(tl, br), color(sel.text)));
+                }
+            }
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
             text::paint_text(window, o, &shape.text, &session.layout(shape), t, z);
         }
@@ -512,6 +562,12 @@ fn main() {
             KeyBinding::new("end", LineEnd, ed),
             KeyBinding::new("backspace", Backspace, ed),
             KeyBinding::new("delete", Delete, ed),
+            KeyBinding::new("shift-left", SelectLeft, ed),
+            KeyBinding::new("shift-right", SelectRight, ed),
+            KeyBinding::new("shift-up", SelectUp, ed),
+            KeyBinding::new("shift-down", SelectDown, ed),
+            KeyBinding::new("shift-home", SelectLineStart, ed),
+            KeyBinding::new("shift-end", SelectLineEnd, ed),
         ]);
         if cfg!(target_os = "macos") {
             cx.bind_keys([
@@ -523,6 +579,11 @@ fn main() {
                 KeyBinding::new("alt-delete", WordDelete, ed),
                 KeyBinding::new("cmd-b", ToggleBold, ed),
                 KeyBinding::new("cmd-i", ToggleItalic, ed),
+                KeyBinding::new("alt-shift-left", SelectWordLeft, ed),
+                KeyBinding::new("alt-shift-right", SelectWordRight, ed),
+                KeyBinding::new("cmd-shift-left", SelectLineStart, ed),
+                KeyBinding::new("cmd-shift-right", SelectLineEnd, ed),
+                KeyBinding::new("cmd-a", SelectAll, ed),
             ]);
         } else {
             cx.bind_keys([
@@ -532,6 +593,9 @@ fn main() {
                 KeyBinding::new("ctrl-delete", WordDelete, ed),
                 KeyBinding::new("ctrl-b", ToggleBold, ed),
                 KeyBinding::new("ctrl-i", ToggleItalic, ed),
+                KeyBinding::new("ctrl-shift-left", SelectWordLeft, ed),
+                KeyBinding::new("ctrl-shift-right", SelectWordRight, ed),
+                KeyBinding::new("ctrl-a", SelectAll, ed),
             ]);
         }
         cx.text_system()
