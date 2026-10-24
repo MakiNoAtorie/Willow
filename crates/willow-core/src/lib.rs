@@ -1,7 +1,9 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
+mod session;
 mod theme;
 
+pub use session::{Button, Cursor, Input, Key, Modifiers, Point, Response, Session, Viewport};
 pub use theme::{PAPER, Rgba, Shadow, ShapeStyle, Theme};
 
 /// Width of every new shape, in canvas units. Shared by every theme.
