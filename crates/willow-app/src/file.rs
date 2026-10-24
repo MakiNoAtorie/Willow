@@ -132,3 +132,28 @@ fn write_beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     written
 }
+
+impl Willow {
+    /// On focus: if the file's modified time changed since the last check, passes its bytes
+    /// (or its absence) to the session, which decides whether to reload.
+    pub(crate) fn check_disk(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = &self.path else { return };
+        let bytes = match fs::metadata(path).and_then(|m| m.modified()) {
+            Ok(t) if Some(t) == self.mtime => return,
+            Ok(t) => match fs::read(path) {
+                Ok(bytes) => {
+                    self.mtime = Some(t);
+                    Some(bytes)
+                }
+                Err(_) => return,
+            },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                self.mtime = None;
+                None
+            }
+            Err(_) => return,
+        };
+        self.session.disk_changed(bytes.as_deref());
+        cx.notify();
+    }
+}

@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
@@ -114,6 +114,8 @@ struct Willow {
     bench: Option<bench::Bench>,
     /// The document's file; `None` while untitled.
     path: Option<PathBuf>,
+    /// The file's modified time at the last focus check.
+    mtime: Option<SystemTime>,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -737,6 +739,8 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 let _activation = cx.observe_window_activation(window, |w, window, cx| {
                     if !window.is_window_active() {
                         w.input(Input::FocusLost, cx);
+                    } else {
+                        w.check_disk(cx);
                     }
                 });
                 let (session, path) = content.session(window);
@@ -750,6 +754,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     _activation,
                     bench: bench.map(bench::Bench::new),
                     path,
+                    mtime: None,
                 }
             })
         },

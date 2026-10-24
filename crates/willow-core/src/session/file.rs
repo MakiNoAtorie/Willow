@@ -3,7 +3,7 @@
 use std::io;
 
 use super::Session;
-use crate::{Loaded, Measure, Theme, format};
+use crate::{Loaded, Measure, Theme, format, load};
 
 impl Session {
     /// A session over a loaded file's document; `bytes` are what was read. A load that
@@ -41,5 +41,31 @@ impl Session {
         self.saved = Some(self.doc.clone());
         self.bytes = bytes;
         Ok(())
+    }
+
+    /// The file on disk as read when the window gains focus; `None` when it is missing.
+    /// Bytes equal to the last read or write change nothing. Otherwise, with nothing unsaved,
+    /// the document reloads as one undoable step; with unsaved changes, unreadable bytes or
+    /// a missing file, the document stays and is marked unsaved.
+    pub fn disk_changed(&mut self, bytes: Option<&[u8]>) {
+        let Some(bytes) = bytes else {
+            self.saved = None;
+            // A file that comes back is compared afresh.
+            self.bytes.clear();
+            return;
+        };
+        if bytes == self.bytes {
+            return;
+        }
+        self.bytes = bytes.to_vec();
+        match load(bytes) {
+            Ok(loaded) if self.is_saved() => {
+                self.stop_editing();
+                self.saved = (!loaded.repaired).then(|| loaded.document.clone());
+                self.history.replace(&mut self.doc, loaded.document);
+                self.drop_missing_selection();
+            }
+            _ => self.saved = None,
+        }
     }
 }

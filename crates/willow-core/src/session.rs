@@ -248,6 +248,15 @@ impl Session {
         self.rings.iter().any(|r| !r.done(now, fade)) || self.zoom.running(self.theme, now)
     }
 
+    /// Deselects a shape the document no longer has (after a whole-document replace).
+    fn drop_missing_selection(&mut self) {
+        if let Some(id) = &self.selected
+            && !self.doc.shapes.iter().any(|s| &s.id == id)
+        {
+            self.select(None);
+        }
+    }
+
     fn select(&mut self, id: Option<ShapeId>) {
         if id == self.selected {
             return;
@@ -554,6 +563,7 @@ impl Session {
                     self.history.redo(&mut self.doc);
                 }
                 self.stop_editing();
+                self.drop_missing_selection();
                 self.respond(true)
             }
             Input::ResetZoom => {
