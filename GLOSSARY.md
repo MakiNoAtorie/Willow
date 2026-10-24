@@ -52,6 +52,25 @@ _Avoid_: File order, creation order
 The theme's edge-to-edge distance between a shape and a new or auto-placed shape linked to it.
 _Avoid_: Spacing, margin
 
+**Minimum gap**:
+The theme's edge-to-edge distance a push keeps between a shape and another chain.
+_Avoid_: Margin, padding
+
+**Midpoint**:
+One of the four circles at a hovered shape's edge midpoints; click to create a linked shape, drag to link.
+_Avoid_: Handle, port, anchor
+
+**Insert-and-push**:
+Creating a shape from a midpoint where a shape is already linked on that side: the new shape goes between them and that shape's subtree moves along.
+_Avoid_: Splice
+
+**Push**:
+A saved move the app makes to keep a gap when a shape grows or is created; it moves a linked subtree or a whole other chain as one block.
+_Avoid_: Nudge, shove, reflow
+
+**Hub**:
+The neighbor of a deleted shape that its opposite-side neighbors relink to.
+
 **Directional picker**:
 The overlay Tab shows over a shape, from which an arrow key creates a linked shape on that side.
 _Avoid_: Directional indicator
