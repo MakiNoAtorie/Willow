@@ -1,6 +1,7 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod delete;
 mod editing;
 mod file;
 mod menu;
@@ -699,6 +700,12 @@ impl Session {
                 }
                 self.stop_editing();
                 self.drop_missing_selection();
+                self.respond(true)
+            }
+            Input::DeleteShapes if self.editing.is_some() => self.respond(false),
+            Input::DeleteShapes => {
+                let ids = self.selected.clone();
+                self.delete(&ids);
                 self.respond(true)
             }
             Input::ResetZoom => {

@@ -129,6 +129,9 @@ pub enum Input {
     /// Plain text from the clipboard, replacing the text selection. Line breaks (`\r\n`, `\r`
     /// or `\n`) become paragraph breaks; other control characters are dropped.
     Paste(String),
+    /// Delete or Backspace with nothing being edited: deletes the selected shapes, each
+    /// reconnecting its neighbors (`Session::delete`).
+    DeleteShapes,
     /// The window lost focus: Space no longer counts as held and a pan ends, since their
     /// key-up or release may never arrive.
     FocusLost,

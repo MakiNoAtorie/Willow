@@ -33,6 +33,8 @@ actions!(willow, [Quit, ResetZoom]);
 actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
+// Delete or Backspace on the canvas, with nothing being edited.
+actions!(willow, [DeleteShapes]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -360,6 +362,7 @@ impl Render for Willow {
                 }
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -755,6 +758,8 @@ fn main() {
             KeyBinding::new("end", LineEnd, ed),
             KeyBinding::new("backspace", Backspace, ed),
             KeyBinding::new("delete", Delete, ed),
+            KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
+            KeyBinding::new("delete", DeleteShapes, Some("!editing")),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),
