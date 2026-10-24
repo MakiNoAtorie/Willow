@@ -20,6 +20,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Shape text offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). A caret is `Caret { offset, upstream }` (`upstream`: a soft-wrap offset shown at the end of the earlier line); the selection is `Editing.anchor..caret.offset`.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `willow-core/src/layout.rs`; read geometry through `Session::layout(&shape)` / `Session::shape_height(&shape)` (cached per shape, keyed on text + width). Editing ops live in `edit.rs` and go through `RichText::replace`, which keeps text normalized.
 - The app's measurer and glyph painting live in `willow-app/src/text.rs`. Fonts are embedded from `crates/willow-app/assets` (Literata + `OFL.txt`); the family is `Theme.font`. Caret visuals are `Theme.caret`; caret width is screen px at any zoom.
+- Style toggles (`Input::ToggleBold/ToggleItalic`) act on `Editing.anchor..caret.offset`; with an empty selection they set `Editing.pending`, which `set_caret` clears and `Session::replace` applies inside the same `history.change`. A toggle turns the style on unless the whole selection already has it.
 - Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`.
 - Editing keys are GPUI actions in the `editing` key context; F2, Enter and Esc are bound everywhere. The input handler is registered whenever a shape is selected.
 
