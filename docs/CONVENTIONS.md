@@ -7,9 +7,17 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - GPUI won't resolve without the `[patch.crates-io]` block from Zed's root `Cargo.toml` at the pinned rev; copy it into the workspace `Cargo.toml` and re-copy it on every pin bump.
 - Build needs the Metal Toolchain on macOS (`xcodebuild -downloadComponent MetalToolchain`) and Visual Studio Build Tools with a Windows SDK on Windows (`fxc` for HLSL). Don't enable `gpui_platform/runtime_shaders` to work around a missing toolchain.
 
+## Layout
+- Workspace crates: `crates/willow-core` (GPUI-free, no deps unless needed) and `crates/willow-app` (binary `willow`; run with `cargo run -p willow-app`).
+- Visual values live as `Theme` fields in the core, never as constants in the app. Colors are `Rgba(0xRRGGBBAA)`; the app converts with `gpui::rgba(c.0).into()`.
+- Theme shadows keep the CSS values from `themes.js`; the app passes `blur / 2` as GPUI's `blur_radius` (GPUI blur is the Gaussian sigma).
+- macOS: the title bar floats over the canvas, so add it as the last child or the canvas paints over it.
+
 ## Local checks (run before pushing)
 - `ci.bat` on Windows, `./ci.sh` on macOS: fmt, build, test, clippy `-D warnings`, and the GPUI-free-core rule (ADR 0001). Optional arg: cargo job count (default 4; 2 when another build runs). Add new checks to both scripts.
 - Keep output filtered: `./ci.sh 2>&1 | grep -E 'error|warning:|FAILED|passed' | head -40`.
+
+- Share the build cache: `CARGO_TARGET_DIR=<main checkout>/target`, so worktrees skip the cold GPUI compile.
 
 ## Tests
 - Large or many input files come from generators, not hand-written fixtures. Parser edge cases may use small golden files.
