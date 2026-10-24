@@ -8,7 +8,9 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Windows and macOS from day one; both must build and feel equally good. Bundle one font so text renders identically on both; Phase 1 picks it, and Phase 0 checks emoji fallback on Windows.
 - Light theme only.
 - Memory and CPU efficiency matter: idle should be near-zero CPU, and large canvases must stay smooth. Animations must stop their redraw loop when they finish.
+- Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001).
 - Tests that need large or many input files build them with file generators rather than hand-written fixtures. Parser edge cases (escaping, invalid files) may use small golden files. Any benchmark or tool output should be CSV.
+- Performance targets, measured on a generated 10,000-shape document: p95 frame time ≤ 8 ms while panning and zooming, keystroke-to-paint ≤ 16 ms while typing in a shape, idle CPU near zero within 1 s of the last input or animation. Reference machines: a MacBook Air M4, which must meet the targets, and a Windows desktop (Ryzen 5 9600X, RTX 5060 Ti), checked for correctness and feel. Optionally repeat the Windows run once on the 9600X's integrated graphics as a stand-in for a weak laptop.
 
 ## Look and feel (fixed decisions)
 
@@ -22,15 +24,15 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - The canvas fills the window. No toolbar: every action lives in right-click menus and shortcuts.
 - One window per document. Ctrl/Cmd+N opens a new window; several documents can be open at once.
 - **macOS**: traffic lights over a transparent title bar, plus the native menu bar (File, Edit, View). The Edit menu carries Undo, Redo, Cut, Copy, Paste so the system shortcuts route correctly.
-- **Windows**: a slim custom title bar with the document name, a quiet saved/unsaved dot, and one small menu button holding the same menus. It must behave like a native title bar: drag region, double-click to maximize, Windows 11 snap layouts on the maximize button, correct on mixed-DPI monitors.
+- **Windows**: a slim custom title bar with the document name, a quiet saved/unsaved dot, and one small menu button holding the same menus. It must behave like a native title bar: drag region, double-click to maximize, Windows 11 snap layouts on the maximize button, correct on mixed-DPI monitors. The owner verifies mixed DPI by hand with a second monitor at a different scale.
 - A small toggle on the title bar shows/hides the code panel (Phase 7).
 - While zooming, the zoom level appears briefly and fades.
 
 ## Core model
 
-- **Shape**: rounded rectangle with rich text (plain, bold, italic), a position, a width and an optional extra height.
+- **Shape**: rounded rectangle with rich text (plain, bold, italic), a position, a width and an optional extra height. Positions and sizes are whole canvas units; mouse drags at any zoom round to the nearest unit.
 - **Link**: connects two shapes. Which side of each shape the connector leaves from (top, bottom, left, right) is **derived from the shapes' relative positions at draw time**, never stored. So a link's direction follows the shapes when they move, and "the shape below b" always means the one that is actually below.
-- **Chain**: the set of shapes reachable through links. A chain is a tree: a shape may have any number of links, but a link that would close a cycle is refused. An unlinked shape is a chain of one. **Color belongs to the chain**, not the shape; every shape in a chain shows the chain's color.
+- **Chain**: the set of shapes reachable through links. A chain is a tree: a shape may have any number of links, but a link that would close a cycle is refused. An unlinked shape is a chain of one. **Color belongs to the chain**, not the shape; every shape in a chain shows the chain's color. When a chain splits (a removed link or a deleted shape), every resulting chain keeps the original color.
 - **Zone**: a titled, colored container holding shapes. Membership is **explicit** (stored in the file), not geometric: a shape is in a zone because it was put there, and it stays a member even if it is later moved, grown or resized outside the zone's rectangle. Zones can nest one level deep. A chain may span zones.
 - One canvas per file.
 
@@ -98,7 +100,7 @@ Goal: an infinite canvas where shapes can be created, moved and written in, insi
 - At low zoom, text fades out and shapes become plain colored blocks, so the overall silhouette reads cleanly.
 - Undo/redo is part of the foundation from this phase on, and every later feature plugs into it. One history per document, covering model changes only: pan, zoom and selection are not undoable. Typing inside a shape coalesces into one step per editing session.
 
-Done when: a canvas with thousands of generated shapes pans, zooms and edits smoothly on both platforms, and typing in a shape feels immediate.
+Done when: a generated 10,000-shape document meets the performance targets on the MacBook Air, and pans, zooms and edits correctly on Windows.
 
 ## Phase 3 — File format and persistence
 
@@ -113,25 +115,32 @@ The chain, link and zone decisions in the core model are settled before this pha
 
   zone arc1 "Arc 1" color blue {
     a: "The city closes its gates"
-    b: "Food prices **spike**"          below a
-    c: "Protagonist smuggles grain"     right of b
+    b: "Food prices **spike**" below a
+    c: "Protagonist smuggles grain" right of b
   }
 
-  @layout a 0,0 w240  b 0,140 w240  c 320,140 w240 h60
+  @layout a 0,0 w240
+  @layout b 0,140 w240
+  @layout c 320,140 w240 h60
   @layout arc1 -40,-40 400x300
   ```
 
 - The first line is a format version, so files can be migrated later.
 - `below a` is a link. The direction word is simply the derived side at save time; positions in `@layout` are what actually place shapes. A linked shape with no layout entry is auto-placed in the stated direction.
-- Chain color is written once per chain, on any one of its shapes; the loader applies it to the whole chain.
+- Chain color is written once per chain, on the chain's first shape in story order, and omitted when it is the neutral; the loader applies it to the whole chain. Colors are written by fixed lowercase names chosen in Phase 1; names never change even if a shade is retuned.
 - The layout section holds position, width and extra height for shapes, and position and size for zones.
 - IDs are auto-generated when shapes are created on the canvas: short, readable, lowercase letters, skipping any ID already in use. They never change once assigned.
 - Bold/italic is represented inline in the text (`**bold**`, `*italic*`, nesting allowed). Text stays on one line: `"` `*` and `\` are escaped with a backslash, and a line break inside a shape is written `\n`.
-- Saving writes canonical text. Loading a canonical file and saving it reproduces it byte for byte. Unknown lines are ignored on load and dropped on save.
+- Saving writes canonical text. Loading a canonical file and saving it reproduces it byte for byte. Canonical rules:
+  - **Story order** (ADR 0002): zone blocks and loose chains are ordered by their topmost shape (ties by x, then ID). Each chain is walked depth-first from its topmost shape, visiting neighbors by side in the order below, right, left, above. A chain spanning zones is split across those zone blocks. A nested zone's block sits inside its parent's block; within a block, shapes and nested zones interleave by their topmost shape.
+  - Each link is written once, by the shape the walk reaches second, pointing back to the shape it was reached from. The first shape of a chain writes no link, so an ID is always defined before it is referenced.
+  - One `@layout` line per shape or zone, in story order, all shapes before all zones. Width is always written; extra height `h` only when non-zero.
+  - Single spaces between tokens, no column alignment, 2-space indent inside zone blocks, one blank line between top-level blocks and before the layout section, and a trailing newline.
+- Unknown lines are ignored on load and dropped on save. Until Phase 7, loading a file with lines it cannot read marks the document unsaved, so dropping them on save is a visible choice.
 - Ctrl/Cmd+N new document, Ctrl/Cmd+O open, Ctrl/Cmd+S save. These also appear in the File menu.
 - Closing a window, or opening into it, with unsaved changes asks Save / Don't save / Cancel. This is the one dialog the app has.
-- Autosave is crash recovery, not saving: every document with unsaved changes is periodically written to a recovery folder, named or not. The saved/unsaved dot reflects manual saves only. On launch, a recovery file newer than its document is offered for restore. The first manual save of an untitled document asks where to put it.
-- If the file changes on disk while open (someone edited it in another editor) and the document has no unsaved changes, it reloads silently. If it does have unsaved changes, the app keeps its version and the dot shows unsaved.
+- Autosave is crash recovery, not saving: every document with unsaved changes is periodically written to a recovery folder, named or not. The saved/unsaved dot reflects manual saves only. On launch, each document with a newer recovery file opens with the recovered content, marked unsaved; Save keeps it, and closing with Don't save discards the recovery and leaves the file on disk as it was. No extra dialog. The first manual save of an untitled document asks where to put it.
+- If the file changes on disk while open (someone edited it in another editor) and the document has no unsaved changes, it reloads silently, and the reload is one undoable step so the writer's version can be brought back. If it does have unsaved changes, the app keeps its version and the dot shows unsaved.
 - The title bar's saved/unsaved dot reflects the document state.
 
 ## Phase 4 — Chains and editing
@@ -139,16 +148,17 @@ The chain, link and zone decisions in the core model are settled before this pha
 Goal: build and reshape chains with the mouse.
 
 - Hovering a shape's border shows small circles at the edge midpoints. Clicking one creates a new linked shape in that direction and enters editing in it.
-- If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves: an unrelated shape may end up overlapped, and zone membership is unchanged.
+- If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves: an unrelated shape may end up overlapped, and zone membership is unchanged. If several shapes link on that side, only the one nearest the midpoint counts as the next shape, and only its subtree is pushed.
+- If the spot is taken by an unrelated shape (another chain, or a shape not linked on that side), the new shape is created at the normal spot and overlaps it; nothing is pushed.
 - Link two existing shapes by dragging from a midpoint onto another shape. A link that would close a cycle is refused. When this joins two chains, the chain the drag started from keeps its color and the other chain adopts it.
 - Remove a link by right-clicking the connector (Remove link). Connectors have a generous hit tolerance and highlight on hover.
-- Delete key removes the selected shape(s). Deleting a shape in the middle of a chain reconnects its neighbors on opposite sides: the one above with the one below, the one left with the one right. Links on other sides are dropped. Cut behaves the same way.
+- Delete key removes the selected shape(s). Deleting a shape in the middle of a chain reconnects its neighbors on opposite sides: the one above with the one below, the one left with the one right. With several neighbors on a side, the nearest one on one side becomes the hub and every neighbor on the opposite side links to it; the other neighbors on the hub's side lose their link and become their own chains. Links on sides with no opposite neighbor are dropped. This can never close a cycle. Cut behaves the same way.
 - Connectors follow shapes as they move.
 - Multi-select: Shift+drag for a marquee, Shift+click to toggle. Selections can be moved together.
 - Right-click on a shape: Cut, Copy, Paste, Duplicate, Change color (seven circles).
 - Right-click on a multi-selection: Cut, Copy, Duplicate, Delete (Create zone is added in Phase 6).
 - Right-click on empty space: create an unlinked shape there (a new parallel branch).
-- Paste creates copies at the cursor; Duplicate creates copies beside the originals. Copies keep the links among themselves but are not linked to the originals. The clipboard carries the text format, so paste works between documents; pasting plain text from another app creates one unlinked shape with that text.
+- Paste creates copies at the cursor; Duplicate creates copies beside the originals. Copies get fresh IDs and keep the links among themselves (remapped) and their chain color, but are not linked to the originals. Pasted copies join the innermost zone under the cursor; duplicates join the originals' zone. Zones themselves are not copied. The clipboard carries the text format, so paste works between documents; pasting plain text from another app creates one unlinked shape with that text.
 - Changing color paints the shape and its whole chain. A new shape created from a chain joins that chain's color. Unlinked shapes start with the neutral color.
 
 ## Phase 5 — Keyboard flow
@@ -161,7 +171,7 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 - Ctrl/Cmd+Shift+Left/Right change width (symmetric). Ctrl/Cmd+Shift+Up/Down move the bottom edge. Same minimum-size rule as the mouse.
 - Ctrl/Cmd+X/C/V cut, copy, paste. Ctrl/Cmd+D duplicates.
 - Ctrl/Cmd+Shift+C opens the color picker, navigable by keyboard.
-- **Tab** shows a directional indicator over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. If the spot is taken, insert and push as in Phase 4.
+- **Tab** shows the directional picker over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. If the spot is taken, insert, push or overlap exactly as in Phase 4.
 - Ctrl/Cmd+Shift+N creates an unlinked shape.
 
 ## Phase 6 — Zones
@@ -169,7 +179,7 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 Goal: group sections of the canvas (arcs, episodes) into containers.
 
 - Create a zone by selecting shapes, right-clicking the selection and choosing **Create zone**. The zone wraps the selection. The item is available only when all selected shapes have the same parent: none (a top-level zone) or the same zone (a nested zone). A selection spanning two zones, or inside an already nested zone, can't become a zone.
-- Shapes join a zone by being dropped inside it (the shape's center decides), and leave by being dropped outside. Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do.
+- Shapes join a zone by being dropped inside it (the shape's center decides), and leave by being dropped outside. Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The one exception is new copies: paste and duplicate place copies in a zone as described in Phase 4.
 - Dropping a zone inside another nests it; dropping a nested zone outside un-nests it.
 - Moving a zone moves everything inside it. Zones are resizable, including smaller than their contents; members stay members.
 - Each zone has an editable title and its own color from the same palette (default: the neutral light gray). It never inherits color from its contents.
@@ -186,8 +196,8 @@ Goal: edit the diagram as text, live, alongside the canvas.
 - A text edit, once applied after the pause, is one step in the document's single undo history. Ctrl/Cmd+Z in the panel undoes that step and regenerates the text; there is no separate character-level undo.
 - The parser is forgiving: an unclosed quote runs to the end of its line, and unknown lines are ignored.
 - When the text is invalid (e.g. a reference to an ID that doesn't exist yet, a duplicate ID, an unclosed zone), the canvas quietly holds its last valid state and the offending line gets a subtle underline. No popups.
-- The file is the text. Saving with invalid text writes the text as typed, never the last valid model, so nothing the writer typed is lost. Loading an invalid file shows whatever parses, opens the panel and underlines the rest.
-- Shapes added in text without a position are auto-placed next to the shape they link to. An unlinked shape without a position is placed below the lowest shape on the canvas.
+- The file is the text. Saving with invalid text writes the text as typed, never the last valid model, so nothing the writer typed is lost. Loading an invalid file shows whatever parses, opens the panel and underlines the rest. Invalid lines survive only until the next canvas edit, which regenerates canonical text without them; that edit is undoable, so Ctrl/Cmd+Z brings the lines back.
+- Shapes added in text without a position are auto-placed next to the shape they link to. An unlinked shape without a position is placed below the lowest shape on the canvas. If the auto-placed spot is taken, the shape overlaps it; nothing is pushed.
 - IDs stay stable across edits so links never scramble. Changing an ID token in the text is not a rename: it is a new shape, and the old references become invalid lines.
 
 ## Phase 8 — Polish pass
@@ -195,7 +205,7 @@ Goal: edit the diagram as text, live, alongside the canvas.
 Goal: the whole app feels finished and matches the Phase 1 visual language.
 
 - Review every interaction on both platforms against the approved mockups: animation timing, hover states, cursor changes, spacing and text rendering.
-- Profile memory and frame times on very large generated documents and fix hotspots.
+- Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
 
 ---
 

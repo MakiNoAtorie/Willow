@@ -1,0 +1,3 @@
+# Saved text is in story order
+
+Canonical text lists zone blocks and loose chains by their topmost shape (ties by x, then ID), and walks each chain depth-first from its topmost shape, visiting neighbors by side in the order below, right, left, above; a chain spanning zones is split across those zone blocks. We rejected creation order (an inserted trunk shape would land at the end, so the text stops reading as the story) and pure position order (reshuffles on every move). The cost: moving shapes can reorder lines, so diffs are noisier than with creation order. Changing this later changes every saved file's canonical form.
