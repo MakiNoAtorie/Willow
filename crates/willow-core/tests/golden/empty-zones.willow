@@ -1,0 +1,15 @@
+willow 1
+
+zone e "Empty" color lilac {
+}
+
+zone f "Holder" {
+  zone h "Nothing yet" {
+  }
+  i: "Alone"
+}
+
+@layout i 40,700 w210
+@layout e 0,0 400x200
+@layout f 0,500 400x400
+@layout h 20,540 200x100

@@ -13,3 +13,5 @@ path = "src/main.rs"
 gpui = { git = "https://github.com/zed-industries/zed", rev = "79fe6a645f68f8c9230578f154bf99852d9f716f", features = ["profiler"] }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "79fe6a645f68f8c9230578f154bf99852d9f716f", features = ["font-kit"] }
 willow-core = { path = "../willow-core" }
+# Native open/save panels with a `.willow` filter, which GPUI's panels lack.
+rfd = { version = "0.17", default-features = false }

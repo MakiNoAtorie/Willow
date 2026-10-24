@@ -1,7 +1,7 @@
 //! Windows: custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
 //! The menu button opens the app menu in the theme's menu style, with the Edit menu cascaded.
 
-use crate::{Copy, Cut, Paste, Quit, Redo, Undo, color, shadows};
+use crate::{Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, Save, SaveAs, Undo, color, shadows};
 use gpui::{
     Action, AnyElement, App, Entity, MouseButton, Window, WindowControlArea, anchored, deferred,
     div, point, prelude::*, px, relative,
@@ -15,7 +15,12 @@ struct MenuState {
     edit: bool,
 }
 
-pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl IntoElement {
+pub fn title_bar(
+    name: &str,
+    session: &Session,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
     let t = session.theme();
     let c = t.chrome;
     let state = window.use_keyed_state("app-menu", cx, |_, _| MenuState::default());
@@ -77,7 +82,16 @@ pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl I
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(color(c.title))
                 .window_control_area(WindowControlArea::Drag)
-                .child("Untitled"),
+                .gap(px(c.win_unsaved_gap))
+                .child(name.to_string())
+                .when(!session.is_saved(), |d| {
+                    d.child(
+                        div()
+                            .size(px(c.win_unsaved_dot))
+                            .rounded_full()
+                            .bg(color(c.title)),
+                    )
+                }),
         )
         .child(button("min", "\u{e921}", WindowControlArea::Min))
         .child(button(
@@ -108,7 +122,25 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
         }
     };
     let (show_edit, hide_edit, close) = (set(true, true), set(true, false), set(false, false));
-    let top = panel(m)
+    let file_items: [Item; 4] = [
+        ("New", "Ctrl+N", Box::new(NewFile)),
+        ("Open…", "Ctrl+O", Box::new(OpenFile)),
+        ("Save", "Ctrl+S", Box::new(Save)),
+        ("Save As…", "Ctrl+Shift+S", Box::new(SaveAs)),
+    ];
+    let mut top = panel(m);
+    for it in file_items {
+        let hide_edit = set(true, false);
+        top = top.child(
+            item(m, it, true, set(false, false)).on_hover(move |&h, _, cx| {
+                if h {
+                    hide_edit(cx)
+                }
+            }),
+        );
+    }
+    let top = top
+        .child(separator(m))
         .child(
             row(m, "edit", "Edit", "\u{203a}", true)
                 .when(edit, |d| d.bg(color(m.hover)))

@@ -1,0 +1,8 @@
+willow 1
+
+a: "The city closes its gates"
+
+b: ""
+
+@layout a 0,0 w210
+@layout b 290,140 w180 h60

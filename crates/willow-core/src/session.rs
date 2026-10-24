@@ -2,8 +2,9 @@
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
 mod editing;
+mod file;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
@@ -12,7 +13,7 @@ use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Layout, Measure, layout};
 use crate::zoom::{Zoom, ZoomPill};
-use crate::{Document, RichText, Shape, ShapeId, Theme, Transition};
+use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
 
@@ -140,6 +141,10 @@ pub struct Session {
     theme: &'static Theme,
     measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
+    /// Where `measure_ahead` goes on: a shape index.
+    ahead: Cell<usize>,
+    /// Each link's shape indices, for drawing; see `link_ends`.
+    link_ends: RefCell<Vec<(usize, usize)>>,
     viewport: Viewport,
     gesture: Option<Gesture>,
     space_held: bool,
@@ -153,17 +158,31 @@ pub struct Session {
     rings: Vec<Ring>,
     /// Time of the last event.
     now: Duration,
+    /// The document as last read or written; `None` after a load that needed repairs.
+    saved: Option<Document>,
+    /// The bytes last read or written.
+    bytes: Vec<u8>,
+    /// First and last change not yet in a recovery file.
+    unrecovered: Option<(Duration, Duration)>,
+    /// A recovery write was taken since the last save.
+    recovery_written: bool,
 }
 
 impl Session {
     /// `measure` is the app's text-measuring function.
     pub fn new(doc: Document, theme: &'static Theme, measure: Box<dyn Measure>) -> Self {
         Session {
+            saved: Some(doc.clone()),
+            bytes: Vec::new(),
+            unrecovered: None,
+            recovery_written: false,
             doc,
             history: History::default(),
             theme,
             measure,
             layouts: RefCell::default(),
+            ahead: Cell::default(),
+            link_ends: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
                 zoom: 1.0,
@@ -218,9 +237,53 @@ impl Session {
         l
     }
 
+    /// Each link's two shape indices, in link order. Cached, and checked against the document
+    /// on every call (cheap ID compares), so any change to shapes or links rebuilds it.
+    // ponytail: a link to a missing shape (`usize::MAX`) fails the check and rebuilds every
+    // call; commands never make one.
+    pub(crate) fn link_ends(&self) -> std::cell::Ref<'_, Vec<(usize, usize)>> {
+        let (shapes, links) = (&self.doc.shapes, &self.doc.links);
+        let is = |i: usize, id: &ShapeId| shapes.get(i).is_some_and(|s| &s.id == id);
+        let valid = |ends: &Vec<(usize, usize)>| {
+            ends.len() == links.len()
+                && (ends.iter().zip(links)).all(|(&(i, j), Link(a, b))| is(i, a) && is(j, b))
+        };
+        if !valid(&self.link_ends.borrow()) {
+            let at: HashMap<&ShapeId, usize> =
+                shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
+            let index = |id| at.get(id).copied().unwrap_or(usize::MAX);
+            *self.link_ends.borrow_mut() = (links.iter())
+                .map(|Link(a, b)| (index(a), index(b)))
+                .collect();
+        }
+        self.link_ends.borrow()
+    }
+
     /// Drawn height in canvas units: text, padding and extra height.
     pub fn shape_height(&self, shape: &Shape) -> f32 {
         self.layout(shape).height + 2.0 * self.theme.shape.pad_y + shape.extra_height as f32
+    }
+
+    /// Every shape's drawn height, in document order: what `save` needs for the side rule.
+    pub fn heights(&self) -> Vec<f32> {
+        self.doc
+            .shapes
+            .iter()
+            .map(|s| self.shape_height(s))
+            .collect()
+    }
+
+    /// Lays out the next `n` shapes in document order, drawn or not, so that `heights` (every
+    /// save and recovery write) finds them cached. True once it has been through them all.
+    /// The app calls it in small steps while idle after opening a document.
+    pub fn measure_ahead(&self, n: usize) -> bool {
+        let (shapes, from) = (&self.doc.shapes, self.ahead.get());
+        let to = (from + n).min(shapes.len());
+        for s in &shapes[from.min(to)..to] {
+            self.layout(s);
+        }
+        self.ahead.set(to);
+        to == shapes.len()
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
@@ -239,6 +302,15 @@ impl Session {
     pub fn animating(&self, now: Duration) -> bool {
         let fade = &self.theme.selection.fade;
         self.rings.iter().any(|r| !r.done(now, fade)) || self.zoom.running(self.theme, now)
+    }
+
+    /// Deselects a shape the document no longer has (after a whole-document replace).
+    fn drop_missing_selection(&mut self) {
+        if let Some(id) = &self.selected
+            && !self.doc.shapes.iter().any(|s| &s.id == id)
+        {
+            self.select(None);
+        }
     }
 
     fn select(&mut self, id: Option<ShapeId>) {
@@ -368,6 +440,15 @@ impl Session {
 
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
+        let revision = self.history.revision();
+        let r = self.dispatch(input, now);
+        if self.history.revision() != revision {
+            self.changed(now);
+        }
+        r
+    }
+
+    fn dispatch(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
         // Anything that may edit, undo or end the session commits the marked text first, so
         // no undo step ever holds it. Space keys come while the IME converts: leave it alone.
@@ -547,6 +628,7 @@ impl Session {
                     self.history.redo(&mut self.doc);
                 }
                 self.stop_editing();
+                self.drop_missing_selection();
                 self.respond(true)
             }
             Input::ResetZoom => {

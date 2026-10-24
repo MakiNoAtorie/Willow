@@ -95,7 +95,7 @@ impl RichText {
 
 /// Rich text from plain text and per-byte styles: same-style bytes merged into runs, no
 /// empty runs, and no paragraphs at all for empty text.
-fn build(s: &str, styles: &[Flags]) -> RichText {
+pub(crate) fn build(s: &str, styles: &[(bool, bool)]) -> RichText {
     if s.is_empty() {
         return RichText::default();
     }

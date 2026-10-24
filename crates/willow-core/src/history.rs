@@ -1,21 +1,29 @@
 //! One undo history per document, covering model changes only. Every command that changes a
-//! shape (move, resize, autofit, text edits) goes through `History::change`; viewport and
-//! selection never do.
+//! shape (move, resize, autofit, text edits) goes through `History::change`, a reload from
+//! disk through `History::replace`; viewport and selection never do.
 
 use crate::{Document, Shape, ShapeId};
 
-/// One undoable step: each touched shape as it is on the other side of the step. Undo and
-/// redo both swap these with the document's shapes, so one step serves both directions.
-// ponytail: shape snapshots cover changes to existing shapes; creating or deleting shapes
-// needs `Option<Shape>` plus the draw-order index.
-type Step = Vec<Shape>;
+/// One undoable step, as the document is on the other side of it. Undo and redo both swap
+/// this with the document, so one step serves both directions.
+#[derive(Debug)]
+enum Step {
+    /// Each touched shape.
+    // ponytail: shape snapshots cover changes to existing shapes; creating or deleting shapes
+    // needs `Option<Shape>` plus the draw-order index.
+    Shapes(Vec<Shape>),
+    /// The whole document (a reload from disk).
+    Document(Box<Document>),
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct History {
     undo: Vec<Step>,
     redo: Vec<Step>,
     /// A group in progress (an editing session): every change in it becomes one step.
-    open: Option<Step>,
+    open: Option<Vec<Shape>>,
+    /// Counts changes to the document (including undo and redo); crash recovery watches it.
+    revision: u64,
 }
 
 impl History {
@@ -30,12 +38,22 @@ impl History {
         if *shape == before {
             return;
         }
+        self.revision += 1;
         self.redo.clear();
         match &mut self.open {
             Some(step) if step.iter().any(|s| &s.id == id) => {}
             Some(step) => step.push(before),
-            None => self.undo.push(vec![before]),
+            None => self.undo.push(Step::Shapes(vec![before])),
         }
+    }
+
+    /// Replaces the whole document with `new` as one step, closing any open group first.
+    pub fn replace(&mut self, doc: &mut Document, new: Document) {
+        self.end(doc);
+        self.revision += 1;
+        self.redo.clear();
+        let old = std::mem::replace(doc, new);
+        self.undo.push(Step::Document(Box::new(old)));
     }
 
     /// Opens a group: changes until `end` become one step.
@@ -48,9 +66,13 @@ impl History {
         if let Some(mut step) = self.open.take() {
             step.retain(|snap| !doc.shapes.contains(snap));
             if !step.is_empty() {
-                self.undo.push(step);
+                self.undo.push(Step::Shapes(step));
             }
         }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn can_undo(&self) -> bool {
@@ -86,12 +108,18 @@ impl History {
         self.end(doc);
         let (from, to) = stacks(self);
         if let Some(mut step) = from.pop() {
-            for snap in &mut step {
-                if let Some(shape) = doc.shapes.iter_mut().find(|s| s.id == snap.id) {
-                    std::mem::swap(shape, snap);
+            match &mut step {
+                Step::Shapes(snaps) => {
+                    for snap in snaps {
+                        if let Some(shape) = doc.shapes.iter_mut().find(|s| s.id == snap.id) {
+                            std::mem::swap(shape, snap);
+                        }
+                    }
                 }
+                Step::Document(d) => std::mem::swap(doc, d),
             }
             to.push(step);
+            self.revision += 1;
         }
         if was_open {
             self.begin();

@@ -17,7 +17,7 @@ fn new_document_has_one_empty_neutral_shape_at_the_origin() {
 
 #[test]
 fn generated_ids_are_short_lowercase_letters_that_skip_ids_in_use() {
-    let mut doc = Document { shapes: vec![] };
+    let mut doc = Document::default();
     let mut ids = Vec::new();
     for _ in 0..30 {
         let id = doc.next_id();
@@ -30,6 +30,7 @@ fn generated_ids_are_short_lowercase_letters_that_skip_ids_in_use() {
     let taken = |id: &str| Shape::new(ShapeId(id.into()), 0, 0);
     let doc = Document {
         shapes: vec![taken("a"), taken("b"), taken("d")],
+        ..Document::default()
     };
     assert_eq!(doc.next_id(), ShapeId("c".into()));
 }

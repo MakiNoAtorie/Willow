@@ -1,7 +1,7 @@
 mod common;
 
 use common::{doc_with, session_of};
-use willow_core::{Color, Point, Rgba, Session, Viewport};
+use willow_core::{Color, Document, Point, Rgba, Session, Shape, ShapeId, Side, Viewport, Zone};
 
 const T: std::time::Duration = std::time::Duration::ZERO;
 
@@ -159,4 +159,105 @@ fn the_edited_shape_carries_its_ring_selection_and_caret_and_low_zoom_drops_text
     let f = s.draw(SCREEN.0, SCREEN.1, ms(500));
     assert!(f.shapes[0].caret.is_none() && f.shapes[0].selection.is_empty());
     assert_eq!(f.shapes[0].ring, 1.0);
+}
+
+fn zone(id: &str, x: i32, y: i32, color: Color, members: &[&str]) -> Zone {
+    Zone {
+        id: ShapeId(id.into()),
+        title: format!("Zone {id}"),
+        color,
+        x,
+        y,
+        width: 600,
+        height: 400,
+        members: members.iter().map(|m| ShapeId((*m).into())).collect(),
+    }
+}
+
+/// Empty shapes a (0, 0), b (300, 100) and c (0, 200), 48.5 tall; a-b and c-a linked; zone y
+/// (sky) holds a, b and zone z (sage), which holds c.
+fn linked_and_zoned() -> Session {
+    let mut doc = Document::default();
+    for (i, x, y) in [("a", 0, 0), ("b", 300, 100), ("c", 0, 200)] {
+        doc.shapes.push(Shape::new(ShapeId(i.into()), x, y));
+    }
+    let id = |i: &str| ShapeId(i.into());
+    assert!(doc.link(&id("a"), &id("b")) && doc.link(&id("c"), &id("a")));
+    doc.zones
+        .push(zone("y", -40, -40, Color::Sky, &["a", "b", "z"]));
+    doc.zones.push(zone("z", -20, 180, Color::Sage, &["c"]));
+    session_of(doc)
+}
+
+#[test]
+fn connectors_join_facing_side_midpoints() {
+    let mut s = linked_and_zoned();
+    look_at(&mut s, 1.0);
+    let f = s.draw(SCREEN.0, SCREEN.1, T);
+    let ends: Vec<_> = (f.connectors.iter())
+        .map(|c| ((c.from, c.from_side), (c.to, c.to_side)))
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            // a-b: centers 300 apart across, 100 down: horizontal.
+            (
+                (pt(210.0, 24.25), Side::Right),
+                (pt(300.0, 124.25), Side::Left)
+            ),
+            // c-a: c is straight below a.
+            (
+                (pt(105.0, 200.0), Side::Top),
+                (pt(105.0, 48.5), Side::Bottom)
+            ),
+        ]
+    );
+    assert_eq!(f.connector_width, 2.0);
+    // Never thinner than one screen pixel.
+    look_at(&mut s, 0.25);
+    assert_eq!(s.draw(SCREEN.0, SCREEN.1, T).connector_width, 4.0);
+}
+
+#[test]
+fn zones_draw_parents_first_with_pastel_fills_and_titles_readable_when_zoomed_out() {
+    let mut s = linked_and_zoned();
+    look_at(&mut s, 1.0);
+    let f = s.draw(SCREEN.0, SCREEN.1, T);
+    let z: Vec<_> = (f.zones.iter())
+        .map(|v| (v.zone.id.0.as_str(), v.nested, v.fill, v.edge))
+        .collect();
+    // Sky #d3e0ea 45% into canvas #f6f3ec, edge 35% toward picker #5d8fbf; nested sage
+    // #d9e5cf 70% into the canvas, edge 35% toward #7ea468.
+    assert_eq!(
+        z,
+        [
+            ("y", false, Rgba(0xe6eaebff), Rgba(0xaac4dbff)),
+            ("z", true, Rgba(0xe2e9d8ff), Rgba(0xb9ceabff)),
+        ]
+    );
+    let y = &f.zones[0];
+    assert_eq!((y.title_at, y.title_size), (pt(-24.0, -28.0), 13.0));
+    // At 50% the title stays 12 screen px and its inset 16, 12 screen px.
+    look_at(&mut s, 0.5);
+    let y = &s.draw(SCREEN.0, SCREEN.1, T).zones[0];
+    assert_eq!((y.title_at, y.title_size), (pt(-8.0, -16.0), 24.0));
+    // Off screen, nothing.
+    let f = s.draw(pt(2000.0, 2000.0), pt(2100.0, 2100.0), T);
+    assert!(f.zones.is_empty() && f.connectors.is_empty());
+}
+
+#[test]
+fn a_generated_document_draws_its_connectors_and_zones() {
+    let mut s = session_of(willow_core::generate(1000, 1));
+    look_at(&mut s, 0.25);
+    let f = s.draw(SCREEN.0, SCREEN.1, T);
+    assert!(f.connectors.len() > 20);
+    assert!(f.zones.iter().any(|z| z.nested) && f.zones.iter().any(|z| !z.nested));
+    let opposite = |a: Side| match a {
+        Side::Top => Side::Bottom,
+        Side::Bottom => Side::Top,
+        Side::Left => Side::Right,
+        Side::Right => Side::Left,
+    };
+    assert!((f.connectors.iter()).all(|c| c.to_side == opposite(c.from_side)));
 }

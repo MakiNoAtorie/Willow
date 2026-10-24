@@ -1,6 +1,8 @@
 //! Shape text on the GPUI side: the text-measuring function the core lays out with, glyphs
 //! painted one by one where the core put their clusters, and the platform text input adapter.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -8,7 +10,7 @@ use gpui::{
     Bounds, Context, EntityInputHandler, Font, FontStyle, FontWeight, LineLayout, Pixels, TextRun,
     UTF16Selection, Window, WindowTextSystem, point, px, size,
 };
-use willow_core::{Input, Layout, Measure, Paragraph, RichText, Theme};
+use willow_core::{Input, Layout, Measure, Paragraph, RichText, Run, Theme};
 
 use crate::{Willow, color};
 
@@ -60,12 +62,60 @@ fn x_by_byte(line: &LineLayout) -> Vec<f32> {
     x
 }
 
-/// The core's text-measuring function, backed by the window's text system.
-pub(crate) struct TextMeasure(pub Arc<WindowTextSystem>);
+/// The core's text-measuring function, backed by the window's text system. Shapes each word
+/// (and each run of spaces) of a style run on its own and keeps it, so a paragraph of known
+/// words costs no shaping: the first save after opening a big file measures every shape.
+// ponytail: the word cache never shrinks; bound it if a session's vocabulary ever shows in RSS.
+pub(crate) struct TextMeasure {
+    ts: Arc<WindowTextSystem>,
+    words: RefCell<Words>,
+}
+
+/// x at every byte of a word shaped alone, per style (`bold as usize * 2 + italic`), for one
+/// font and size.
+#[derive(Default)]
+struct Words {
+    font: (&'static str, f32),
+    by_style: [HashMap<String, Box<[f32]>>; 4],
+}
+
+impl TextMeasure {
+    pub(crate) fn new(ts: Arc<WindowTextSystem>) -> Self {
+        let words = RefCell::default();
+        TextMeasure { ts, words }
+    }
+}
 
 impl Measure for TextMeasure {
     fn advances(&self, para: &Paragraph, clusters: &[Range<usize>], t: &Theme) -> Vec<f32> {
-        let x = x_by_byte(&shape(&self.0, para, t));
+        let mut words = self.words.borrow_mut();
+        if words.font != (t.font, t.font_size) {
+            *words = Words {
+                font: (t.font, t.font_size),
+                ..Default::default()
+            };
+        }
+        // x at every byte of the paragraph: its words' x, end to end.
+        let len: usize = para.runs.iter().map(|r| r.text.len()).sum();
+        let mut x = Vec::with_capacity(len + 1);
+        x.push(0.0);
+        for r in &para.runs {
+            let words = &mut words.by_style[r.bold as usize * 2 + r.italic as usize];
+            let mut rest = r.text.as_str();
+            while let Some(c) = rest.chars().next() {
+                let len = (rest.find(|d: char| (d == ' ') != (c == ' '))).unwrap_or(rest.len());
+                let word = &rest[..len];
+                rest = &rest[len..];
+                if !words.contains_key(word) {
+                    let (text, bold, italic) = (word.into(), r.bold, r.italic);
+                    let runs = vec![Run { text, bold, italic }];
+                    let wx = x_by_byte(&shape(&self.ts, &Paragraph { runs }, t));
+                    words.insert(word.into(), wx.into());
+                }
+                let (start, wx) = (*x.last().unwrap(), &words[word]);
+                x.extend(wx[1..].iter().map(|wx| start + wx));
+            }
+        }
         clusters.iter().map(|c| x[c.end] - x[c.start]).collect()
     }
 }
@@ -121,6 +171,52 @@ pub(crate) fn paint_text(
                     window.paint_glyph(o, run.font_id, g.id, font_size, ink)
                 };
             }
+        }
+    }
+}
+
+/// Paints one line of plain `text` in the theme font at `weight` and `size` (screen px), its
+/// top-left at `origin`, in ink.
+pub(crate) fn paint_line(
+    window: &mut Window,
+    origin: gpui::Point<Pixels>,
+    text: &str,
+    t: &Theme,
+    weight: f32,
+    size: f32,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let mut font = gpui::font(t.font);
+    // Only Regular and Bold are bundled, and CSS matching takes Bold for 600; asking for 600
+    // itself benched about 1 ms slower per frame.
+    font.weight = if weight >= 600.0 {
+        FontWeight::BOLD
+    } else {
+        FontWeight::NORMAL
+    };
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: color(t.ink),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    // Quantised to half pixels, as shape text is.
+    let size = px((size * 2.0).round() / 2.0);
+    let l = window.text_system().layout_line(text, size, &[run], None);
+    let ink = color(t.ink);
+    for run in &l.runs {
+        for g in &run.glyphs {
+            let o = origin + point(g.position.x, l.ascent);
+            // A missing glyph only loses that glyph; nothing to recover.
+            let _ = if g.is_emoji {
+                window.paint_emoji(o, run.font_id, g.id, size)
+            } else {
+                window.paint_glyph(o, run.font_id, g.id, size, ink)
+            };
         }
     }
 }

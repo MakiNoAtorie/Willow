@@ -1,0 +1,18 @@
+willow 1
+
+z: "Zed"
+
+aa: "Double a"
+
+b: "Bee"
+
+c: "Fork"
+e: "Left prong" below c
+d: "Right prong" below c
+
+@layout z 0,0 w210
+@layout aa 0,0 w210
+@layout b 300,0 w210
+@layout c 600,200 w210
+@layout e 500,400 w210
+@layout d 700,400 w210

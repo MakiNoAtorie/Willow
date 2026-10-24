@@ -14,7 +14,19 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 ## Layout
 - Crates: `crates/willow-core` (GPUI-free) and `crates/willow-app` (binary `willow`).
 - Core session: input vocabulary in `input.rs`, text editing in `session/editing.rs`. New editing inputs go in `Session::handle_text` and are listed in `handle`'s dispatch arm.
-- Platform chrome lives in `titlebar_<os>.rs`, each exposing `title_bar(session, window, cx)`. On macOS the title bar is the canvas's last child, or the canvas paints over it.
+- Platform chrome lives in `titlebar_<os>.rs`, each exposing `title_bar(name, session, window, cx)`. On macOS the title bar is the canvas's last child, or the canvas paints over it.
+
+## Model
+- Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
+- Change links only through `Document::link`/`unlink`/`recolor` (one-color trees); bulk loaders do their own union-find. Side rule: `willow_core::side`; centers need `Session::shape_height`.
+- Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
+
+## Files
+- Format: `format.rs` (`save(doc, heights)`, `load(bytes)`); heights come from `Session::heights()`, taken on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`; tests compare models order-free.
+- Loaded files go through `Session::open` / `disk_changed`, which apply `Loaded.unplaced` (missing layout, chain colors to settle in story order) via `format::place`. `Theme.creation_gap` is the one creation gap.
+- File state, disk-change decisions and recovery timing live in `session/file.rs`; the app only does I/O. App file I/O lives in `file.rs` (atomic `write_beside`, `file::alert`, `rfd` panels) and `recovery.rs` (off the UI thread; startup `launch` excepted).
+- `file::settle` is the one Save / Don't Save / Cancel routine and never deletes; `file::close` / `quit` delete recovery once they go ahead, awaiting `discard_recovery(cx)`'s `Task`.
+- Every `History` method that changes the document bumps `revision` (recovery timing). `take_recovery` returns `Write` (marked text left out) or `Delete` (back to saved); call `arm_recovery` after anything that may change the session. Recovery I/O runs through `Autosave::run`; the UI thread never locks or calls `cx.notify` for it.
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
@@ -22,7 +34,8 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Timed animations take a `Transition { duration, easing: CubicBezier }`. Low-zoom values live in `ZoomStyle`.
 
 ## Text
-- Offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). A caret is `Caret { offset, upstream }` (`upstream`: a soft-wrap offset shown at the end of the earlier line); the selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
+- Offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
+- Every way of opening a document calls `Session::measure_ahead(n)` from idle afterwards, so saves don't stall.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
 - Justification gaps are spaces plus UAX #14 break opportunities next to a CJK cluster; new gap kinds go in the `stretch` closure.
 - Style toggles take `edit::Style`. With an empty selection they set `Editing.pending`, which `set_caret` clears and `Session::replace` applies in the same `history.change`. A toggle turns the style on unless the whole selection has it.
@@ -36,17 +49,17 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Pointer move/up listen window-wide (`window.on_mouse_event`) so drags continue outside the canvas; pointer down and scroll listen on the canvas div. `Input::FocusLost` (window deactivation) resets held keys and pans.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context, since on macOS a context-free binding swallows the letter while editing.
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
-- Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries (`drag_preview`, `resize_preview`); the mutation lands once on release through a named `Session` method (`move_shape`, `resize_shape`, `autofit`). Side resizes keep width parity, so the minimum can land one unit above the theoretical one.
-- Undoable changes go through `History::change` from a named `Session` method; viewport and selection never do. An editing session is one `begin()`/`end()` group.
+- Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries; the mutation lands once on release through a named `Session` method.
+- Undoable changes go through `History::change` from a named `Session` method; viewport and selection never do. Whole-document swaps (reload) go through `History::replace` (snapshots the whole `Document`); anything that can remove shapes calls `drop_missing_selection` after. An editing session is one `begin()`/`end()` group.
 
 ## Drawing
-- Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Cull on position and width before asking for layout.
+- Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
 - Paint multiplies canvas-unit values by `vp.zoom`; screen-space chrome (the zoom pill) is unscaled. The screen position of canvas (0,0) is rounded to whole pixels.
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
-- Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1; bulk IDs use `id_for(i)`). Tool output is CSV.
-- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). It feeds input through `Session::handle` and typing through `window.dispatch_keystroke`; gpui keeps the `profiler` feature. Judge idle by `renders == 0` (~0.5% CPU is GPUI's display link).
+- Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1). Tool output is CSV.
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure. Judge idle by `renders == 0` (~0.5% CPU is GPUI's display link).
 
 ## Workflow
 - Model per task: Opus for concurrency, state/serialization, rendering, security-sensitive parsing, cross-module refactors, unexplained failures; Sonnet for mechanical work (pattern-following modules, UI screens, wiring, config, docs, small fixes, merges). State the pick and why in one line.

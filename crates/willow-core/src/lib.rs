@@ -1,50 +1,63 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
+mod chain;
 mod draw;
 mod edit;
+mod format;
 mod generate;
 mod history;
 mod input;
 mod layout;
+mod recovery;
 mod session;
 mod theme;
 mod zoom;
 
-pub use draw::{Frame, Visible};
+pub use chain::{Link, Side, side};
+pub use draw::{Connector, Frame, Visible, VisibleZone};
+pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
+pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{CaretView, DragPreview, Editing, ResizeTo, Session, Viewport};
 pub use theme::{
-    CaretStyle, ChromeStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow,
-    ShapeStyle, Theme, Transition, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle,
+    Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
 /// Width of every new shape, in canvas units. Shared by every theme.
 pub const DEFAULT_WIDTH: u32 = 210;
 
-/// One file's content: shapes, drawn in this order (later on top).
-#[derive(Clone, Debug, PartialEq)]
+/// One file's content. `Default` is an empty document.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
+    /// Drawn in this order (later on top).
     pub shapes: Vec<Shape>,
+    /// Every chain is a tree and all its shapes share one color; change links through
+    /// `link` / `unlink` to keep it so.
+    pub links: Vec<Link>,
+    /// Drawn in this order, so a parent comes before the zones nested in it.
+    pub zones: Vec<Zone>,
 }
 
 impl Document {
     /// A new document: one empty shape at the canvas origin.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let mut doc = Document { shapes: Vec::new() };
+        let mut doc = Document::default();
         let id = doc.next_id();
         doc.shapes.push(Shape::new(id, 0, 0));
         doc
     }
 
-    /// The first unused ID in the order a, b, …, z, aa, ab, …
+    /// The first ID no shape or zone uses, in the order a, b, …, z, aa, ab, …
     pub fn next_id(&self) -> ShapeId {
+        let ids = || (self.shapes.iter().map(|s| &s.id)).chain(self.zones.iter().map(|z| &z.id));
         (0..)
             .map(id_for)
-            .find(|id| self.shapes.iter().all(|s| s.id.0 != *id))
+            .find(|id| ids().all(|i| i.0 != *id))
             .map(ShapeId)
             .expect("unbounded")
     }
@@ -64,7 +77,8 @@ fn id_for(mut n: usize) -> String {
     String::from_utf8(s).expect("ascii")
 }
 
-/// A shape's stable ID: short lowercase letters, never changed once given.
+/// A shape's or zone's stable ID: short lowercase letters, never changed once given. Shapes
+/// and zones share one namespace.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShapeId(pub String);
 
@@ -95,6 +109,22 @@ impl Shape {
             color: Color::Neutral,
         }
     }
+}
+
+/// A titled, colored container. Membership is explicit: `members` lists shape and zone IDs,
+/// whatever the geometry. Zones nest one level deep at most.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Zone {
+    pub id: ShapeId,
+    /// Plain text.
+    pub title: String,
+    pub color: Color,
+    /// Top-left corner and size, in canvas units.
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub members: Vec<ShapeId>,
 }
 
 /// Paragraphs of styled runs. Empty text has no paragraphs.

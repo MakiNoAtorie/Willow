@@ -5,7 +5,7 @@ use willow_core::Session;
 
 use crate::color;
 
-pub fn title_bar(session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
+pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
     let c = session.theme().chrome;
     div()
         .absolute()
@@ -19,5 +19,9 @@ pub fn title_bar(session: &Session, _: &mut Window, _: &mut App) -> impl IntoEle
         .text_size(px(c.mac_title_size))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(color(c.title))
-        .child("Untitled")
+        .child(if session.is_saved() {
+            name.to_string()
+        } else {
+            format!("{name} — Edited")
+        })
 }

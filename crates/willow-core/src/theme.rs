@@ -37,6 +37,37 @@ pub struct ShapeStyle {
     pub shadow: [Shadow; 2],
 }
 
+/// The straight line drawn for a link, under shapes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConnectorStyle {
+    pub color: Rgba,
+    /// Canvas units, but never thinner than `min_screen` screen pixels.
+    pub width: f32,
+    pub min_screen: f32,
+}
+
+/// A zone: a rounded rectangle of its pastel mixed into the canvas, with an inset edge and a
+/// title at the top-left. Sizes are canvas units unless named screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoneStyle {
+    pub radius: f32,
+    /// How far the fill moves from the canvas toward the pastel; deeper for nested zones.
+    pub fill_mix: f32,
+    pub nested_fill_mix: f32,
+    /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
+    pub edge_mix: f32,
+    pub edge_width: f32,
+    /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
+    /// never faded. Its top-left sits `title_x`, `title_y` in, constant on screen when zoomed out.
+    pub title_size: f32,
+    pub title_weight: f32,
+    pub title_min_screen: f32,
+    pub title_x: f32,
+    pub title_y: f32,
+    /// Room around the members of a zone the loader wraps (clears the title).
+    pub padding: f32,
+}
+
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing curve.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CubicBezier(pub f32, pub f32, pub f32, pub f32);
@@ -150,6 +181,9 @@ pub struct MenuStyle {
 /// The window's title bar, in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChromeStyle {
+    /// A new window's size.
+    pub window_width: f32,
+    pub window_height: f32,
     /// Window title text.
     pub title: Rgba,
     /// Windows title-bar button hover fill.
@@ -157,6 +191,8 @@ pub struct ChromeStyle {
     /// macOS: the transparent bar over the canvas, and its title size.
     pub mac_height: f32,
     pub mac_title_size: f32,
+    /// macOS: the traffic lights' offset from the window's top-left corner.
+    pub mac_traffic_light: f32,
     /// Windows: the custom bar, its title size, the min/max/close buttons and their icon
     /// glyph size, and the menu button.
     pub win_height: f32,
@@ -164,6 +200,9 @@ pub struct ChromeStyle {
     pub win_button_width: f32,
     pub win_glyph_size: f32,
     pub win_menu_button_width: f32,
+    /// Windows: the unsaved dot after the document name (title color), and its gap.
+    pub win_unsaved_dot: f32,
+    pub win_unsaved_gap: f32,
 }
 
 /// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
@@ -209,6 +248,11 @@ pub struct Theme {
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
     pub shape: ShapeStyle,
+    /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
+    /// linked to it.
+    pub creation_gap: f32,
+    pub connector: ConnectorStyle,
+    pub zone: ZoneStyle,
     pub selection: SelectionStyle,
     pub caret: CaretStyle,
     /// Shape fill per color, indexed in `Color::ALL` order.
@@ -266,6 +310,25 @@ pub const PAPER: Theme = Theme {
             },
         ],
     },
+    creation_gap: 48.0,
+    connector: ConnectorStyle {
+        color: hex(0xcbbfae),
+        width: 2.0,
+        min_screen: 1.0,
+    },
+    zone: ZoneStyle {
+        radius: 22.0,
+        fill_mix: 0.45,
+        nested_fill_mix: 0.7,
+        edge_mix: 0.35,
+        edge_width: 1.0,
+        title_size: 13.0,
+        title_weight: 600.0,
+        title_min_screen: 12.0,
+        title_x: 16.0,
+        title_y: 12.0,
+        padding: 40.0,
+    },
     selection: SelectionStyle {
         gap: 2.0,
         ring: 2.0,
@@ -319,15 +382,20 @@ pub const PAPER: Theme = Theme {
         hex(0x9479b8),
     ],
     chrome: ChromeStyle {
+        window_width: 1180.0,
+        window_height: 740.0,
         title: rgba(59, 52, 44, 0.55),
         button_hover: rgba(70, 50, 20, 0.07),
         mac_height: 38.0,
         mac_title_size: 13.0,
+        mac_traffic_light: 12.0,
         win_height: 34.0,
         win_title_size: 12.5,
         win_button_width: 46.0,
         win_glyph_size: 10.0,
         win_menu_button_width: 44.0,
+        win_unsaved_dot: 6.0,
+        win_unsaved_gap: 7.0,
     },
     zoom: ZoomStyle {
         min: 0.1,

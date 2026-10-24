@@ -1,0 +1,13 @@
+willow 1
+
+a: "First"
+b: "Bee" below a
+a: "Second" color rose
+zone b "Twin" {
+  c: "Inside"
+}
+
+@layout a 0,0 w210
+@layout b 0,140 w210
+@layout c 0,280 w210
+@layout a 50,50 w100

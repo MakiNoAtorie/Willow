@@ -1,19 +1,22 @@
 //! Willow's window: turns GPUI events into editor-session input and draws what the session holds.
 
 use std::borrow::Cow;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
     FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, ScrollEvent, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
+    MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
-    Button, Cursor, Document, Input, Key, Modifiers, Motion, PAPER, Rgba, Session, Shadow, Theme,
-    ZoomPill,
+    Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
+    Theme, ZoomPill,
 };
 mod bench;
+mod file;
+mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
 mod titlebar_macos;
@@ -25,6 +28,8 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
+// File menu: New and Open are app-wide; Save and Save As belong to the focused window.
+actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
@@ -104,15 +109,111 @@ struct Willow {
     start: Instant,
     /// Redraws at the caret's next blink edge; replacing it cancels the old timer.
     wake: Option<gpui::Task<()>>,
+    /// Lays the document out ahead of the first save; see `measure_ahead`.
+    ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
     /// Set by `--bench`.
     bench: Option<bench::Bench>,
+    /// The document's file; `None` while untitled.
+    path: Option<PathBuf>,
+    /// The file's modified time at the last focus check.
+    mtime: Option<SystemTime>,
+    /// Crash recovery; off in `--bench`.
+    recovery: Option<recovery::Autosave>,
+}
+
+/// What a window shows: a document, the bytes it was read from, and its file.
+pub(crate) struct Content {
+    loaded: Loaded,
+    bytes: Vec<u8>,
+    path: Option<PathBuf>,
+    /// The recovery file it was reopened from, at launch.
+    recovery: Option<String>,
+}
+
+impl Content {
+    /// `loaded` as read from `bytes` at `path`, or reopened from recovery file `recovery`.
+    fn new(
+        loaded: Loaded,
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        recovery: Option<String>,
+    ) -> Self {
+        Content {
+            loaded,
+            bytes,
+            path,
+            recovery,
+        }
+    }
+
+    /// A new, untitled `document`.
+    fn untitled(document: Document) -> Self {
+        let loaded = Loaded {
+            document,
+            repaired: false,
+            unplaced: Default::default(),
+        };
+        Content::new(loaded, Vec::new(), None, None)
+    }
+
+    fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
+        let measure = Box::new(text::TextMeasure::new(window.text_system().clone()));
+        let session = Session::open(self.loaded, self.bytes, &PAPER, measure);
+        (session, self.path)
+    }
 }
 
 impl Willow {
+    fn name(&self) -> String {
+        file::name(self.path.as_deref())
+    }
+
+    fn set_path(&mut self, path: Option<PathBuf>, window: &mut Window) {
+        self.path = path;
+        window.set_window_title(&self.name());
+    }
+
+    /// An untitled new document nobody has touched: Open reuses its window.
+    fn blank(&self) -> bool {
+        let s = &self.session;
+        self.path.is_none()
+            && s.is_saved()
+            && !s.can_undo()
+            && !s.can_redo()
+            && *s.document() == Document::new()
+    }
+
+    /// Replaces this window's document with `content`.
+    fn show(&mut self, content: Content, window: &mut Window, cx: &mut Context<Self>) {
+        // Paint sizes the new session's viewport.
+        let path;
+        (self.session, path) = content.session(window);
+        self.set_path(path, window);
+        self.measure_ahead(cx);
+        cx.notify();
+    }
+
+    /// Lays a just-opened document out a few hundred shapes at a time while idle, without
+    /// redrawing, so the first save (which needs every shape's height) doesn't stall on it.
+    fn measure_ahead(&mut self, cx: &mut Context<Self>) {
+        self.ahead = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(4))
+                    .await;
+                let done = this.update(cx, |w, _| w.session.measure_ahead(200));
+                if done.unwrap_or(true) {
+                    break;
+                }
+            }
+        }));
+    }
+
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
         let r = self.session.handle(input, self.start.elapsed());
+        self.arm_recovery(cx);
         self.cursor = r.cursor;
         if r.redraw {
             cx.notify();
@@ -258,6 +359,8 @@ impl Render for Willow {
                 }
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
+            .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
             // while the core has something to undo or redo.
             .when(self.session.can_undo(), |d| {
@@ -330,10 +433,13 @@ impl Render for Willow {
             .child(canvas)
             .children(pill);
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
+        let name = self.name();
         if cfg!(target_os = "windows") {
-            root.child(title_bar(&self.session, window, cx)).child(body)
+            root.child(title_bar(&name, &self.session, window, cx))
+                .child(body)
         } else {
-            root.child(body).child(title_bar(&self.session, window, cx))
+            root.child(body)
+                .child(title_bar(&name, &self.session, window, cx))
         }
     }
 }
@@ -362,7 +468,7 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
         )
 }
 
-/// Canvas, dot grid, shapes with their text, and the caret.
+/// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
 fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
     let (vp, t) = (session.viewport(), session.theme());
     let (w, h) = (bounds.size.width.into(), bounds.size.height.into());
@@ -402,6 +508,60 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             x += s;
         }
         y += s;
+    }
+
+    // Zones and their titles, then connectors, under the shapes.
+    let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
+    for v in &frame.zones {
+        let zone = v.zone;
+        let b = Bounds::new(
+            at(willow_core::Point {
+                x: zone.x as f32,
+                y: zone.y as f32,
+            }),
+            size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
+        );
+        let zt = &t.zone;
+        window.paint_quad(quad(
+            b,
+            px(zt.radius * z),
+            color(v.fill),
+            px(zt.edge_width * z),
+            color(v.edge),
+            Default::default(),
+        ));
+        let size = v.title_size * z;
+        text::paint_line(
+            window,
+            at(v.title_at),
+            &zone.title,
+            t,
+            zt.title_weight,
+            size,
+        );
+    }
+    let width = frame.connector_width * z;
+    let ink = color(t.connector.color);
+    for c in &frame.connectors {
+        let (p, q) = (at(c.from), at(c.to));
+        let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
+        if dx.max(dy) < 1.0 {
+            // Under a pixel long: nothing to see.
+            continue;
+        }
+        if dx < 1.0 || dy < 1.0 {
+            // Within a pixel of straight across or down: a quad is far cheaper than a path.
+            let half = point(px(width / 2.0), px(width / 2.0));
+            let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
+            window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
+            continue;
+        }
+        let mut path = gpui::PathBuilder::stroke(px(width));
+        path.move_to(p);
+        path.line_to(q);
+        if let Ok(path) = path.build() {
+            window.paint_path(path, ink);
+        }
     }
 
     let radius = px(t.shape.radius * z);
@@ -492,6 +652,13 @@ fn set_menus(cx: &mut App) {
     use gpui::{Menu, MenuItem, OsAction};
     cx.set_menus([
         Menu::new("Willow").items([MenuItem::action("Quit Willow", Quit)]),
+        Menu::new("File").items([
+            MenuItem::action("New", NewFile),
+            MenuItem::action("Open…", OpenFile),
+            MenuItem::separator(),
+            MenuItem::action("Save", Save),
+            MenuItem::action("Save As…", SaveAs),
+        ]),
         Menu::new("Edit").items([
             MenuItem::os_action("Undo", Undo, OsAction::Undo),
             MenuItem::os_action("Redo", Redo, OsAction::Redo),
@@ -515,6 +682,7 @@ fn main() {
         let machine = arg("--machine").flatten();
         machine.expect("--bench needs --machine NAME").clone()
     });
+    let recover = bench.is_none() && arg("--generate").is_none();
     let doc = match arg("--generate") {
         _ if bench.is_some() => willow_core::generate(10_000, GENERATE_SEED),
         Some(n) => {
@@ -538,6 +706,21 @@ fn main() {
             KeyBinding::new(quit, Quit, None),
             KeyBinding::new(reset_zoom, ResetZoom, None),
         ]);
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([
+                KeyBinding::new("cmd-n", NewFile, None),
+                KeyBinding::new("cmd-o", OpenFile, None),
+                KeyBinding::new("cmd-s", Save, None),
+                KeyBinding::new("cmd-shift-s", SaveAs, None),
+            ]);
+        } else {
+            cx.bind_keys([
+                KeyBinding::new("ctrl-n", NewFile, None),
+                KeyBinding::new("ctrl-o", OpenFile, None),
+                KeyBinding::new("ctrl-s", Save, None),
+                KeyBinding::new("ctrl-shift-s", SaveAs, None),
+            ]);
+        }
         if cfg!(target_os = "macos") {
             cx.bind_keys([
                 KeyBinding::new("cmd-z", Undo, None),
@@ -616,50 +799,80 @@ fn main() {
             .expect("bundled fonts");
         #[cfg(target_os = "macos")]
         set_menus(cx);
-        cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.on_window_closed(|cx, _| cx.quit()).detach();
-        let bounds = Bounds::centered(None, size(px(1180.), px(740.)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Untitled".into()),
-                    appears_transparent: true,
-                    traffic_light_position: Some(point(px(12.), px(12.))),
-                }),
-                ..Default::default()
-            },
-            |window, cx| {
-                cx.new(|cx| {
-                    let focus = cx.focus_handle();
-                    window.focus(&focus, cx);
-                    if bench.is_some() {
-                        cx.spawn_in(window, async move |this, cx| bench::run(this, cx).await)
-                            .detach();
-                    }
-                    let _activation = cx.observe_window_activation(window, |w, window, cx| {
-                        if !window.is_window_active() {
-                            w.input(Input::FocusLost, cx);
-                        }
-                    });
-                    Willow {
-                        session: Session::new(
-                            doc,
-                            &PAPER,
-                            Box::new(text::TextMeasure(window.text_system().clone())),
-                        ),
-                        focus,
-                        cursor: Cursor::Arrow,
-                        canvas_origin: Default::default(),
-                        start: Instant::now(),
-                        wake: None,
-                        _activation,
-                        bench: bench.map(bench::Bench::new),
-                    }
-                })
-            },
-        )
-        .expect("open window");
+        cx.on_action(|_: &Quit, cx| file::quit(cx));
+        cx.on_action(|_: &NewFile, cx| file::new_file(cx));
+        cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
+        cx.set_quit_mode(QuitMode::LastWindowClosed);
+        // A plain launch applies the recovery files instead of opening a new document.
+        if recover {
+            recovery::launch(cx);
+        } else {
+            open_window(Content::untitled(doc), bench, cx);
+        }
         cx.activate(true);
     });
+}
+
+/// Opens a window showing `content`; `bench` runs the scripted bench in it.
+fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
+    let c = &PAPER.chrome;
+    let bounds = Bounds::centered(None, size(px(c.window_width), px(c.window_height)), cx);
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some(file::name(content.path.as_deref()).into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(
+                    px(c.mac_traffic_light),
+                    px(c.mac_traffic_light),
+                )),
+            }),
+            ..Default::default()
+        },
+        |window, cx| {
+            if let Some(w) = window.window_handle().downcast::<Willow>() {
+                // Close only once the user has settled unsaved changes and the recovery
+                // file is gone.
+                window.on_window_should_close(cx, move |_, cx| {
+                    cx.spawn(async move |cx| file::close(w, cx).await).detach();
+                    false
+                });
+            }
+            cx.new(|cx| {
+                let focus = cx.focus_handle();
+                window.focus(&focus, cx);
+                if bench.is_some() {
+                    cx.spawn_in(window, async move |this, cx| bench::run(this, cx).await)
+                        .detach();
+                }
+                let _activation = cx.observe_window_activation(window, |w, window, cx| {
+                    if !window.is_window_active() {
+                        w.input(Input::FocusLost, cx);
+                    } else {
+                        w.check_disk(cx);
+                    }
+                });
+                let recovery = content.recovery.clone();
+                let (session, path) = content.session(window);
+                let mut w = Willow {
+                    session,
+                    focus,
+                    cursor: Cursor::Arrow,
+                    canvas_origin: Default::default(),
+                    start: Instant::now(),
+                    wake: None,
+                    ahead: None,
+                    _activation,
+                    recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
+                    bench: bench.map(bench::Bench::new),
+                    path,
+                    mtime: None,
+                };
+                w.measure_ahead(cx);
+                w
+            })
+        },
+    )
+    .expect("open window");
 }
