@@ -40,6 +40,8 @@ actions!(
         Delete,
         WordBackspace,
         WordDelete,
+        ToggleBold,
+        ToggleItalic,
     ]
 );
 
@@ -241,6 +243,8 @@ impl Render for Willow {
             Delete => Input::Delete(Motion::Right),
             WordBackspace => Input::Delete(Motion::WordLeft),
             WordDelete => Input::Delete(Motion::WordRight),
+            ToggleBold => Input::ToggleBold,
+            ToggleItalic => Input::ToggleItalic,
         );
         let body = div()
             .flex_1()
@@ -517,6 +521,8 @@ fn main() {
                 KeyBinding::new("cmd-right", LineEnd, ed),
                 KeyBinding::new("alt-backspace", WordBackspace, ed),
                 KeyBinding::new("alt-delete", WordDelete, ed),
+                KeyBinding::new("cmd-b", ToggleBold, ed),
+                KeyBinding::new("cmd-i", ToggleItalic, ed),
             ]);
         } else {
             cx.bind_keys([
@@ -524,6 +530,8 @@ fn main() {
                 KeyBinding::new("ctrl-right", WordRight, ed),
                 KeyBinding::new("ctrl-backspace", WordBackspace, ed),
                 KeyBinding::new("ctrl-delete", WordDelete, ed),
+                KeyBinding::new("ctrl-b", ToggleBold, ed),
+                KeyBinding::new("ctrl-i", ToggleItalic, ed),
             ]);
         }
         cx.text_system()
