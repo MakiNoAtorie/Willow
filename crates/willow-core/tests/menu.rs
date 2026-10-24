@@ -198,7 +198,10 @@ fn recolor_ripples_out_from_the_clicked_shape() {
     assert_eq!(fill_of(&s, "b", ms(200)), new);
     // The neighbours start 40 ms later per step.
     assert_eq!(fill_of(&s, "a", ms(40)), old);
-    assert_eq!(fill_of(&s, "c", ms(80)), old);
-    assert_eq!(fill_of(&s, "c", ms(280)), new);
-    assert!(!s.animating(ms(280)));
+    assert_eq!(fill_of(&s, "c", ms(40)), old);
+    // Both neighbours are one link away, so they start together.
+    assert_eq!(fill_of(&s, "a", ms(100)), fill_of(&s, "c", ms(100)));
+    assert_ne!(fill_of(&s, "a", ms(100)), old);
+    assert_eq!(fill_of(&s, "c", ms(240)), new);
+    assert!(!s.animating(ms(240)));
 }

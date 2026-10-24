@@ -136,9 +136,20 @@ impl Session {
         let (now, fade) = (self.now, r.fade.duration);
         self.ripples.retain(|_, x| now < x.start + fade);
         let chain: Vec<ShapeId> = self.doc.chain(id).into_iter().cloned().collect();
-        for (i, id) in chain.iter().enumerate() {
+        // Steps from the clicked shape; `chain` is in BFS order, so neighbours come first.
+        let mut depth: std::collections::HashMap<&ShapeId, u32> = Default::default();
+        for id in &chain {
+            let d = (self.doc.links.iter())
+                .filter_map(|l| match (&l.0, &l.1) {
+                    (a, b) if a == id => depth.get(b),
+                    (a, b) if b == id => depth.get(a),
+                    _ => None,
+                })
+                .min()
+                .map_or(0, |d| d + 1);
+            depth.insert(id, d);
             if let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) {
-                let start = self.now + r.step * i as u32;
+                let start = self.now + r.step * d;
                 self.ripples.insert(
                     id.clone(),
                     Ripple {
