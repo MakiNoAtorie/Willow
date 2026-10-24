@@ -258,6 +258,15 @@ impl Session {
         self.layout(shape).height + 2.0 * self.theme.shape.pad_y + shape.extra_height as f32
     }
 
+    /// Every shape's drawn height, in document order: what `save` needs for the side rule.
+    pub fn heights(&self) -> Vec<f32> {
+        self.doc
+            .shapes
+            .iter()
+            .map(|s| self.shape_height(s))
+            .collect()
+    }
+
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
     /// still fading out after a deselect.
     pub fn selection_rings(&self, now: Duration) -> Vec<(&ShapeId, f32)> {

@@ -1,0 +1,17 @@
+willow 1
+
+a: "Gates close" color sage
+b: "Food prices **spike**" below a
+c: "Grain runs out" below b
+d: "Riots" right of b
+f: "Curfew" below d
+g: "Rumours" above d
+e: "Smugglers" left of b
+
+@layout a 0,0 w210
+@layout b 0,170 w210
+@layout c 0,340 w210
+@layout d 290,170 w210
+@layout f 290,340 w210
+@layout g 290,0 w210
+@layout e -290,170 w210

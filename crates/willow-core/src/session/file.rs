@@ -43,7 +43,7 @@ impl Session {
     /// Writes canonical text through `write`. On success the session is saved; on failure
     /// nothing changes.
     pub fn save(&mut self, write: impl FnOnce(&[u8]) -> io::Result<()>) -> io::Result<()> {
-        let bytes = format::save(&self.doc).into_bytes();
+        let bytes = format::save(&self.doc, &self.heights()).into_bytes();
         write(&bytes)?;
         self.unrecovered = None;
         self.saved = Some(self.doc.clone());

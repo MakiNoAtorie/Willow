@@ -1,0 +1,16 @@
+willow 1
+
+zone q "First" {
+  j: "Unrelated"
+  k: "Child" left of m color rose
+}
+
+zone r "Second" color peach {
+  m: "Parent"
+}
+
+@layout j 0,0 w210
+@layout k 0,300 w210
+@layout m 400,100 w210
+@layout q -40,-40 300x400
+@layout r 360,60 300x200

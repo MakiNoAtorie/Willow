@@ -1,0 +1,18 @@
+willow 1
+
+zone p "Act \"One\"" color sky {
+  a: "Start" color rose
+  c: "Back out" below b
+  zone n "Inner" {
+    b: "Dip" below a
+  }
+}
+
+g: "After"
+
+@layout a 0,0 w210
+@layout c 0,340 w210
+@layout b 0,170 w210
+@layout g 0,1000 w210
+@layout p -40,-40 300x500
+@layout n -20,130 260x120

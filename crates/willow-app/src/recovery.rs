@@ -99,10 +99,12 @@ impl Willow {
             // ponytail: clones the document on the UI thread; share it (Arc) if that shows up
             // in frame times on very large documents.
             if let (Some(doc), Some(dir)) = (self.session.take_recovery(now), dir()) {
+                // Heights need the measurer, so they're taken here; `save` runs off-thread.
+                let heights = self.session.heights();
                 let (epoch, mine) = (a.epoch.clone(), a.bump());
                 let (id, path) = (a.id.clone(), self.path.clone());
                 cx.background_executor()
-                    .spawn(async move { write(&dir, &id, path, doc, &epoch, mine) })
+                    .spawn(async move { write(&dir, &id, path, (doc, heights), &epoch, mine) })
                     .detach();
             }
         }
@@ -122,11 +124,11 @@ fn write(
     dir: &Path,
     id: &str,
     path: Option<PathBuf>,
-    doc: Document,
+    (doc, heights): (Document, Vec<f32>),
     epoch: &Mutex<u64>,
     mine: u64,
 ) {
-    let text = willow_core::save(&doc);
+    let text = willow_core::save(&doc, &heights);
     let e = epoch.lock().unwrap_or_else(PoisonError::into_inner);
     if *e != mine {
         return;
