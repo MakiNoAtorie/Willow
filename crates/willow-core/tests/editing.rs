@@ -320,9 +320,58 @@ fn the_caret_blinks_then_goes_solid_and_stops_animating() {
     // After "abx", 30 units in.
     assert_eq!((c.pos, c.height), (pt(46.0, 13.0), 22.5));
     assert!(!s.caret(ms(1000 + blink)).unwrap().visible);
-    assert!(s.animating(ms(1000 + blink)));
 
     assert!(s.caret(ms(1000 + idle)).unwrap().visible);
     assert!(!s.animating(ms(1000 + idle)));
     assert!(!s.tick(ms(1000 + idle)).animating);
+}
+
+#[test]
+fn a_blinking_caret_asks_for_a_wake_at_each_blink_edge_not_for_frames() {
+    let mut s = session("ab");
+    click(&mut s, TEXT);
+    s.handle(Input::StartEditing, ms(1000));
+    // PAPER: blink 530 ms, solid after 5 s.
+    assert!(!s.animating(ms(1100)));
+    assert_eq!(s.next_wake(ms(1000)), Some(ms(530)));
+    assert_eq!(s.next_wake(ms(1100)), Some(ms(430)));
+    assert_eq!(s.next_wake(ms(1530)), Some(ms(530)));
+    // The last edge before solid is at 4770 ms; the caret turns solid at 5000 ms.
+    assert_eq!(s.next_wake(ms(1000 + 4800)), Some(ms(200)));
+    assert_eq!(s.next_wake(ms(1000 + 5000)), None);
+
+    s.handle(Input::StopEditing, ms(1200));
+    assert_eq!(s.next_wake(ms(1200)), None);
+}
+
+#[test]
+fn redo_while_editing_leaves_editing_like_undo() {
+    let mut s = session("ab cd");
+    click(&mut s, TEXT);
+    s.handle(Input::StartEditing, T);
+    s.handle(Input::Delete(Motion::WordLeft), T);
+    s.handle(Input::StopEditing, T);
+    s.handle(Input::Undo, T);
+    assert_eq!(plain(&s), "ab cd");
+
+    s.handle(Input::StartEditing, T);
+    s.handle(Input::SelectAll, T);
+    s.handle(Input::Redo, T);
+    assert_eq!((plain(&s), caret(&s)), ("ab ".into(), None));
+    assert_eq!(s.selected_text(), None);
+    assert!(s.selection().is_some());
+}
+
+#[test]
+fn undo_in_a_session_that_changed_nothing_only_leaves_editing() {
+    let mut s = session("ab");
+    edit_at(&mut s, TEXT);
+    typ(&mut s, "x");
+    s.handle(Input::StopEditing, T);
+
+    s.handle(Input::StartEditing, T);
+    s.handle(Input::Undo, T);
+    assert_eq!((plain(&s), caret(&s)), ("xab".into(), None));
+    s.handle(Input::Undo, T);
+    assert_eq!(plain(&s), "ab");
 }

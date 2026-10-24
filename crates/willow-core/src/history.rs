@@ -62,8 +62,12 @@ impl History {
     }
 
     /// Undoes the last step. Inside a group, that is the group so far; the group stays open,
-    /// empty, so further changes form the next step.
+    /// empty, so further changes form the next step. A group that changed nothing undoes nothing.
     pub fn undo(&mut self, doc: &mut Document) {
+        let open = self.open.as_ref();
+        if open.is_some_and(|step| step.iter().all(|snap| doc.shapes.contains(snap))) {
+            return;
+        }
         self.across(doc, |h| (&mut h.undo, &mut h.redo));
     }
 

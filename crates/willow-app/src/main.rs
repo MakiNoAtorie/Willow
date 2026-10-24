@@ -98,6 +98,10 @@ struct Willow {
     /// Window position of the canvas's top-left, from the last paint.
     canvas_origin: gpui::Point<Pixels>,
     start: Instant,
+    /// Redraws at the caret's next blink edge; replacing it cancels the old timer.
+    wake: Option<gpui::Task<()>>,
+    /// Sends `Input::FocusLost` when the window deactivates.
+    _activation: gpui::Subscription,
     /// Set by `--bench`.
     bench: Option<bench::Bench>,
 }
@@ -170,13 +174,26 @@ impl Render for Willow {
         let canvas = canvas(
             |_, _, _| (),
             move |bounds, (), window, cx| {
-                let grabbing = entity.update(cx, |w, _| {
+                let grabbing = entity.update(cx, |w, cx| {
                     w.canvas_origin = bounds.origin;
                     let (width, height) = (bounds.size.width.into(), bounds.size.height.into());
                     let size = w.session.viewport().size;
                     if (size.x, size.y) != (width, height) {
                         w.session.resize(width, height);
                     }
+                    // Frames while animating; else a timer for the caret's next blink edge.
+                    let now = w.start.elapsed();
+                    let animating = w.session.animating(now);
+                    if animating {
+                        window.request_animation_frame();
+                    }
+                    let wake = (!animating).then(|| w.session.next_wake(now)).flatten();
+                    w.wake = wake.map(|d| {
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(d).await;
+                            this.update(cx, |_, cx| cx.notify()).ok();
+                        })
+                    });
                     w.cursor == Cursor::Grabbing
                 });
                 // Window-wide, so a pan keeps going (and ends) outside the canvas.
@@ -205,9 +222,6 @@ impl Render for Willow {
                 }
                 let w = entity.read(cx);
                 let (session, now) = (&w.session, w.start.elapsed());
-                if session.animating(now) {
-                    window.request_animation_frame();
-                }
                 paint(bounds, session, now, window);
                 // Text input reaches the selected shape too: typing on it starts editing.
                 if session.selection().is_some() {
@@ -648,6 +662,11 @@ fn main() {
                         cx.spawn_in(window, async move |this, cx| bench::run(this, cx).await)
                             .detach();
                     }
+                    let _activation = cx.observe_window_activation(window, |w, window, cx| {
+                        if !window.is_window_active() {
+                            w.input(Input::FocusLost, cx);
+                        }
+                    });
                     Willow {
                         session: Session::new(
                             doc,
@@ -658,6 +677,8 @@ fn main() {
                         cursor: Cursor::Arrow,
                         canvas_origin: Default::default(),
                         start: Instant::now(),
+                        wake: None,
+                        _activation,
                         bench: bench.map(bench::Bench::new),
                     }
                 })

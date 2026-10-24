@@ -129,6 +129,9 @@ pub enum Input {
     /// Plain text from the clipboard, replacing the text selection. Line breaks (`\r\n`, `\r`
     /// or `\n`) become paragraph breaks; other control characters are dropped.
     Paste(String),
+    /// The window lost focus: Space no longer counts as held and a pan ends, since their
+    /// key-up or release may never arrive.
+    FocusLost,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -384,11 +387,22 @@ impl Session {
     }
 
     /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
+    /// The caret blink isn't: see `next_wake`.
     pub fn animating(&self, now: Duration) -> bool {
         let fade = self.theme.selection.fade;
-        self.rings.iter().any(|r| r.progress(now, fade) < 1.0)
-            || self.zoom.running(self.theme, now)
-            || self.blinking(now)
+        self.rings.iter().any(|r| r.progress(now, fade) < 1.0) || self.zoom.running(self.theme, now)
+    }
+
+    /// How long after `now` the caret next changes (a blink edge, or turning solid); `None`
+    /// once nothing will change by itself. The app redraws then, on a timer, not every frame.
+    pub fn next_wake(&self, now: Duration) -> Option<Duration> {
+        let e = self.editing.as_ref()?;
+        let (c, since) = (&self.theme.caret, now.saturating_sub(e.since));
+        if since >= c.idle {
+            return None;
+        }
+        let edge = c.blink * (since.as_nanos() / c.blink.as_nanos() + 1) as u32;
+        Some(edge.min(c.idle) - since)
     }
 
     fn blinking(&self, now: Duration) -> bool {
@@ -739,13 +753,20 @@ impl Session {
                 self.space_held = false;
                 self.respond(true)
             }
-            Input::Undo => {
-                self.history.undo(&mut self.doc);
-                self.stop_editing();
+            Input::FocusLost => {
+                self.space_held = false;
+                if matches!(self.gesture, Some(Gesture::Pan { .. })) {
+                    self.gesture = None;
+                }
                 self.respond(true)
             }
-            Input::Redo => {
-                self.history.redo(&mut self.doc);
+            Input::Undo | Input::Redo => {
+                if input == Input::Undo {
+                    self.history.undo(&mut self.doc);
+                } else {
+                    self.history.redo(&mut self.doc);
+                }
+                self.stop_editing();
                 self.respond(true)
             }
             Input::ResetZoom => {

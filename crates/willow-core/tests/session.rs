@@ -94,6 +94,23 @@ fn space_held_turns_left_drag_over_a_shape_into_a_pan() {
     assert_eq!(s.viewport(), before);
 }
 
+#[test]
+fn losing_focus_releases_space_and_ends_the_pan() {
+    let mut s = session();
+    let mods = Modifiers::default();
+    s.handle(Input::KeyDown(Key::Space), T);
+    let (pos, button) = (ON_SHAPE, Button::Left);
+    s.handle(Input::PointerDown { pos, button, mods }, T);
+
+    assert_eq!(s.handle(Input::FocusLost, T).cursor, Cursor::Arrow);
+    let before = s.viewport();
+    let pos = pt(600.0, 500.0);
+    s.handle(Input::PointerMove { pos, mods }, T);
+    assert_eq!(s.viewport(), before);
+    drag(&mut s, Button::Left, ON_SHAPE, pt(600.0, 500.0));
+    assert_eq!(s.viewport(), before);
+}
+
 fn wheel(s: &mut Session, dx: f32, dy: f32, mods: Modifiers) -> willow_core::Response {
     s.handle(
         Input::Wheel {
