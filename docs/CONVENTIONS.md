@@ -14,7 +14,12 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 ## Layout
 - Crates: `crates/willow-core` (GPUI-free) and `crates/willow-app` (binary `willow`).
 - Core session: input vocabulary in `input.rs`, text editing in `session/editing.rs`. New editing inputs go in `Session::handle_text` and are listed in `handle`'s dispatch arm.
-- Platform chrome lives in `titlebar_<os>.rs`, each exposing `title_bar(session, window, cx)`. On macOS the title bar is the canvas's last child, or the canvas paints over it.
+- Platform chrome lives in `titlebar_<os>.rs`, each exposing `title_bar(name, session, window, cx)`. On macOS the title bar is the canvas's last child, or the canvas paints over it.
+
+## Files
+- Text format in `willow-core/src/format.rs`: `save(&Document) -> String`, `load(&[u8]) -> Result<Loaded { document, repaired }, LoadError>`; `LoadError`'s `Display` is the alert's reason. Golden files in `crates/willow-core/tests/golden/*.willow` (git `-text`).
+- Session file state in `session/file.rs`: `Session::open(loaded, bytes, ..)`, `is_saved()`, `bytes()`, `save(|bytes| io::Result<()>)` (the failed-save test seam).
+- The app's only file I/O is `willow-app/src/file.rs`: saves via `write_beside` (temp file, then rename), alerts via `file::alert`, panels via `rfd`. Windows open through `open_window(Content, bench, cx)`; `Willow.path` is canonicalized; `Willow::blank()` decides Open's window reuse. Quit is `QuitMode::LastWindowClosed`.
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
