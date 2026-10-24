@@ -103,6 +103,10 @@ pub enum Input {
     StartEditing,
     /// Enter or Esc: stop editing, keep the shape selected.
     StopEditing,
+    /// Ctrl/Cmd+B: toggles bold on the text selection, or for the next typed text.
+    ToggleBold,
+    /// Ctrl/Cmd+I: the same for italic.
+    ToggleItalic,
     Move(Motion),
     /// Deletes the text selection, or else from the caret to where the motion goes.
     Delete(Motion),
@@ -171,6 +175,9 @@ pub struct Editing {
     pub anchor: usize,
     /// Column that up/down keep, set by the first vertical move.
     goal_x: Option<f32>,
+    /// (bold, italic) for the next typed text, set by a toggle with nothing selected; any
+    /// caret move drops it.
+    pending: Option<(bool, bool)>,
     /// Last edit input: the caret blinks from here until `CaretStyle::idle`.
     since: Duration,
 }
@@ -623,6 +630,10 @@ impl Session {
                 self.stop_editing();
                 self.respond(was)
             }
+            Input::ToggleBold | Input::ToggleItalic => {
+                self.toggle(input == Input::ToggleItalic);
+                self.respond(true)
+            }
             Input::Move(m) => {
                 let Some((caret, goal)) = self.motion(m) else {
                     return self.respond(false);
@@ -673,6 +684,7 @@ impl Session {
             },
             anchor: end,
             goal_x: None,
+            pending: None,
             since: self.now,
         });
     }
@@ -707,7 +719,7 @@ impl Session {
     /// Puts the caret at `c` with nothing selected, and restarts the blink.
     fn set_caret(&mut self, c: Caret) {
         if let Some(e) = &mut self.editing {
-            (e.caret, e.anchor, e.goal_x, e.since) = (c, c.offset, None, self.now);
+            (e.caret, e.anchor, e.goal_x, e.pending, e.since) = (c, c.offset, None, None, self.now);
         }
     }
 
@@ -747,12 +759,50 @@ impl Session {
     /// Replaces `range` of the edited text with `text`; the caret lands after it.
     fn replace(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
-        let (id, mut end) = (e.id.clone(), range.start);
-        (self.history).change(&mut self.doc, &id, |s| end = s.text.replace(range, text));
+        let (id, pending, mut end) = (e.id.clone(), e.pending, range.start);
+        (self.history).change(&mut self.doc, &id, |s| {
+            end = s.text.replace(range.clone(), text);
+            if let Some((bold, italic)) = pending {
+                s.text.set_style(range.start..end, false, bold);
+                s.text.set_style(range.start..end, true, italic);
+            }
+        });
         self.set_caret(Caret {
             offset: end,
             upstream: false,
         });
+    }
+
+    /// Toggles italic (else bold) on the text selection, or in the pending style.
+    fn toggle(&mut self, italic: bool) {
+        let Some(e) = &self.editing else { return };
+        let (id, sel) = (e.id.clone(), self.text_selection());
+        if sel.is_empty() {
+            let Some((shape, _)) = self.edited() else {
+                return;
+            };
+            let mut st = e.pending.unwrap_or_else(|| shape.text.style_at(sel.start));
+            *(if italic { &mut st.1 } else { &mut st.0 }) ^= true;
+            if let Some(e) = &mut self.editing {
+                e.pending = Some(st);
+            }
+            return;
+        }
+        (self.history).change(&mut self.doc, &id, |s| {
+            let on = !s.text.all_styled(sel.clone(), italic);
+            s.text.set_style(sel, italic, on);
+        });
+    }
+
+    /// Selects `range` of the edited text, caret at its end.
+    pub fn set_text_selection(&mut self, range: Range<usize>) {
+        self.set_caret(Caret {
+            offset: range.start,
+            upstream: false,
+        });
+        if let Some(e) = &mut self.editing {
+            e.caret.offset = range.end;
+        }
     }
 
     /// Index of the topmost shape under screen point `p`.
