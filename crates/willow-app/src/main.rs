@@ -250,6 +250,8 @@ impl Render for Willow {
                 Cursor::Grab => CursorStyle::OpenHand,
                 Cursor::Grabbing => CursorStyle::ClosedHand,
                 Cursor::Text => CursorStyle::IBeam,
+                Cursor::ResizeEw => CursorStyle::ResizeLeftRight,
+                Cursor::ResizeNs => CursorStyle::ResizeUpDown,
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
@@ -336,7 +338,12 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
 
     let radius = px(t.shape.radius * z);
     let sel = &t.selection;
+    let resized = session.resize_preview();
     for shape in &doc.shapes {
+        let shape = resized
+            .as_ref()
+            .filter(|r| r.id == shape.id)
+            .unwrap_or(shape);
         let (x, y) = match preview {
             Some((id, x, y)) if *id == shape.id => (x, y),
             _ => (shape.x, shape.y),

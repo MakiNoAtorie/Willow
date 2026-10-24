@@ -118,6 +118,10 @@ pub enum Cursor {
     Grabbing,
     /// Over the text being edited.
     Text,
+    /// Over a side edge, or resizing from one.
+    ResizeEw,
+    /// Over the bottom edge, or resizing from it.
+    ResizeNs,
 }
 
 /// What the app does after an event.
@@ -187,6 +191,16 @@ pub struct CaretView {
 /// Screen pixels the pointer may wander before a press counts as a drag.
 const DRAG_START: f32 = 3.0;
 
+/// Screen pixels around a shape's edge that grab it for resizing.
+const EDGE_GRAB: f32 = 5.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edge {
+    Left,
+    Right,
+    Bottom,
+}
+
 /// A pointer gesture in progress.
 #[derive(Clone, Copy, Debug)]
 enum Gesture {
@@ -207,6 +221,14 @@ enum Gesture {
     /// Left press in the text being edited: never moves the shape.
     // ponytail: dragging will select text (#11).
     Text,
+    /// Left press on an edge of the shape at `index`. Once dragged, `to` is the previewed
+    /// (x, width, extra height); release then resizes the shape to it.
+    Resize {
+        index: usize,
+        edge: Edge,
+        from: Point,
+        to: Option<(i32, u32, u32)>,
+    },
 }
 
 /// A selection ring easing from `from` to `to` (0 hidden, 1 shown), starting at `since`.
@@ -248,6 +270,8 @@ pub struct Session {
     editing: Option<Editing>,
     /// The pointer is over the text being edited.
     over_text: bool,
+    /// The pointer is over a shape's edge.
+    over_edge: Option<Edge>,
     rings: Vec<Ring>,
     /// Time of the last event.
     now: Duration,
@@ -273,6 +297,7 @@ impl Session {
             selected: None,
             editing: None,
             over_text: false,
+            over_edge: None,
             rings: Vec::new(),
             now: Duration::ZERO,
         }
@@ -396,6 +421,53 @@ impl Session {
         }
     }
 
+    /// The shape being resized as the drag would leave it; the document still holds the old one.
+    pub fn resize_preview(&self) -> Option<Shape> {
+        match self.gesture {
+            Some(Gesture::Resize {
+                index,
+                to: Some((x, width, extra_height)),
+                ..
+            }) => Some(Shape {
+                x,
+                width,
+                extra_height,
+                ..self.doc.shapes[index].clone()
+            }),
+            _ => None,
+        }
+    }
+
+    /// Sets a shape's x, width and extra height: one discrete change to the document.
+    pub fn resize_shape(&mut self, id: &ShapeId, x: i32, width: u32, extra_height: u32) {
+        self.history.change(&mut self.doc, id, |s| {
+            (s.x, s.width, s.extra_height) = (x, width, extra_height)
+        });
+    }
+
+    /// Drops a shape's extra height so it fits its text; the width stays.
+    pub fn autofit(&mut self, id: &ShapeId) {
+        self.history
+            .change(&mut self.doc, id, |s| s.extra_height = 0);
+    }
+
+    /// The narrowest a shape may be: padding plus its widest grapheme cluster, or one em
+    /// when it has no text.
+    fn min_width(&self, shape: &Shape) -> u32 {
+        let t = self.theme;
+        // Wide enough that only paragraph breaks wrap.
+        let l = layout(&shape.text, 1e6, t, &*self.measure);
+        let widest = (l.lines.iter().flat_map(|l| &l.clusters))
+            .map(|c| c.width)
+            .fold(0.0, f32::max);
+        let content = if shape.text.is_empty() {
+            t.font_size
+        } else {
+            widest
+        };
+        (2.0 * t.shape.pad_x + content).ceil() as u32
+    }
+
     /// Moves a shape's top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
         self.history
@@ -441,8 +513,26 @@ impl Session {
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
         match input {
-            Input::PointerDown { pos, button, .. } => {
+            Input::PointerDown { pos, button, mods } => {
                 let hit = self.shape_at(pos);
+                if self.gesture.is_none() && button == Button::Left && !self.space_held {
+                    if let Some(i) = hit.filter(|_| mods.alt && self.editing.is_none()) {
+                        let id = self.doc.shapes[i].id.clone();
+                        self.autofit(&id);
+                        return self.respond(true);
+                    }
+                    if let Some((index, edge)) = self.edge_at(pos) {
+                        self.stop_editing();
+                        self.select(Some(self.doc.shapes[index].id.clone()));
+                        self.gesture = Some(Gesture::Resize {
+                            index,
+                            edge,
+                            from: pos,
+                            to: None,
+                        });
+                        return self.respond(true);
+                    }
+                }
                 if self.gesture.is_none()
                     && let Some(e) = &self.editing
                 {
@@ -482,6 +572,12 @@ impl Session {
                 }
                 self.respond(pans)
             }
+            Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::Resize { .. })) =>
+            {
+                self.resize_to(pos);
+                self.respond(true)
+            }
             Input::PointerMove { pos, .. } => match &mut self.gesture {
                 Some(Gesture::Pan { last, click, .. }) => {
                     if click.is_some_and(|c| (pos.x - c.x).hypot(pos.y - c.y) >= DRAG_START) {
@@ -510,14 +606,17 @@ impl Session {
                     ));
                     self.respond(true)
                 }
-                Some(Gesture::Text) => self.respond(false),
+                Some(Gesture::Text | Gesture::Resize { .. }) => self.respond(false),
                 None => {
+                    let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
+                    let edge = edge.map(|e| e.1);
+                    let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
                     let over = self.editing.as_ref().is_some_and(|e| {
                         (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
                     });
                     let changed = over != self.over_text;
                     self.over_text = over;
-                    self.respond(changed)
+                    self.respond(changed || edge_changed)
                 }
             },
             Input::PointerUp { button, .. } => {
@@ -545,6 +644,13 @@ impl Session {
                         }
                     }
                     Some(Gesture::Text) if button == Button::Left => self.gesture = None,
+                    Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
+                        self.gesture = None;
+                        if let Some((x, w, extra)) = to {
+                            let id = self.doc.shapes[index].id.clone();
+                            self.resize_shape(&id, x, w, extra);
+                        }
+                    }
                     _ => {}
                 }
                 self.respond(true)
@@ -755,6 +861,83 @@ impl Session {
         });
     }
 
+    /// Updates the previewed size of the resize gesture for the pointer at `pos`.
+    fn resize_to(&mut self, pos: Point) {
+        let Some(Gesture::Resize {
+            index,
+            edge,
+            from,
+            to,
+        }) = &mut self.gesture
+        else {
+            return;
+        };
+        let (d, z) = (
+            Point {
+                x: pos.x - from.x,
+                y: pos.y - from.y,
+            },
+            self.viewport.zoom,
+        );
+        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+            return;
+        }
+        let (index, edge) = (*index, *edge);
+        let s = &self.doc.shapes[index];
+        let min = self.min_width(s) as i32;
+        let grown = |dx: f32| {
+            // Whole units each side; the width stays at least `min`.
+            let d = (dx / z).round() as i32;
+            let low = (min - s.width as i32 + 1).div_euclid(2);
+            d.max(low)
+        };
+        let r = match edge {
+            Edge::Right | Edge::Left => {
+                let d = grown(if edge == Edge::Right { d.x } else { -d.x });
+                (s.x - d, (s.width as i32 + 2 * d) as u32, s.extra_height)
+            }
+            Edge::Bottom => {
+                let extra = (s.extra_height as i32 + (d.y / z).round() as i32).max(0);
+                (s.x, s.width, extra as u32)
+            }
+        };
+        if let Some(Gesture::Resize { to, .. }) = &mut self.gesture {
+            *to = Some(r);
+        }
+    }
+
+    /// The topmost shape whose edge is within `EDGE_GRAB` of screen point `p`, and which edge.
+    /// A shape's interior under `p` hides the edges of shapes below it.
+    fn edge_at(&self, p: Point) -> Option<(usize, Edge)> {
+        let g = EDGE_GRAB;
+        for (i, s) in self.doc.shapes.iter().enumerate().rev() {
+            let tl = self.viewport.to_screen(Point {
+                x: s.x as f32,
+                y: s.y as f32,
+            });
+            let z = self.viewport.zoom;
+            let (w, h) = (s.width as f32 * z, self.shape_height(s) * z);
+            if !(tl.x - g..=tl.x + w + g).contains(&p.x)
+                || !(tl.y - g..=tl.y + h + g).contains(&p.y)
+            {
+                continue;
+            }
+            let edge = if p.y < tl.y {
+                None
+            } else if (p.x - tl.x).abs() <= g {
+                Some(Edge::Left)
+            } else if (p.x - tl.x - w).abs() <= g {
+                Some(Edge::Right)
+            } else if (p.y - tl.y - h).abs() <= g {
+                Some(Edge::Bottom)
+            } else {
+                None
+            };
+            return edge.map(|e| (i, e));
+        }
+        None
+    }
+
     /// Index of the topmost shape under screen point `p`.
     fn shape_at(&self, p: Point) -> Option<usize> {
         let c = self.viewport.to_canvas(p);
@@ -769,12 +952,21 @@ impl Session {
             redraw,
             cursor: match self.gesture {
                 Some(Gesture::Pan { .. }) => Cursor::Grabbing,
+                Some(Gesture::Resize { edge, .. }) => edge_cursor(edge),
                 _ if self.space_held => Cursor::Grab,
                 Some(Gesture::Text) => Cursor::Text,
                 _ if self.over_text => Cursor::Text,
+                _ if let Some(e) = self.over_edge => edge_cursor(e),
                 _ => Cursor::Arrow,
             },
             animating: self.animating(self.now),
         }
+    }
+}
+
+fn edge_cursor(edge: Edge) -> Cursor {
+    match edge {
+        Edge::Left | Edge::Right => Cursor::ResizeEw,
+        Edge::Bottom => Cursor::ResizeNs,
     }
 }
