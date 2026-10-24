@@ -1,50 +1,195 @@
-//! One undo history per document, covering model changes only. Every command that changes a
-//! shape (move, resize, autofit, text edits) goes through `History::change`, a reload from
-//! disk through `History::replace`; viewport and selection never do.
+//! One undo history per document, covering model changes only. Every command that changes the
+//! document goes through `History`: shape edits through `change`, structural edits (shapes
+//! added or removed, links, chain colors) through `add` / `remove` / `link` / `unlink` /
+//! `recolor`, several changes as one step through `step`, a reload from disk through
+//! `replace`. Viewport and selection never do.
 
-use crate::{Document, Shape, ShapeId};
+use std::collections::{HashMap, HashSet};
 
-/// One undoable step, as the document is on the other side of it. Undo and redo both swap
-/// this with the document, so one step serves both directions.
+use crate::{Color, Document, Link, Shape, ShapeId};
+
+/// One recorded change, as what takes the document back across it. Applying an op returns
+/// the op that takes it forward again.
+#[derive(Debug)]
+enum Op {
+    /// Swap with the shape of this ID.
+    Set(Shape),
+    /// Put this shape back at this draw-order index.
+    Insert(usize, Shape),
+    /// Take out the shape at this index.
+    Remove(usize),
+    /// Put this link back at this index.
+    Link(usize, Link),
+    /// Take out the link at this index.
+    Unlink(usize),
+}
+
+impl Op {
+    /// Applies the op and returns its inverse. `at` caches shape indices by ID.
+    fn apply(self, doc: &mut Document, at: &mut Option<HashMap<ShapeId, usize>>) -> Op {
+        match self {
+            Op::Set(mut s) => {
+                let at = at.get_or_insert_with(|| {
+                    (doc.shapes.iter().enumerate())
+                        .map(|(i, s)| (s.id.clone(), i))
+                        .collect()
+                });
+                if let Some(&i) = at.get(&s.id) {
+                    std::mem::swap(&mut doc.shapes[i], &mut s);
+                }
+                Op::Set(s)
+            }
+            Op::Insert(i, s) => {
+                *at = None;
+                doc.shapes.insert(i, s);
+                Op::Remove(i)
+            }
+            Op::Remove(i) => {
+                *at = None;
+                Op::Insert(i, doc.shapes.remove(i))
+            }
+            Op::Link(i, l) => {
+                doc.links.insert(i, l);
+                Op::Unlink(i)
+            }
+            Op::Unlink(i) => Op::Link(i, doc.links.remove(i)),
+        }
+    }
+
+    /// A `Set` the document already matches: it changes nothing.
+    fn is_noop(&self, doc: &Document) -> bool {
+        matches!(self, Op::Set(s) if doc.shapes.contains(s))
+    }
+}
+
+/// One undoable step, as the document is on the other side of it.
 #[derive(Debug)]
 enum Step {
-    /// Each touched shape.
-    // ponytail: shape snapshots cover changes to existing shapes; creating or deleting shapes
-    // needs `Option<Shape>` plus the draw-order index.
-    Shapes(Vec<Shape>),
+    /// Ops in the order they were recorded; applied last first.
+    Ops(Vec<Op>),
     /// The whole document (a reload from disk).
     Document(Box<Document>),
+}
+
+/// A group in progress: its ops, and the shapes it already holds a `Set` for.
+#[derive(Debug, Default)]
+struct Group {
+    ops: Vec<Op>,
+    set: HashSet<ShapeId>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct History {
     undo: Vec<Step>,
     redo: Vec<Step>,
-    /// A group in progress (an editing session): every change in it becomes one step.
-    open: Option<Vec<Shape>>,
+    /// A group in progress (an editing session, a command): its changes become one step.
+    open: Option<Group>,
     /// Counts changes to the document (including undo and redo); crash recovery watches it.
     revision: u64,
 }
 
 impl History {
+    /// Records that the document changed, and `op` (if any) to take it back: its own step, or
+    /// part of the open group.
+    fn record(&mut self, op: Option<Op>) {
+        self.revision += 1;
+        self.redo.clear();
+        match (&mut self.open, op) {
+            (_, None) => {}
+            (Some(g), Some(op)) => g.ops.push(op),
+            (None, Some(op)) => self.undo.push(Step::Ops(vec![op])),
+        }
+    }
+
     /// Changes shape `id` through `f`: its own step, or part of the open group. A change that
     /// leaves the shape as it was adds nothing.
     pub fn change(&mut self, doc: &mut Document, id: &ShapeId, f: impl FnOnce(&mut Shape)) {
-        let Some(shape) = doc.shapes.iter_mut().find(|s| &s.id == id) else {
-            return;
-        };
+        if let Some(i) = doc.shapes.iter().position(|s| &s.id == id) {
+            self.change_at(doc, i, f);
+        }
+    }
+
+    /// `change` for the shape at draw-order index `i`.
+    fn change_at(&mut self, doc: &mut Document, i: usize, f: impl FnOnce(&mut Shape)) {
+        let shape = &mut doc.shapes[i];
         let before = shape.clone();
         f(shape);
         if *shape == before {
             return;
         }
-        self.revision += 1;
-        self.redo.clear();
-        match &mut self.open {
-            Some(step) if step.iter().any(|s| &s.id == id) => {}
-            Some(step) => step.push(before),
-            None => self.undo.push(Step::Shapes(vec![before])),
+        // A group's first `Set` for a shape restores it whole; later ones would add nothing.
+        let first = (self.open.as_mut()).is_none_or(|g| g.set.insert(before.id.clone()));
+        self.record(first.then_some(Op::Set(before)));
+    }
+
+    /// Runs `f` as one step; inside an open group, its changes join the group.
+    pub fn step(&mut self, doc: &mut Document, f: impl FnOnce(&mut Self, &mut Document)) {
+        let opened = self.open.is_none();
+        self.begin();
+        f(self, doc);
+        if opened {
+            self.end(doc);
         }
+    }
+
+    /// Adds `shape` on top of every other (last in draw order). Its ID must be new.
+    #[cfg_attr(not(test), allow(dead_code))] // create linked, new shape, paste (#33 on)
+    pub fn add(&mut self, doc: &mut Document, shape: Shape) {
+        doc.shapes.push(shape);
+        self.record(Some(Op::Remove(doc.shapes.len() - 1)));
+    }
+
+    /// Removes shape `id` and its links, as one step. Nothing else changes: no reconnecting.
+    #[cfg_attr(not(test), allow(dead_code))] // delete, cut (#36 on)
+    pub fn remove(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Shape> {
+        let i = doc.shapes.iter().position(|s| &s.id == id)?;
+        let shape = doc.shapes[i].clone();
+        self.step(doc, |h, doc| {
+            while let Some(j) = (doc.links.iter()).rposition(|Link(a, b)| a == id || b == id) {
+                let l = doc.links.remove(j);
+                h.record(Some(Op::Link(j, l)));
+            }
+            let shape = doc.shapes.remove(i);
+            h.record(Some(Op::Insert(i, shape)));
+        });
+        Some(shape)
+    }
+
+    /// `Document::link`, recorded as one step: refused (false) for the same shape, a missing
+    /// one or a cycle; a join repaints `b`'s chain in `a`'s color.
+    pub fn link(&mut self, doc: &mut Document, a: &ShapeId, b: &ShapeId) -> bool {
+        let Some(color) = doc.link_color(a, b) else {
+            return false;
+        };
+        self.step(doc, |h, doc| {
+            h.recolor(doc, b, color);
+            doc.links.push(Link(a.clone(), b.clone()));
+            h.record(Some(Op::Unlink(doc.links.len() - 1)));
+        });
+        true
+    }
+
+    /// `Document::unlink`, recorded: both halves keep the color. False if there was no link.
+    pub fn unlink(&mut self, doc: &mut Document, a: &ShapeId, b: &ShapeId) -> bool {
+        let found = (doc.links.iter()).position(|Link(x, y)| (x, y) == (a, b) || (x, y) == (b, a));
+        let Some(i) = found else {
+            return false;
+        };
+        let l = doc.links.remove(i);
+        self.record(Some(Op::Link(i, l)));
+        true
+    }
+
+    /// Paints `id`'s whole chain `color`, as one step.
+    pub fn recolor(&mut self, doc: &mut Document, id: &ShapeId, color: Color) {
+        let chain: HashSet<ShapeId> = doc.chain(id).into_iter().cloned().collect();
+        self.step(doc, |h, doc| {
+            for i in 0..doc.shapes.len() {
+                if chain.contains(&doc.shapes[i].id) {
+                    h.change_at(doc, i, |s| s.color = color);
+                }
+            }
+        });
     }
 
     /// Replaces the whole document with `new` as one step, closing any open group first.
@@ -63,10 +208,10 @@ impl History {
 
     /// Closes the group. Shapes it left as they were drop out; an empty group adds no step.
     pub fn end(&mut self, doc: &Document) {
-        if let Some(mut step) = self.open.take() {
-            step.retain(|snap| !doc.shapes.contains(snap));
-            if !step.is_empty() {
-                self.undo.push(Step::Shapes(step));
+        if let Some(g) = self.open.take() {
+            let ops: Vec<Op> = g.ops.into_iter().filter(|op| !op.is_noop(doc)).collect();
+            if !ops.is_empty() {
+                self.undo.push(Step::Ops(ops));
             }
         }
     }
@@ -76,7 +221,7 @@ impl History {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty() || self.open.as_ref().is_some_and(|s| !s.is_empty())
+        !self.undo.is_empty() || self.open.as_ref().is_some_and(|g| !g.ops.is_empty())
     }
 
     pub fn can_redo(&self) -> bool {
@@ -87,7 +232,7 @@ impl History {
     /// empty, so further changes form the next step. A group that changed nothing undoes nothing.
     pub fn undo(&mut self, doc: &mut Document) {
         let open = self.open.as_ref();
-        if open.is_some_and(|step| step.iter().all(|snap| doc.shapes.contains(snap))) {
+        if open.is_some_and(|g| g.ops.iter().all(|op| op.is_noop(doc))) {
             return;
         }
         self.across(doc, |h| (&mut h.undo, &mut h.redo));
@@ -97,8 +242,8 @@ impl History {
         self.across(doc, |h| (&mut h.redo, &mut h.undo));
     }
 
-    /// Ends any open group, then moves the top step of one stack onto the other, swapping its
-    /// shapes with the document's. Reopens the group if one was open.
+    /// Ends any open group, then moves the top step of one stack onto the other, applying it
+    /// and keeping what takes it back. Reopens the group if one was open.
     fn across(
         &mut self,
         doc: &mut Document,
@@ -107,18 +252,23 @@ impl History {
         let was_open = self.open.is_some();
         self.end(doc);
         let (from, to) = stacks(self);
-        if let Some(mut step) = from.pop() {
-            match &mut step {
-                Step::Shapes(snaps) => {
-                    for snap in snaps {
-                        if let Some(shape) = doc.shapes.iter_mut().find(|s| s.id == snap.id) {
-                            std::mem::swap(shape, snap);
-                        }
-                    }
+        if let Some(step) = from.pop() {
+            to.push(match step {
+                // Last op first. The inverses, kept in that order, replay reversed again.
+                Step::Ops(ops) => {
+                    let mut at = None;
+                    Step::Ops(
+                        ops.into_iter()
+                            .rev()
+                            .map(|op| op.apply(doc, &mut at))
+                            .collect(),
+                    )
                 }
-                Step::Document(d) => std::mem::swap(doc, d),
-            }
-            to.push(step);
+                Step::Document(mut d) => {
+                    std::mem::swap(doc, &mut d);
+                    Step::Document(d)
+                }
+            });
             self.revision += 1;
         }
         if was_open {
@@ -159,5 +309,75 @@ mod tests {
         h.undo(&mut doc);
         assert_eq!(x(&doc), 0);
         assert!(!h.can_undo());
+    }
+
+    fn id(s: &str) -> ShapeId {
+        ShapeId(s.into())
+    }
+
+    /// a-b linked (rose), c alone (sky), in draw order a, b, c.
+    fn three() -> Document {
+        let mut doc = Document::default();
+        for (n, x) in [("a", 0), ("b", 0), ("c", 400)] {
+            doc.shapes.push(Shape::new(id(n), x, 0));
+        }
+        doc.shapes[1].y = 200;
+        doc.link(&id("a"), &id("b"));
+        doc.recolor(&id("a"), crate::Color::Rose);
+        doc.recolor(&id("c"), crate::Color::Sky);
+        doc
+    }
+
+    #[test]
+    fn undo_and_redo_of_a_structural_step_restore_the_document_exactly() {
+        let mut doc = three();
+        let mut h = History::default();
+        let before = doc.clone();
+
+        h.step(&mut doc, |h, doc| {
+            h.add(doc, Shape::new(id("d"), 0, 400));
+            assert!(h.link(doc, &id("b"), &id("d")));
+            h.remove(doc, &id("a"));
+            h.recolor(doc, &id("c"), crate::Color::Sage);
+            assert!(h.link(doc, &id("c"), &id("b")));
+        });
+        let after = doc.clone();
+        assert_ne!(before, after);
+        assert!(!after.shapes.iter().any(|s| s.id == id("a")));
+        assert!(!after.links.iter().any(|l| l.0 == id("a") || l.1 == id("a")));
+        assert!(after.shapes.iter().all(|s| s.color == crate::Color::Sage));
+
+        for _ in 0..2 {
+            h.undo(&mut doc);
+            assert_eq!(doc, before);
+            h.redo(&mut doc);
+            assert_eq!(doc, after);
+        }
+        h.undo(&mut doc);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn a_group_mixing_shape_edits_with_a_new_linked_shape_is_one_step() {
+        let mut doc = three();
+        let mut h = History::default();
+        let before = doc.clone();
+
+        h.begin();
+        h.change(&mut doc, &id("b"), |s| s.x = 50);
+        h.step(&mut doc, |h, doc| {
+            h.add(doc, Shape::new(id("d"), 0, 400));
+            h.link(doc, &id("b"), &id("d"));
+        });
+        h.change(&mut doc, &id("d"), |s| s.width = 300);
+        h.change(&mut doc, &id("b"), |s| s.y = 250);
+        h.end(&doc);
+        let after = doc.clone();
+
+        h.undo(&mut doc);
+        assert_eq!(doc, before);
+        assert!(!h.can_undo());
+        h.redo(&mut doc);
+        assert_eq!(doc, after);
     }
 }

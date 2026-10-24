@@ -80,7 +80,6 @@ impl Session {
         let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker[c as usize], deepen));
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
-        let rings = self.selection_rings(now);
         let edited = self.editing().filter(|_| fade > 0.0);
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and top-left.
@@ -167,7 +166,7 @@ impl Session {
                 if fy + height < a.y {
                     return None;
                 }
-                let ring = (rings.iter()).find(|r| *r.0 == s.id).map_or(0.0, |r| r.1);
+                let ring = self.ring(&s.id, now);
                 let e = edited.filter(|e| e.id == s.id);
                 Some(Visible {
                     fill: fills[s.color as usize],

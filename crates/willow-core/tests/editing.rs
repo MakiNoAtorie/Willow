@@ -79,7 +79,7 @@ fn a_click_on_the_selected_shape_edits_with_the_caret_where_clicked() {
 
     click(&mut s, on);
     assert_eq!(caret(&s), Some(3));
-    assert!(s.selection().is_some());
+    assert!(!s.selection().is_empty());
 }
 
 #[test]
@@ -126,11 +126,11 @@ fn typing_on_a_selected_shape_edits_it_and_appends_but_space_types_nothing() {
 fn enter_and_esc_leave_editing_and_keep_the_shape_selected() {
     let mut s = session("ab");
     edit_at(&mut s, TEXT);
-    let sel = s.selection().cloned();
+    let sel = s.selection().to_vec();
 
     s.handle(Input::StopEditing, T);
     assert_eq!(caret(&s), None);
-    assert_eq!(s.selection().cloned(), sel);
+    assert_eq!(s.selection().to_vec(), sel);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn a_click_on_empty_canvas_while_editing_only_leaves_editing() {
 
     drag(&mut s, Button::Left, EMPTY, pt(90.0, 90.0));
     assert_eq!(caret(&s), None);
-    assert!(s.selection().is_some());
+    assert!(!s.selection().is_empty());
     assert_eq!(s.viewport(), vp);
 }
 
@@ -292,7 +292,7 @@ fn undo_while_editing_reverts_the_session_so_far_and_leaves_editing() {
 
     s.handle(Input::Undo, T);
     assert_eq!((plain(&s), caret(&s)), ("ab".into(), None));
-    assert!(s.selection().is_some());
+    assert!(!s.selection().is_empty());
 
     s.handle(Input::Redo, T);
     assert_eq!(plain(&s), "abxy");
@@ -359,7 +359,7 @@ fn redo_while_editing_leaves_editing_like_undo() {
     s.handle(Input::Redo, T);
     assert_eq!((plain(&s), caret(&s)), ("ab ".into(), None));
     assert_eq!(s.selected_text(), None);
-    assert!(s.selection().is_some());
+    assert!(!s.selection().is_empty());
 }
 
 #[test]

@@ -1,6 +1,11 @@
 //! Links, chains, chain color and zones in the core model.
 
-use willow_core::{Color, Document, Point, Shape, ShapeId, Side, Zone, side};
+mod common;
+
+use std::time::Duration;
+use willow_core::{
+    Color, Document, Input, PAPER, Point, Session, Shape, ShapeId, Side, Zone, side,
+};
 
 fn id(s: &str) -> ShapeId {
     ShapeId(s.into())
@@ -74,6 +79,46 @@ fn the_side_rule_compares_centers_and_an_exact_diagonal_is_vertical() {
 
 fn color(doc: &Document, i: &str) -> Color {
     doc.shapes.iter().find(|s| s.id.0 == i).unwrap().color
+}
+
+#[test]
+fn link_unlink_and_recolor_through_the_session_are_undoable() {
+    let mut doc = doc_of(&["a", "b", "c", "d"]);
+    doc.link(&id("a"), &id("b"));
+    doc.link(&id("c"), &id("d"));
+    doc.recolor(&id("a"), Color::Sage);
+    doc.recolor(&id("c"), Color::Rose);
+    let mut s = Session::new(doc, &PAPER, Box::new(common::Fake));
+    let mut states = vec![s.document().clone()];
+
+    assert!(s.link(&id("b"), &id("d")));
+    states.push(s.document().clone());
+    assert_eq!(color(s.document(), "c"), Color::Sage);
+    s.recolor(&id("c"), Color::Lilac);
+    states.push(s.document().clone());
+    assert!(s.unlink(&id("d"), &id("b")));
+    states.push(s.document().clone());
+    assert!(!s.link(&id("a"), &id("b")), "already linked");
+    assert!(!s.unlink(&id("a"), &id("c")), "no such link");
+    s.recolor(&id("a"), Color::Lilac);
+    assert_eq!(s.document(), states.last().unwrap(), "already lilac");
+
+    for want in states.iter().rev().skip(1) {
+        s.handle(Input::Undo, Duration::ZERO);
+        assert_eq!(s.document(), want);
+        assert!(one_color_chains(s.document()));
+    }
+    assert!(!s.can_undo());
+    for want in states.iter().skip(1) {
+        s.handle(Input::Redo, Duration::ZERO);
+        assert_eq!(s.document(), want);
+        assert!(one_color_chains(s.document()));
+    }
+}
+
+/// Every link joins two shapes of one color.
+fn one_color_chains(doc: &Document) -> bool {
+    (doc.links.iter()).all(|l| color(doc, &l.0.0) == color(doc, &l.1.0))
 }
 
 #[test]

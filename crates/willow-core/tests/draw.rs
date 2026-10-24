@@ -161,6 +161,25 @@ fn the_edited_shape_carries_its_ring_selection_and_caret_and_low_zoom_drops_text
     assert_eq!(f.shapes[0].ring, 1.0);
 }
 
+#[test]
+fn every_selected_shape_draws_the_selection_ring() {
+    let mut s = shapes_at(&[(0, 0), (300, 0), (600, 0)]);
+    look_at(&mut s, 1.0);
+    let rings = |s: &Session| -> Vec<f32> {
+        let f = s.draw(SCREEN.0, SCREEN.1, std::time::Duration::from_secs(5));
+        f.shapes.iter().map(|v| v.ring).collect()
+    };
+    let sid = |n: &str| ShapeId(n.into());
+
+    s.select([sid("s0"), sid("s2")]);
+    assert_eq!(s.selection(), [sid("s0"), sid("s2")]);
+    assert_eq!(rings(&s), [1.0, 0.0, 1.0]);
+    s.select([sid("s1")]);
+    assert_eq!(rings(&s), [0.0, 1.0, 0.0]);
+    s.select([]);
+    assert!(s.selection().is_empty());
+}
+
 fn zone(id: &str, x: i32, y: i32, color: Color, members: &[&str]) -> Zone {
     Zone {
         id: ShapeId(id.into()),

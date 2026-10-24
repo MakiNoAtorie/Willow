@@ -329,7 +329,7 @@ impl Render for Willow {
                 let (session, now) = (&w.session, w.start.elapsed());
                 paint(bounds, session, now, window);
                 // Text input reaches the selected shape too: typing on it starts editing.
-                if session.selection().is_some() {
+                if !session.selection().is_empty() {
                     let handler = ElementInputHandler::new(bounds, entity.clone());
                     window.handle_input(&w.focus, handler, cx);
                 }

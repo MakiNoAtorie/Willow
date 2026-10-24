@@ -77,7 +77,7 @@ impl Session {
                 self.respond(true)
             }
             Input::Unmark => self.respond(true),
-            Input::StartEditing => match self.selected.clone() {
+            Input::StartEditing => match self.only_selected() {
                 Some(id) if self.editing.is_none() => {
                     self.start_editing(id);
                     self.respond(true)
@@ -164,7 +164,7 @@ impl Session {
     ) -> Option<(String, Range<usize>)> {
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if self.editing.is_none() {
-            match self.selected.clone() {
+            match self.only_selected() {
                 Some(id) if !text.trim().is_empty() => self.start_editing(id),
                 _ => return None,
             }

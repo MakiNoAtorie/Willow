@@ -188,11 +188,11 @@ fn id(s: &str) -> willow_core::ShapeId {
 #[test]
 fn press_release_on_an_unselected_shape_selects_it() {
     let mut s = session();
-    assert_eq!(s.selection(), None);
+    assert!(s.selection().is_empty());
 
     click(&mut s, ON_SHAPE, T);
 
-    assert_eq!(s.selection(), Some(&id("a")));
+    assert_eq!(s.selection(), [id("a")]);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn press_drag_on_a_shape_moves_it_on_release_instead_of_selecting() {
         (s.document().shapes[0].x, s.document().shapes[0].y),
         (30, -20)
     );
-    assert_eq!(s.selection(), None);
+    assert!(s.selection().is_empty());
 }
 
 #[test]
@@ -260,10 +260,10 @@ fn clicking_empty_canvas_deselects_but_panning_does_not() {
     click(&mut s, ON_SHAPE, T);
 
     drag(&mut s, Button::Left, pt(50.0, 50.0), pt(90.0, 50.0));
-    assert_eq!(s.selection(), Some(&id("a")));
+    assert_eq!(s.selection(), [id("a")]);
 
     click(&mut s, pt(50.0, 50.0), T);
-    assert_eq!(s.selection(), None);
+    assert!(s.selection().is_empty());
 }
 
 #[test]
@@ -278,7 +278,7 @@ fn a_click_where_shapes_overlap_hits_the_later_one() {
     let overlap = s.viewport().to_screen(pt(150.0, 30.0));
     click(&mut s, overlap, T);
 
-    assert_eq!(s.selection(), Some(&id("b")));
+    assert_eq!(s.selection(), [id("b")]);
 }
 
 fn ms(n: u64) -> Duration {
@@ -347,7 +347,7 @@ fn pan_zoom_and_selection_are_not_undo_steps_and_undo_leaves_them_alone() {
     s.handle(Input::Undo, T);
     assert_eq!(pos(&s), (0, 0));
     assert_eq!(s.viewport(), vp);
-    assert_eq!(s.selection(), Some(&id("a")));
+    assert_eq!(s.selection(), [id("a")]);
     assert!(!s.can_undo());
 }
 
