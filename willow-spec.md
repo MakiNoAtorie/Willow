@@ -55,6 +55,8 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 
 ## Phase 0 — GPUI viability check
 
+**Status: closed.** GPUI is the UI stack (ADR 0003).
+
 Goal: confirm GPUI can carry this app before building on it. This is a throwaway spike, not the start of the real codebase.
 
 Build the smallest thing that answers these questions, on both Windows and macOS:
@@ -68,6 +70,8 @@ Build the smallest thing that answers these questions, on both Windows and macOS
 Record measurements as CSV. End with a short go/no-go note. If GPUI falls short, the fallback is the Linebender stack (winit + Vello + Parley); say which gaps would justify switching.
 
 ## Phase 1 — Visual language
+
+**Status: closed 2026-10-24.** Approved result: `design/visual-language.md` and `design/mockups/` (PNGs in `design/mockups/png/`).
 
 Goal: nail exactly how Willow looks before building any real UI. No Rust in this phase: recreate the app purely visually as SVG or HTML mockups, iterate on them with the owner, and record the result.
 

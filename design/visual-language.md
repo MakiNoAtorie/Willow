@@ -2,7 +2,7 @@
 
 The reference every phase builds against. **Paper** is the default theme and the one Phases 2–7 build; **Desk** and **Poster** arrive in Phase 8 (see the spec's Themes section).
 
-Status: all three themes drafted, awaiting owner approval. Desk and Poster below list only what differs from Paper; anything not mentioned works as in Paper.
+Status: approved by the owner on 2026-10-24, closing Phase 1. Desk and Poster below list only what differs from Paper; anything not mentioned works as in Paper.
 
 ## Where things are
 
@@ -127,7 +127,7 @@ Names are what the file format writes and never change. Pastel goes on shapes an
 
 Every animation ends its redraw loop when it finishes.
 
-### Proposals beyond the spec (owner to confirm)
+### Additions beyond the spec (approved with Phase 1)
 
 - Zone titles stay readable when zoomed out: they never drop below 12 px on screen, and unlike shape text they don't fade. This keeps acts and episodes findable in the low-zoom view.
 - Fills deepen toward the picker color as text fades (above), so the willow silhouette holds at low zoom.
