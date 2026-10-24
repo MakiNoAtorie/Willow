@@ -1,6 +1,6 @@
 # Phase 0: GPUI go/no-go
 
-**Verdict: GO on macOS, conditional on the owner's Windows checks** ([spike-gpui/WINDOWS-CHECKLIST.md](spike-gpui/WINDOWS-CHECKLIST.md)). Every question was answered yes on the MacBook Air M4, with two caveats the owner should decide on:
+**Verdict: GO on macOS and Windows.** Every question was answered yes on the MacBook Air M4 and on the Windows desktop (Ryzen 5 9600X, RTX 5060 Ti, [spike-gpui/WINDOWS-CHECKLIST.md](spike-gpui/WINDOWS-CHECKLIST.md)). Nothing failed at the platform layer. Still untested: mixed DPI (no second monitor), precision touchpad (none), the real-IME and dead-key checks on the Mac, and the iGPU run. Two caveats the owner should decide on:
 
 - Text has to stop drawing below about 7 px on screen for the zoom sweep to meet 8 ms.
 - The keystroke-to-paint target as written is bounded by vsync pacing, not by GPUI.
@@ -43,7 +43,7 @@ These are public APIs, and they are the same calls GPUI's own `ShapedLine::paint
   - CJK breaks only at a character when nothing else fits, so it isn't justified and line-start punctuation is allowed (`。` starts a line in `mac-1-demo.png`). Proper UAX #14 breaking, kinsoku and inter-character justification are a Phase 1 job (e.g. the `unicode-linebreak` crate).
   - Hyphenation: none.
 
-## 2. In-shape editing: caret, mouse selection, IME: **GO on macOS** (Windows pending)
+## 2. In-shape editing: caret, mouse selection, IME: **GO** (macOS real-IME check untested)
 
 `EntityInputHandler` (UTF-16 ranges, marked text, `bounds_for_range` for placing the candidate window) maps cleanly onto the custom layout. See `evidence/mac-selftest.txt`, all PASS:
 
@@ -53,7 +53,14 @@ These are public APIs, and they are the same calls GPUI's own `ShapedLine::paint
 - A dead-key sequence (´ + e → é).
 - Up/down arrows use the stop table.
 
-The self-test calls the input handler the way `NSTextInputClient` does but doesn't go through the OS. A two-minute real-IME check on the Mac is on the checklist. Windows IME (TSF) and dead keys are on the owner's list.
+The self-test calls the input handler the way `NSTextInputClient` does but doesn't go through the OS. A two-minute real-IME check on the Mac is on the checklist and is still untested.
+
+**Windows**: `evidence/win-selftest.txt` is all PASS, and the real OS paths were checked by hand:
+
+- Caret lands where clicked, drag selects across lines, Shift+click extends, Up/Down keep the column through the CJK line.
+- Microsoft Japanese IME through TSF: `nihongo` composes underlined inline, the candidate list opens at the composition (not the window corner), Space cycles, Enter commits (`win-ime.png`). The list opens a few pixels high and covers the bottom of the composition line; usable, and likely our `bounds_for_range` rect rather than `gpui_windows`.
+- Dead keys on US-International: é, à, ü.
+- The click that activates an inactive window isn't passed to the app, so it places no caret.
 
 ## 3. Rounded shapes and straight connectors, panned and zoomed, on 10,000 shapes: **GO** (with a text cutoff)
 
@@ -72,6 +79,20 @@ Shapes are `paint_quad` with corner radii. All visible connectors go into one `P
 - Cold `draw_max` spikes (20–30 ms) are first-time glyph rasterization at new sizes. Font size follows zoom, quantized to 0.5 px.
 - Laying out all 10k shapes at load takes **570–590 ms** on the main thread, through the window's text system. The real app needs shape heights at load, so it should either store heights in the file or lay out incrementally.
 
+**Windows (9600X + RTX 5060 Ti, rows `win-9600x-5060ti`)**: every scenario is under target, even at the default 4 px cutoff.
+
+| scenario (warm) | draw p95, cutoff 4 px | draw p95, cutoff 7 px | Mac, cutoff 4 px |
+|---|---|---|---|
+| pan at 100 % | 1.2 ms | 1.2 ms | 3.7 ms |
+| pan at 40 % | 5.3 ms | 0.5 ms | 7.6 ms |
+| pan at 10 % | 1.0 ms | 1.1 ms | 3.0 ms |
+| pan at 2 % | 3.0 ms | 3.0 ms | 5.5 ms |
+| zoom sweep 100 → 2 → 100 % | 6.3 ms (cold 6.2) | 2.4 ms (cold 2.7) | 8.7 ms |
+
+- Present intervals stayed on vsync (p95 17.3–18.1 ms). Worst `draw_max` was 10.8 ms (cold zoom sweep).
+- By hand: wheel and Shift+wheel pan, Ctrl+wheel zooms, `L` loads the 10k document. The owner found Ctrl+wheel zoom choppy: each notch jumps about 49 % in one frame because the spike applies it with no easing. Draw time isn't the cause, and the spec now requires eased wheel zoom in Phase 2.
+- Precision touchpad pan and pinch are untested (none on this machine).
+
 ## 4. Idle CPU and memory after an animation: **GO**
 
 The zoom badge fades over 1.2 s using `request_animation_frame` and then stops asking for frames.
@@ -79,6 +100,7 @@ The zoom badge fades over 1.2 s using `request_animation_frame` and then stops a
 - Over the following 5 s: **0 renders**, **0.76 % CPU** (`ps` cputime; the same in all runs).
 - RSS: demo document 95 MB; 10k document fully laid out 224 MB; 259–272 MB after the sweeps (glyph atlas).
 - Most of the 10k figure is the spike's fat per-glyph layout structs, not GPUI. It shrinks if layouts are kept only for visible shapes and heights are cached.
+- **Windows**: **0 renders** and 0.9–1.2 % CPU over the 5 s after the fade. RSS 199–204 MB with the 10k document loaded, 185–201 MB after the sweeps.
 
 ## 5. Is the API reasonable for the planned interactions? **GO**
 
@@ -88,12 +110,14 @@ All of these were built in the spike except the native menus:
 - **Context menu**: `deferred(anchored().position(p).child(div().occlude()…))`, about 40 lines (`mac-9-context-menu.png`). GPUI itself has no menu widget; Zed's `ui::ContextMenu` pulls in Zed's theme and settings crates. We'd write our own, which is small.
 - **Directional picker**: Tab, then an arrow adds a linked shape (`mac-7-picker.png`, `mac-8-panel.png`). Gotcha: GPUI dispatches a bound action *before* capture-phase key listeners, so picker arrows have to go through the arrow actions (or a key context), not `capture_key_down`.
 - **Side text panel**: a flex `div` beside the canvas. Trivial. Phase 7's code panel needs a multi-line text editor, and the `gpui` crate has none (Zed's editor isn't reusable). We'd build it on this same custom text layout.
-- **Windows title bar**: `div().window_control_area(WindowControlArea::{Drag, Min, Max, Close})`. `gpui_windows` maps `Max` to `HTMAXBUTTON` (events.rs:971), which is what gives Windows 11 its native snap-layout flyout, and handles `WM_DPICHANGED`. The code is in `title_bar()`. It is not verified until the owner runs the checklist.
+- **Windows title bar**: `div().window_control_area(WindowControlArea::{Drag, Min, Max, Close})`. `gpui_windows` maps `Max` to `HTMAXBUTTON` (events.rs:971), which is what gives Windows 11 its native snap-layout flyout, and handles `WM_DPICHANGED`. The code is in `title_bar()`. Verified on Windows 11: drag, double-click maximize/restore, min/max/close, and the snap flyout on hover and on Win+Z (`win-snap.png`). Mixed DPI is untested (one monitor). The spike first painted shapes over the title bar because its canvas wasn't clipped; one `overflow_hidden()` fixed it.
+- **Right-click menu, picker and panel on Windows**: all work. Ctrl+\ can't be typed on the Spanish layout (`\` is AltGr+º), so Phase 5 should pick shortcuts that exist on common layouts.
+- **Spike bug found and fixed**: a pan released off the canvas kept panning, because the drag only ended on a mouse-up over the canvas. It now ends on the next move once the button is up. GPUI reports the pressed button on every move, so this was our code.
 - **macOS**: a transparent title bar with traffic lights works (`TitlebarOptions`). Native menus (`cx.set_menus`) weren't exercised; Zed uses them daily.
 
-## 6. Emoji fallback with the bundled font: **GO on macOS** (Windows pending)
+## 6. Emoji fallback with the bundled font: **GO**
 
-IBM Plex Sans (the stand-in bundled font) has no emoji, and 🌳🍂 fall back to Apple Color Emoji and draw in colour (`mac-1-demo.png`). Windows (Segoe UI Emoji through DirectWrite) is on the checklist.
+IBM Plex Sans (the stand-in bundled font) has no emoji, and 🌳🍂 fall back to Apple Color Emoji and draw in colour (`mac-1-demo.png`). On Windows they fall back to Segoe UI Emoji through DirectWrite and draw in colour at every zoom (`win-demo.png`, `win-emoji.png`).
 
 ## Keystroke-to-paint: vsync-bound, needs a target decision
 
@@ -107,6 +131,8 @@ The draw itself is 4–5 ms (p95). The rest is waiting: on macOS GPUI draws only
 
 Suggested restatement: "draw ≤ 8 ms per keystroke and the next vsync is never missed". That one passes.
 
+On Windows the same measure is p50 2.6–2.8 ms, p95 5.4–10.8 ms and max 18 ms, with draw p95 1.5–1.6 ms. It passes the target as written. Why Windows waits less for the frame wasn't investigated.
+
 (GPUI's built-in input-latency histogram doesn't count synthetic text input, because it reaches the input handler after `dispatch_event` returns. Real keystrokes would be counted.)
 
 ## Notes for ADR 0001 (GPUI-free core)
@@ -119,7 +145,7 @@ Suggested restatement: "draw ≤ 8 ms per keystroke and the next vsync is never 
 
 None of these is true today. Switch if any turns out to be true:
 
-1. **The Windows checklist fails at the platform layer** (IME candidate placement, snap layouts, mixed-DPI scaling) and can't be fixed with a small patch to a pinned `gpui_windows`. winit does these natively and Parley handles IME composition.
+1. **The Windows checklist fails at the platform layer** (IME candidate placement, snap layouts, mixed-DPI scaling) and can't be fixed with a small patch to a pinned `gpui_windows`. winit does these natively and Parley handles IME composition. IME placement and snap layouts passed on 2026-10-24. Mixed DPI is the one still untested.
 2. **Small text has to stay visible** at the 25–40 % zoom that costs 7.6–9 ms, and a per-shape cache can't be built on GPUI's immediate-mode scene. Vello's retained scene fragments are the main draw there.
 3. **Owning text layout becomes the dominant cost.** Parley ships UAX #14 line breaking, justified alignment, bidi and selection geometry. With GPUI we keep ~200 lines of layout plus CJK breaking and a multi-line editor for Phase 7.
 4. **Pin upgrades become painful.** This rev already split `gpui` into several platform crates, which shows how fast the API surface moves.
