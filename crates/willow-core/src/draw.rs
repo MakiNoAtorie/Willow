@@ -61,7 +61,7 @@ impl Session {
                     _ => Cow::Borrowed(s),
                 };
                 let (x, y) = match preview {
-                    Some((id, x, y)) if *id == s.id => (x, y),
+                    Some(p) if *p.id == s.id => (p.x, p.y),
                     _ => (s.x, s.y),
                 };
                 let (fx, fy) = (x as f32, y as f32);

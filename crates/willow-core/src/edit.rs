@@ -7,8 +7,24 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Paragraph, RichText, Run};
 
-/// (bold, italic).
-type Style = (bool, bool);
+/// One byte's (bold, italic).
+type Flags = (bool, bool);
+
+/// A style a toggle turns on or off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Style {
+    Bold,
+    Italic,
+}
+
+impl Style {
+    pub(crate) fn of(self, f: &mut Flags) -> &mut bool {
+        match self {
+            Style::Bold => &mut f.0,
+            Style::Italic => &mut f.1,
+        }
+    }
+}
 
 impl RichText {
     /// The text with paragraphs joined by `\n`: what every offset indexes.
@@ -47,29 +63,27 @@ impl RichText {
             .map_or_else(Default::default, |j| styles[j])
     }
 
-    /// Whether all of `r` is italic (else bold).
-    pub(crate) fn all_styled(&self, r: Range<usize>, italic: bool) -> bool {
-        let styles = self.flatten().1;
-        styles
-            .get(r)
-            .is_some_and(|b| b.iter().all(|&(bold, it)| if italic { it } else { bold }))
+    /// Whether all of `r` has `style`.
+    pub(crate) fn all_styled(&self, r: Range<usize>, style: Style) -> bool {
+        let mut styles = self.flatten().1;
+        (styles.get_mut(r)).is_some_and(|b| b.iter_mut().all(|f| *style.of(f)))
     }
 
-    /// Sets italic (else bold) on `r` and merges runs.
-    pub(crate) fn set_style(&mut self, r: Range<usize>, italic: bool, on: bool) {
+    /// Turns `style` on or off on `r` and merges runs.
+    pub(crate) fn set_style(&mut self, r: Range<usize>, style: Style, on: bool) {
         let (s, mut styles) = self.flatten();
-        for st in styles.get_mut(r).into_iter().flatten() {
-            *(if italic { &mut st.1 } else { &mut st.0 }) = on;
+        for f in styles.get_mut(r).into_iter().flatten() {
+            *style.of(f) = on;
         }
         *self = build(&s, &styles);
     }
 
     /// Plain text and one style per byte (`\n` gets a default style).
-    fn flatten(&self) -> (String, Vec<Style>) {
+    fn flatten(&self) -> (String, Vec<Flags>) {
         let mut styles = Vec::new();
         for (i, p) in self.paragraphs.iter().enumerate() {
             if i > 0 {
-                styles.push(Style::default());
+                styles.push(Flags::default());
             }
             for r in &p.runs {
                 styles.extend(std::iter::repeat_n((r.bold, r.italic), r.text.len()));
@@ -81,7 +95,7 @@ impl RichText {
 
 /// Rich text from plain text and per-byte styles: same-style bytes merged into runs, no
 /// empty runs, and no paragraphs at all for empty text.
-fn build(s: &str, styles: &[Style]) -> RichText {
+fn build(s: &str, styles: &[Flags]) -> RichText {
     if s.is_empty() {
         return RichText::default();
     }

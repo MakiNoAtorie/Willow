@@ -4,6 +4,7 @@ mod draw;
 mod edit;
 mod generate;
 mod history;
+mod input;
 mod layout;
 mod session;
 mod theme;
@@ -11,11 +12,9 @@ mod zoom;
 
 pub use draw::{Frame, Visible};
 pub use generate::generate;
+pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
-pub use session::{
-    Button, CaretView, Cursor, Editing, Input, Key, Modifiers, Motion, Point, Response, Session,
-    Viewport,
-};
+pub use session::{CaretView, DragPreview, Editing, ResizeTo, Session, Viewport};
 pub use theme::{
     CaretStyle, ChromeStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow,
     ShapeStyle, Theme, Transition, ZoomPillStyle, ZoomStyle,

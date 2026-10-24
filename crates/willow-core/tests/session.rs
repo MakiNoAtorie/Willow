@@ -216,7 +216,8 @@ fn press_drag_on_a_shape_moves_it_on_release_instead_of_selecting() {
         T,
     );
     // Previewed live; the document only changes on release.
-    assert_eq!(s.drag_preview(), Some((&id("a"), 30, -20)));
+    let p = s.drag_preview().map(|p| (p.id.clone(), p.x, p.y));
+    assert_eq!(p, Some((id("a"), 30, -20)));
     assert_eq!((s.document().shapes[0].x, s.document().shapes[0].y), (0, 0));
 
     s.handle(
