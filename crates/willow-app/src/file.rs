@@ -67,6 +67,7 @@ fn open_path(path: &Path, cx: &mut App) {
         loaded,
         bytes,
         path: Some(path),
+        recovery: None,
     };
     match active.filter(|w| w.read(cx).is_ok_and(Willow::blank)) {
         Some(w) => _ = w.update(cx, |w, window, cx| w.show(content, window, cx)),
@@ -120,6 +121,7 @@ impl Willow {
     fn write(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         match self.session.save(|b| write_beside(&path, b)) {
             Ok(()) => {
+                self.discard_recovery();
                 let path = fs::canonicalize(&path).unwrap_or(path);
                 self.set_path(Some(path), window);
                 cx.notify();
@@ -134,7 +136,7 @@ impl Willow {
 
 /// Writes a temporary file beside `path` and renames it over `path`, so a crash mid-save
 /// never leaves a half-written file.
-fn write_beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
     let tmp = path.with_file_name(format!(".{}.tmp", name.to_string_lossy()));
     let written = fs::File::create(&tmp)
@@ -177,6 +179,7 @@ impl Willow {
 pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
     let ask = w.update(cx, |this, window, cx| {
         if this.session.is_saved() {
+            this.discard_recovery();
             return None;
         }
         window.activate_window();
@@ -200,8 +203,10 @@ pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
                 Err(_) => true,
             }
         }
-        // Don't save: the one place to drop the window's recovery file (#25).
-        Ok(1) => true,
+        Ok(1) => {
+            _ = w.update(cx, |this, _, _| this.discard_recovery());
+            true
+        }
         _ => false,
     }
 }

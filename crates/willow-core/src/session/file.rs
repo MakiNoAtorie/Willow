@@ -1,9 +1,16 @@
-//! The session's file state: saved or unsaved, and the bytes last read or written.
+//! The session's file state: saved or unsaved, the bytes last read or written, and when a
+//! recovery file is due.
 
 use std::io;
+use std::time::Duration;
 
 use super::Session;
-use crate::{Loaded, Measure, Theme, format, load};
+use crate::{Document, Loaded, Measure, Theme, format, load};
+
+/// A recovery write is due this long after the last change…
+const RECOVERY_QUIET: Duration = Duration::from_secs(5);
+/// …or this long after the first unrecovered one, while changes keep coming.
+const RECOVERY_MAX: Duration = Duration::from_secs(30);
 
 impl Session {
     /// A session over a loaded file's document; `bytes` are what was read. A load that
@@ -38,6 +45,7 @@ impl Session {
     pub fn save(&mut self, write: impl FnOnce(&[u8]) -> io::Result<()>) -> io::Result<()> {
         let bytes = format::save(&self.doc).into_bytes();
         write(&bytes)?;
+        self.unrecovered = None;
         self.saved = Some(self.doc.clone());
         self.bytes = bytes;
         Ok(())
@@ -67,5 +75,34 @@ impl Session {
             }
             _ => self.saved = None,
         }
+    }
+
+    /// Notes a change to the document at `now`. One back to the saved document (undo) leaves
+    /// nothing to recover.
+    pub(super) fn changed(&mut self, now: Duration) {
+        if self.is_saved() {
+            self.unrecovered = None;
+            return;
+        }
+        let first = self.unrecovered.map_or(now, |(first, _)| first);
+        self.unrecovered = Some((first, now));
+    }
+
+    /// How long after `now` a recovery write is due; `None` while there is nothing to recover.
+    /// The app wakes then and calls `take_recovery`.
+    pub fn recovery_wake(&self, now: Duration) -> Option<Duration> {
+        let (first, last) = self.unrecovered?;
+        let due = (last + RECOVERY_QUIET).min(first + RECOVERY_MAX);
+        Some(due.saturating_sub(now))
+    }
+
+    /// The document to write to the recovery file, once due at `now`. Taking it counts as
+    /// written: the next one is due only after another change.
+    pub fn take_recovery(&mut self, now: Duration) -> Option<Document> {
+        if self.recovery_wake(now)? > Duration::ZERO {
+            return None;
+        }
+        self.unrecovered = None;
+        Some(self.doc.clone())
     }
 }

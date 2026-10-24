@@ -16,6 +16,7 @@ use willow_core::{
 };
 mod bench;
 mod file;
+mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
 mod titlebar_macos;
@@ -116,6 +117,8 @@ struct Willow {
     path: Option<PathBuf>,
     /// The file's modified time at the last focus check.
     mtime: Option<SystemTime>,
+    /// Crash recovery; off in `--bench`.
+    recovery: Option<recovery::Autosave>,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -123,6 +126,8 @@ pub(crate) struct Content {
     loaded: Loaded,
     bytes: Vec<u8>,
     path: Option<PathBuf>,
+    /// The recovery file it was reopened from, at launch.
+    recovery: Option<String>,
 }
 
 impl Content {
@@ -135,6 +140,7 @@ impl Content {
             loaded,
             bytes: Vec::new(),
             path: None,
+            recovery: None,
         }
     }
 
@@ -176,6 +182,7 @@ impl Willow {
 
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
         let r = self.session.handle(input, self.start.elapsed());
+        self.arm_recovery(cx);
         self.cursor = r.cursor;
         if r.redraw {
             cx.notify();
@@ -590,6 +597,7 @@ fn main() {
         let machine = arg("--machine").flatten();
         machine.expect("--bench needs --machine NAME").clone()
     });
+    let recover = bench.is_none() && arg("--generate").is_none();
     let doc = match arg("--generate") {
         _ if bench.is_some() => willow_core::generate(10_000, GENERATE_SEED),
         Some(n) => {
@@ -710,7 +718,12 @@ fn main() {
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
         cx.set_quit_mode(QuitMode::LastWindowClosed);
-        open_window(Content::new(doc), bench, cx);
+        // A plain launch applies the recovery files instead of opening a new document.
+        if recover {
+            recovery::launch(cx);
+        } else {
+            open_window(Content::new(doc), bench, cx);
+        }
         cx.activate(true);
     });
 }
@@ -731,7 +744,10 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
         |window, cx| {
             if let Some(w) = window.window_handle().downcast::<Willow>() {
                 window.on_window_should_close(cx, move |_, cx| {
-                    if w.read(cx).is_ok_and(|w| w.session.is_saved()) {
+                    if let Ok(w) = w.read(cx)
+                        && w.session.is_saved()
+                    {
+                        w.discard_recovery();
                         return true;
                     }
                     // Close only once the user has settled unsaved changes.
@@ -758,6 +774,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                         w.check_disk(cx);
                     }
                 });
+                let recovery = content.recovery.clone();
                 let (session, path) = content.session(window);
                 Willow {
                     session,
@@ -767,6 +784,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     start: Instant::now(),
                     wake: None,
                     _activation,
+                    recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
                     bench: bench.map(bench::Bench::new),
                     path,
                     mtime: None,

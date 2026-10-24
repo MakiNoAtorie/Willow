@@ -158,6 +158,8 @@ pub struct Session {
     saved: Option<Document>,
     /// The bytes last read or written.
     bytes: Vec<u8>,
+    /// First and last change not yet in a recovery file.
+    unrecovered: Option<(Duration, Duration)>,
 }
 
 impl Session {
@@ -166,6 +168,7 @@ impl Session {
         Session {
             saved: Some(doc.clone()),
             bytes: Vec::new(),
+            unrecovered: None,
             doc,
             history: History::default(),
             theme,
@@ -384,6 +387,15 @@ impl Session {
 
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
+        let revision = self.history.revision();
+        let r = self.dispatch(input, now);
+        if self.history.revision() != revision {
+            self.changed(now);
+        }
+        r
+    }
+
+    fn dispatch(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
         // Anything that may edit, undo or end the session commits the marked text first, so
         // no undo step ever holds it. Space keys come while the IME converts: leave it alone.

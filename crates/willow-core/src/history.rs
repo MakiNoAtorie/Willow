@@ -22,6 +22,8 @@ pub(crate) struct History {
     redo: Vec<Step>,
     /// A group in progress (an editing session): every change in it becomes one step.
     open: Option<Vec<Shape>>,
+    /// Counts changes to the document (including undo and redo); crash recovery watches it.
+    revision: u64,
 }
 
 impl History {
@@ -36,6 +38,7 @@ impl History {
         if *shape == before {
             return;
         }
+        self.revision += 1;
         self.redo.clear();
         match &mut self.open {
             Some(step) if step.iter().any(|s| &s.id == id) => {}
@@ -47,6 +50,7 @@ impl History {
     /// Replaces the whole document with `new` as one step, closing any open group first.
     pub fn replace(&mut self, doc: &mut Document, new: Document) {
         self.end(doc);
+        self.revision += 1;
         self.redo.clear();
         let old = std::mem::replace(doc, new);
         self.undo.push(Step::Document(Box::new(old)));
@@ -65,6 +69,10 @@ impl History {
                 self.undo.push(Step::Shapes(step));
             }
         }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn can_undo(&self) -> bool {
@@ -111,6 +119,7 @@ impl History {
                 Step::Document(d) => std::mem::swap(doc, d),
             }
             to.push(step);
+            self.revision += 1;
         }
         if was_open {
             self.begin();

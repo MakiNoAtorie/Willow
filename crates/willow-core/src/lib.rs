@@ -7,6 +7,7 @@ mod generate;
 mod history;
 mod input;
 mod layout;
+mod recovery;
 mod session;
 mod theme;
 mod zoom;
@@ -16,6 +17,7 @@ pub use format::{LoadError, Loaded, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
+pub use recovery::{LaunchPlan, RecoveryFile, Reopen, launch_plan};
 pub use session::{CaretView, DragPreview, Editing, ResizeTo, Session, Viewport};
 pub use theme::{
     CaretStyle, ChromeStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow,
