@@ -19,13 +19,17 @@ pub struct Loaded {
     pub unplaced: Unplaced,
 }
 
-/// Shapes and zones (indices into the loaded document) still to be placed.
+/// Shapes and zones (indices into the loaded document) still to be placed, and chain colors
+/// still to be settled.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Unplaced {
     /// Each shape, and the shape it goes beside and on which side of it; `None` goes below
     /// the lowest shape.
     shapes: Vec<(usize, Option<(usize, Side)>)>,
     zones: Vec<usize>,
+    /// Every stated color in chains that state conflicting ones; story order, which picks the
+    /// winner, needs heights.
+    colors: Vec<(usize, Color)>,
 }
 
 /// Why a file can't open. `Display` is the reason an alert names.
@@ -48,17 +52,20 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Reads a file's bytes. CRLF line endings are accepted as they are, not as a repair.
+/// Reads a file's bytes. CRLF line endings, a leading byte order mark and whitespace after
+/// the header are accepted as they are, not as repairs.
 /// Shapes stack in the order their lines appear. Links resolve after the whole file, so they
 /// may point forward. Lines it can't read are dropped; a line reusing a taken ID is dropped;
 /// a zone inside a nested zone is flattened into it; links to missing shapes or closing a
-/// cycle are dropped; a chain stating two colors keeps the first; shapes and zones without
-/// layout are listed in `unplaced`. All of these count as repairs.
+/// cycle are dropped; a chain stating two colors takes the first in the file, and the first in
+/// story order once `place` runs; shapes and zones without layout are listed in `unplaced`.
+/// All of these count as repairs.
 pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| LoadError::NotUtf8)?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines();
     let version = (lines.next())
-        .and_then(|l| l.strip_prefix("willow "))
+        .and_then(|l| l.trim_end().strip_prefix("willow "))
         .ok_or(LoadError::NotWillow)?;
     match version.parse::<u32>() {
         Ok(1) => {}
@@ -143,7 +150,8 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
         }
     }
     repaired |= !layout.is_empty();
-    let (dropped, anchor) = resolve(&mut doc, &stated);
+    let (dropped, anchor, colors) = resolve(&mut doc, &stated);
+    unplaced.colors = colors;
     // A shape goes beside the shape it names, or else beside a placed one naming it.
     let mut named_by = vec![None; doc.shapes.len()];
     for (k, a) in anchor.iter().enumerate() {
@@ -151,7 +159,7 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
             && missing[j]
             && !missing[k]
         {
-            named_by[j].get_or_insert((k, opposite(side)));
+            named_by[j].get_or_insert((k, side.opposite()));
         }
     }
     unplaced.shapes = (0..doc.shapes.len())
@@ -166,23 +174,68 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     })
 }
 
-fn opposite(s: Side) -> Side {
-    match s {
-        Side::Top => Side::Bottom,
-        Side::Bottom => Side::Top,
-        Side::Left => Side::Right,
-        Side::Right => Side::Left,
-    }
-}
-
-/// Places what `unplaced` lists. A shape goes one creation gap from its anchor on its side,
-/// or below the lowest shape (the one whose top is lowest) when it has none; a zone wraps its
-/// members with padding. `height` measures a shape; only anchors and the lowest are measured.
+/// Places what `unplaced` lists, then paints each chain that stated conflicting colors the
+/// first one in story order. `height` measures a shape.
 pub(crate) fn place(
     doc: &mut Document,
     unplaced: &Unplaced,
     theme: &Theme,
     height: impl Fn(&Shape) -> f32,
+) {
+    position(doc, unplaced, theme, &height);
+    recolor(doc, &unplaced.colors, &height);
+}
+
+/// Paints the chain of each shape in `stated` the color stated first in story order.
+fn recolor(doc: &mut Document, stated: &[(usize, Color)], height: &impl Fn(&Shape) -> f32) {
+    if stated.is_empty() {
+        return;
+    }
+    let colors: HashMap<usize, Color> = stated.iter().copied().collect();
+    let (shapes, next) = (&doc.shapes, neighbors(doc));
+    let center = |i: usize| Point {
+        x: shapes[i].x as f32 + shapes[i].width as f32 / 2.0,
+        y: shapes[i].y as f32 + height(&shapes[i]) / 2.0,
+    };
+    let n = shapes.len();
+    let (mut seen, mut chain, mut from) = (vec![false; n], vec![usize::MAX; n], vec![None; n]);
+    let mut paint = Vec::new();
+    for &(start, _) in stated {
+        if seen[start] {
+            continue;
+        }
+        // The chain's topmost shape starts the walk.
+        let (mut stack, mut top) = (vec![start], start);
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            if key(&shapes[i]) < key(&shapes[top]) {
+                top = i;
+            }
+            for &j in &next[i] {
+                if !std::mem::replace(&mut seen[j], true) {
+                    stack.push(j);
+                }
+            }
+        }
+        let walk = walk(top, 0, &next, shapes, &center, &mut chain, &mut from);
+        let color = walk.iter().find_map(|i| colors.get(i).copied());
+        paint.push((walk, color.unwrap_or_default()));
+    }
+    for (walk, color) in paint {
+        for i in walk {
+            doc.shapes[i].color = color;
+        }
+    }
+}
+
+/// A shape goes one creation gap from its anchor on its side, or below the lowest shape (the
+/// one whose bottom edge is lowest) when it has none; a zone wraps its members with padding.
+/// Every shape is measured only when something goes below the lowest.
+fn position(
+    doc: &mut Document,
+    unplaced: &Unplaced,
+    theme: &Theme,
+    height: &impl Fn(&Shape) -> f32,
 ) {
     let (gap, pad) = (theme.creation_gap, theme.zone.padding);
     let shapes = &mut doc.shapes;
@@ -191,16 +244,17 @@ pub(crate) fn place(
     for &(i, a) in &unplaced.shapes {
         (placed[i], anchor[i]) = (false, a);
     }
-    let low = |s: &Shape| (s.y, s.x);
+    // The lowest bottom edge and its shape's x. Measuring every shape for it is paid only
+    // when something goes below the lowest.
+    let needs_lowest = !unplaced.zones.is_empty() || unplaced.shapes.iter().any(|s| s.1.is_none());
+    let bottom = |s: &Shape| (s.y as f32 + height(s), s.x);
     let mut lowest = (0..shapes.len())
-        .filter(|&i| placed[i])
-        .max_by_key(|&i| low(&shapes[i]));
+        .filter(|&i| needs_lowest && placed[i])
+        .map(|i| bottom(&shapes[i]))
+        .max_by(|a, b| a.partial_cmp(b).expect("finite heights"));
     // Below the lowest shape: its x, one gap under its bottom.
-    let below = |shapes: &[Shape], lowest: Option<usize>| match lowest {
-        Some(l) => {
-            let l = &shapes[l];
-            (l.x, (l.y as f32 + height(l) + gap).round() as i32)
-        }
+    let below = |lowest: Option<(f32, i32)>| match lowest {
+        Some((b, x)) => (x, (b + gap).round() as i32),
         None => (0, 0),
     };
     for &(start, _) in &unplaced.shapes {
@@ -224,11 +278,14 @@ pub(crate) fn place(
                         Side::Left => (a.x - s.width as i32 - gap as i32, a.y),
                     }
                 }
-                None => below(shapes, lowest),
+                None => below(lowest),
             };
             (shapes[i].x, shapes[i].y, placed[i]) = (x, y, true);
-            if lowest.is_none_or(|l| low(&shapes[i]) > low(&shapes[l])) {
-                lowest = Some(i);
+            if needs_lowest {
+                let b = bottom(&shapes[i]);
+                if lowest.is_none_or(|l| b > l) {
+                    lowest = Some(b);
+                }
             }
         }
     }
@@ -263,7 +320,7 @@ pub(crate) fn place(
             // ponytail: an empty zone gets a small box below the lowest shape; a later
             // spacing pass may move it.
             ((zone.x, zone.y), zone.width, zone.height) = (
-                below(shapes, lowest),
+                below(lowest),
                 DEFAULT_WIDTH + 2 * pad as u32,
                 2 * pad as u32,
             );
@@ -277,13 +334,14 @@ pub(crate) fn place(
 }
 
 /// Links each shape to the one it names and paints every chain the first color one of its
-/// shapes states. Whether anything had to be dropped, and for each shape the shape its kept
-/// link names and the side of it the shape sits on.
+/// shapes states in the file. Whether anything had to be dropped, for each shape the shape
+/// its kept link names and the side of it the shape sits on, and every color stated in a
+/// chain stating conflicting ones (for `place` to settle in story order).
 #[allow(clippy::type_complexity)]
 fn resolve(
     doc: &mut Document,
     stated: &[(Option<(&str, Side)>, Option<Color>)],
-) -> (bool, Vec<Option<(usize, Side)>>) {
+) -> (bool, Vec<Option<(usize, Side)>>, Vec<(usize, Color)>) {
     let index: HashMap<&str, usize> = (doc.shapes.iter().enumerate())
         .map(|(i, s)| (s.id.0.as_str(), i))
         .collect();
@@ -312,20 +370,25 @@ fn resolve(
         let link = Link(doc.shapes[j].id.clone(), doc.shapes[i].id.clone());
         doc.links.push(link);
     }
-    let mut color: Vec<Option<Color>> = vec![None; doc.shapes.len()];
+    // Each chain's first stated color, and whether it states another.
+    let mut color: Vec<Option<(Color, bool)>> = vec![None; doc.shapes.len()];
     for (i, &(_, c)) in stated.iter().enumerate() {
         let Some(c) = c else { continue };
         let r = find(&mut root, i);
-        match color[r] {
-            None => color[r] = Some(c),
-            Some(first) => repaired |= first != c,
+        match &mut color[r] {
+            None => color[r] = Some((c, false)),
+            Some((first, conflict)) => *conflict |= *first != c,
         }
     }
-    for i in 0..doc.shapes.len() {
+    let mut conflicts = Vec::new();
+    for (i, (shape, &(_, c))) in doc.shapes.iter_mut().zip(stated).enumerate() {
         let r = find(&mut root, i);
-        doc.shapes[i].color = color[r].unwrap_or_default();
+        shape.color = color[r].map_or_else(Color::default, |c| c.0);
+        if let (Some((_, true)), Some(c)) = (color[r], c) {
+            conflicts.push((i, c));
+        }
     }
-    (repaired, anchor)
+    (repaired || !conflicts.is_empty(), anchor, conflicts)
 }
 
 fn is_id(id: &str) -> bool {
@@ -483,13 +546,7 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         x: shapes[i].x as f32 + shapes[i].width as f32 / 2.0,
         y: shapes[i].y as f32 + heights.get(i).copied().unwrap_or(0.0) / 2.0,
     };
-    let mut next = vec![Vec::new(); shapes.len()];
-    for Link(a, b) in &doc.links {
-        if let (Some(&a), Some(&b)) = (index.get(a), index.get(b)) {
-            next[a].push(b);
-            next[b].push(a);
-        }
-    }
+    let next = neighbors(doc);
     let mut order: Vec<usize> = (0..shapes.len()).collect();
     order.sort_by_key(|&i| key(&shapes[i]));
     let (mut chain, mut from) = (vec![usize::MAX; shapes.len()], vec![None; shapes.len()]);
@@ -498,22 +555,15 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         if chain[top] != usize::MAX {
             continue;
         }
-        let (c, mut walk, mut stack) = (walks.len(), Vec::new(), vec![(top, None)]);
-        while let Some((i, f)) = stack.pop() {
-            if chain[i] != usize::MAX {
-                continue;
-            }
-            (chain[i], from[i]) = (c, f);
-            walk.push(i);
-            let c = center(i);
-            let mut ns: Vec<usize> = next[i]
-                .iter()
-                .copied()
-                .filter(|&n| chain[n] == usize::MAX)
-                .collect();
-            ns.sort_by_key(|&n| (rank(side(c, center(n))), key(&shapes[n])));
-            stack.extend(ns.into_iter().rev().map(|n| (n, Some(i))));
-        }
+        let walk = walk(
+            top,
+            walks.len(),
+            &next,
+            shapes,
+            &center,
+            &mut chain,
+            &mut from,
+        );
         walks.push(walk);
     }
 
@@ -589,6 +639,50 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         );
     }
     out
+}
+
+/// Each shape's linked shapes (indices into `doc.shapes`).
+fn neighbors(doc: &Document) -> Vec<Vec<usize>> {
+    let index: HashMap<&ShapeId, usize> = (doc.shapes.iter().enumerate())
+        .map(|(i, s)| (&s.id, i))
+        .collect();
+    let mut next = vec![Vec::new(); doc.shapes.len()];
+    for Link(a, b) in &doc.links {
+        if let (Some(&a), Some(&b)) = (index.get(a), index.get(b)) {
+            next[a].push(b);
+            next[b].push(a);
+        }
+    }
+    next
+}
+
+/// Walks `top`'s chain in story order: depth-first, neighbors below, right, left, then above.
+/// Marks each shape reached in `chain` (as chain `c`; unvisited is `usize::MAX`) and the shape
+/// it was reached from in `from`.
+fn walk(
+    top: usize,
+    c: usize,
+    next: &[Vec<usize>],
+    shapes: &[Shape],
+    center: &dyn Fn(usize) -> Point,
+    chain: &mut [usize],
+    from: &mut [Option<usize>],
+) -> Vec<usize> {
+    let (mut walk, mut stack) = (Vec::new(), vec![(top, None)]);
+    while let Some((i, f)) = stack.pop() {
+        if chain[i] != usize::MAX {
+            continue;
+        }
+        (chain[i], from[i]) = (c, f);
+        walk.push(i);
+        let at = center(i);
+        let mut ns: Vec<usize> = (next[i].iter().copied())
+            .filter(|&n| chain[n] == usize::MAX)
+            .collect();
+        ns.sort_by_key(|&n| (rank(side(at, center(n))), key(&shapes[n])));
+        stack.extend(ns.into_iter().rev().map(|n| (n, Some(i))));
+    }
+    walk
 }
 
 /// Neighbors are visited below, right, left, then above.

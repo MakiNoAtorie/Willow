@@ -245,12 +245,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let t = Instant::now();
         let bytes = std::fs::read(&path).expect("bench read");
         let loaded = willow_core::load(&bytes).expect("bench load");
-        let content = crate::Content {
-            loaded,
-            bytes,
-            path: None,
-            recovery: None,
-        };
+        let content = crate::Content::new(loaded, bytes, None, None);
         let vp = w.session.viewport();
         w.show(content, window, cx);
         let load = t.elapsed().as_secs_f64() * 1e3;

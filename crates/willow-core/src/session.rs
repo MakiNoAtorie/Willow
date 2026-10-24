@@ -164,6 +164,8 @@ pub struct Session {
     bytes: Vec<u8>,
     /// First and last change not yet in a recovery file.
     unrecovered: Option<(Duration, Duration)>,
+    /// A recovery write was taken since the last save.
+    recovery_written: bool,
 }
 
 impl Session {
@@ -173,6 +175,7 @@ impl Session {
             saved: Some(doc.clone()),
             bytes: Vec::new(),
             unrecovered: None,
+            recovery_written: false,
             doc,
             history: History::default(),
             theme,

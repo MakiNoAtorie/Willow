@@ -19,7 +19,7 @@ pub(crate) fn name(path: Option<&Path>) -> String {
 }
 
 pub(crate) fn new_file(cx: &mut App) {
-    open_window(Content::new(Document::new()), None, cx);
+    open_window(Content::untitled(Document::new()), None, cx);
 }
 
 pub(crate) fn open_file(cx: &mut App) {
@@ -32,18 +32,19 @@ pub(crate) fn open_file(cx: &mut App) {
     .detach();
 }
 
+/// The window other than `except` showing the canonical `path`.
+fn showing(path: &Path, except: Option<AnyWindowHandle>, cx: &App) -> Option<WindowHandle<Willow>> {
+    (cx.windows().into_iter())
+        .filter(|w| Some(*w) != except)
+        .filter_map(|w| w.downcast::<Willow>())
+        .find(|w| w.read(cx).is_ok_and(|w| w.path.as_deref() == Some(path)))
+}
+
 /// Focuses the window already showing `path`; else reads it into the active window if that
 /// is blank and untouched, or into a new window. Alerts when the file can't be opened.
 fn open_path(path: &Path, cx: &mut App) {
     let path = fs::canonicalize(path).unwrap_or_else(|_| path.into());
-    let windows = cx
-        .windows()
-        .into_iter()
-        .filter_map(|w| w.downcast::<Willow>());
-    let showing = |w: &WindowHandle<Willow>, cx: &App| {
-        w.read(cx).is_ok_and(|w| w.path.as_ref() == Some(&path))
-    };
-    if let Some(open) = windows.clone().find(|w| showing(w, cx)) {
+    if let Some(open) = showing(&path, None, cx) {
         open.update(cx, |_, window, _| window.activate_window())
             .ok();
         return;
@@ -63,12 +64,7 @@ fn open_path(path: &Path, cx: &mut App) {
             return;
         }
     };
-    let content = Content {
-        loaded,
-        bytes,
-        path: Some(path),
-        recovery: None,
-    };
+    let content = Content::new(loaded, bytes, Some(path), None);
     match active.filter(|w| w.read(cx).is_ok_and(Willow::blank)) {
         Some(w) => _ = w.update(cx, |w, window, cx| w.show(content, window, cx)),
         None => open_window(content, None, cx),
@@ -111,6 +107,13 @@ impl Willow {
                 path.set_extension("willow");
             }
             this.update_in(cx, |w, window, cx| {
+                // Two windows on one file would overwrite each other.
+                let canon = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                if showing(&canon, Some(window.window_handle()), cx).is_some() {
+                    let message = format!("“{}” could not be saved.", name(Some(&path)));
+                    alert(window, &message, "It is open in another window.", cx);
+                    return false;
+                }
                 w.write(path, window, cx);
                 w.session.is_saved()
             })
@@ -121,7 +124,7 @@ impl Willow {
     fn write(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         match self.session.save(|b| write_beside(&path, b)) {
             Ok(()) => {
-                self.discard_recovery();
+                self.discard_recovery(cx).detach();
                 let path = fs::canonicalize(&path).unwrap_or(path);
                 self.set_path(Some(path), window);
                 cx.notify();
@@ -129,6 +132,8 @@ impl Willow {
             Err(e) => {
                 let message = format!("“{}” could not be saved.", name(Some(&path)));
                 alert(window, &message, &e.to_string(), cx);
+                // Committing IME text may have made a recovery due.
+                self.arm_recovery(cx);
             }
         }
     }
@@ -169,17 +174,18 @@ impl Willow {
             Err(_) => return,
         };
         self.session.disk_changed(bytes.as_deref());
+        self.arm_recovery(cx);
         cx.notify();
     }
 }
 
 /// Asks Save / Don't save / Cancel when the window has unsaved changes. Resolves to true when
 /// the caller may discard the window (saved, or Don't save), false when the user cancelled
-/// (including cancelling the save panel).
+/// (including cancelling the save panel). The recovery file stays: the caller discards it
+/// once the close or quit goes ahead, so a later Cancel keeps it.
 pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
     let ask = w.update(cx, |this, window, cx| {
         if this.session.is_saved() {
-            this.discard_recovery();
             return None;
         }
         window.activate_window();
@@ -203,15 +209,25 @@ pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
                 Err(_) => true,
             }
         }
-        Ok(1) => {
-            _ = w.update(cx, |this, _, _| this.discard_recovery());
-            true
-        }
+        Ok(1) => true,
         _ => false,
     }
 }
 
-/// Quits after settling each window in turn; Cancel anywhere leaves the rest open.
+/// Settles `w` and, unless cancelled, deletes its recovery file and closes it.
+pub(crate) async fn close(w: WindowHandle<Willow>, cx: &mut AsyncApp) {
+    if !settle(w, cx).await {
+        return;
+    }
+    // Closing the last window quits, so the deletion finishes first.
+    if let Ok(gone) = w.update(cx, |w, _, cx| w.discard_recovery(cx)) {
+        gone.await;
+    }
+    w.update(cx, |_, window, _| window.remove_window()).ok();
+}
+
+/// Quits after settling each window in turn; Cancel anywhere leaves every window open with
+/// its recovery file. Recovery files are deleted only once the quit goes ahead.
 pub(crate) fn quit(cx: &mut App) {
     let windows: Vec<_> = cx
         .windows()
@@ -219,9 +235,14 @@ pub(crate) fn quit(cx: &mut App) {
         .filter_map(|w| w.downcast::<Willow>())
         .collect();
     cx.spawn(async move |cx| {
-        for w in windows {
+        for &w in &windows {
             if !settle(w, cx).await {
                 return;
+            }
+        }
+        for w in windows {
+            if let Ok(gone) = w.update(cx, |w, _, cx| w.discard_recovery(cx)) {
+                gone.await;
             }
         }
         cx.update(|cx| cx.quit());

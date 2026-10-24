@@ -39,6 +39,14 @@ fn crlf_loads_without_a_repair_and_saves_as_lf() {
 }
 
 #[test]
+fn a_byte_order_mark_and_spaces_after_the_header_load_without_a_repair() {
+    let text = "\u{feff}willow 1 \t\n\na: \"Line\"\n\n@layout a 5,-5 w210\n";
+    let loaded = load(text.as_bytes()).unwrap();
+    assert!(!loaded.repaired);
+    assert_eq!(loaded.document.shapes[0].text.plain(), "Line");
+}
+
+#[test]
 fn files_without_the_header_from_a_newer_willow_or_not_utf8_do_not_open() {
     let err = |name| load(&golden(name)).unwrap_err();
     assert_eq!(err("no-header.willow"), LoadError::NotWillow);

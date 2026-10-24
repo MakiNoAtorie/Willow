@@ -3,6 +3,21 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use crate::Document;
+
+/// What to do with a window's recovery file, once due (`Session::take_recovery`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Recovery {
+    /// Write this document to it (without any IME marked text), with its shapes' drawn
+    /// heights for `save`.
+    Write {
+        document: Document,
+        heights: Vec<f32>,
+    },
+    /// Delete it: the document went back to its saved state.
+    Delete,
+}
+
 /// A recovery file found at launch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecoveryFile {
@@ -11,9 +26,9 @@ pub struct RecoveryFile {
     /// The document's file; `None` for an untitled document.
     pub path: Option<PathBuf>,
     /// When the recovery file was written.
-    pub recovered: SystemTime,
+    pub recovered_at: SystemTime,
     /// When the document's file was last modified; `None` when it is missing.
-    pub document: Option<SystemTime>,
+    pub document_modified: Option<SystemTime>,
 }
 
 /// A recovery to open, marked unsaved, keeping its recovery file.
@@ -38,8 +53,8 @@ pub struct LaunchPlan {
 pub fn launch_plan(files: Vec<RecoveryFile>) -> LaunchPlan {
     let (mut open, mut delete) = (Vec::new(), Vec::new());
     for f in files {
-        match (f.path, f.document) {
-            (Some(_), Some(t)) if f.recovered < t => delete.push(f.id),
+        match (f.path, f.document_modified) {
+            (Some(_), Some(t)) if f.recovered_at < t => delete.push(f.id),
             (Some(path), Some(_)) => open.push(Reopen {
                 id: f.id,
                 path: Some(path),

@@ -181,6 +181,9 @@ pub struct MenuStyle {
 /// The window's title bar, in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChromeStyle {
+    /// A new window's size.
+    pub window_width: f32,
+    pub window_height: f32,
     /// Window title text.
     pub title: Rgba,
     /// Windows title-bar button hover fill.
@@ -188,6 +191,8 @@ pub struct ChromeStyle {
     /// macOS: the transparent bar over the canvas, and its title size.
     pub mac_height: f32,
     pub mac_title_size: f32,
+    /// macOS: the traffic lights' offset from the window's top-left corner.
+    pub mac_traffic_light: f32,
     /// Windows: the custom bar, its title size, the min/max/close buttons and their icon
     /// glyph size, and the menu button.
     pub win_height: f32,
@@ -377,10 +382,13 @@ pub const PAPER: Theme = Theme {
         hex(0x9479b8),
     ],
     chrome: ChromeStyle {
+        window_width: 1180.0,
+        window_height: 740.0,
         title: rgba(59, 52, 44, 0.55),
         button_hover: rgba(70, 50, 20, 0.07),
         mac_height: 38.0,
         mac_title_size: 13.0,
+        mac_traffic_light: 12.0,
         win_height: 34.0,
         win_title_size: 12.5,
         win_button_width: 46.0,

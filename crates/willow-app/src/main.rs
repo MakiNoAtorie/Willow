@@ -133,18 +133,29 @@ pub(crate) struct Content {
 }
 
 impl Content {
-    fn new(document: Document) -> Self {
+    /// `loaded` as read from `bytes` at `path`, or reopened from recovery file `recovery`.
+    fn new(
+        loaded: Loaded,
+        bytes: Vec<u8>,
+        path: Option<PathBuf>,
+        recovery: Option<String>,
+    ) -> Self {
+        Content {
+            loaded,
+            bytes,
+            path,
+            recovery,
+        }
+    }
+
+    /// A new, untitled `document`.
+    fn untitled(document: Document) -> Self {
         let loaded = Loaded {
             document,
             repaired: false,
             unplaced: Default::default(),
         };
-        Content {
-            loaded,
-            bytes: Vec::new(),
-            path: None,
-            recovery: None,
-        }
+        Content::new(loaded, Vec::new(), None, None)
     }
 
     fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
@@ -796,7 +807,7 @@ fn main() {
         if recover {
             recovery::launch(cx);
         } else {
-            open_window(Content::new(doc), bench, cx);
+            open_window(Content::untitled(doc), bench, cx);
         }
         cx.activate(true);
     });
@@ -804,33 +815,27 @@ fn main() {
 
 /// Opens a window showing `content`; `bench` runs the scripted bench in it.
 fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
-    let bounds = Bounds::centered(None, size(px(1180.), px(740.)), cx);
+    let c = &PAPER.chrome;
+    let bounds = Bounds::centered(None, size(px(c.window_width), px(c.window_height)), cx);
     cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some(file::name(content.path.as_deref()).into()),
                 appears_transparent: true,
-                traffic_light_position: Some(point(px(12.), px(12.))),
+                traffic_light_position: Some(point(
+                    px(c.mac_traffic_light),
+                    px(c.mac_traffic_light),
+                )),
             }),
             ..Default::default()
         },
         |window, cx| {
             if let Some(w) = window.window_handle().downcast::<Willow>() {
+                // Close only once the user has settled unsaved changes and the recovery
+                // file is gone.
                 window.on_window_should_close(cx, move |_, cx| {
-                    if let Ok(w) = w.read(cx)
-                        && w.session.is_saved()
-                    {
-                        w.discard_recovery();
-                        return true;
-                    }
-                    // Close only once the user has settled unsaved changes.
-                    cx.spawn(async move |cx| {
-                        if file::settle(w, cx).await {
-                            w.update(cx, |_, window, _| window.remove_window()).ok();
-                        }
-                    })
-                    .detach();
+                    cx.spawn(async move |cx| file::close(w, cx).await).detach();
                     false
                 });
             }

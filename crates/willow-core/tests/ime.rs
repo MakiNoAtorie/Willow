@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use common::{doc_with, session_of};
-use willow_core::{Button, Input, Modifiers, Point, Session};
+use willow_core::{Button, Input, Modifiers, Point, Recovery, Session};
 
 const T: Duration = Duration::ZERO;
 /// Inside the centered default shape.
@@ -167,4 +167,31 @@ fn composed_text_takes_the_pending_style() {
     commit(&mut s, "漢");
     let runs = &s.document().shapes[0].text.paragraphs[0].runs;
     assert_eq!((runs[1].text.as_str(), runs[1].bold), ("漢", true));
+}
+
+#[test]
+fn save_commits_the_marked_text_first() {
+    let mut s = editing("ab");
+    mark(&mut s, "k", None);
+    let mut written = String::new();
+    s.save(|b| {
+        written = String::from_utf8(b.to_vec()).unwrap();
+        Ok(())
+    })
+    .unwrap();
+    assert!(written.contains("a: \"abk\""), "{written}");
+    assert_eq!(state(&s), (None, 3, 3));
+    assert!(s.is_saved());
+}
+
+#[test]
+fn a_recovery_leaves_out_the_marked_text_and_keeps_composing() {
+    let mut s = editing("ab");
+    commit(&mut s, "x");
+    mark(&mut s, "k", None);
+    let Some(Recovery::Write { document, .. }) = s.take_recovery(Duration::from_secs(5)) else {
+        panic!("a write due");
+    };
+    assert_eq!(document.shapes[0].text.plain(), "abx");
+    assert_eq!(state(&s), (Some(3..4), 4, 4));
 }

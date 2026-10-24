@@ -17,6 +17,18 @@ pub enum Side {
     Right,
 }
 
+impl Side {
+    /// The side facing this one across a link.
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Top => Side::Bottom,
+            Side::Bottom => Side::Top,
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+        }
+    }
+}
+
 /// The side of the shape centered at `from` that faces the shape centered at `to`: vertical
 /// when |dy| ≥ |dx| (so an exact diagonal is vertical), else horizontal. Drawing, the saved
 /// text and story order all use this one rule.

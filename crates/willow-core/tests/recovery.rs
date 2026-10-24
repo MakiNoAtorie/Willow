@@ -5,7 +5,8 @@ use std::time::{Duration, SystemTime};
 
 use common::{doc_with, session_of};
 use willow_core::{
-    Button, Input, LaunchPlan, Modifiers, Point, RecoveryFile, Reopen, Session, launch_plan,
+    Button, Input, LaunchPlan, Modifiers, PAPER, Point, Recovery, RecoveryFile, Reopen, Session,
+    launch_plan, load,
 };
 
 fn sec(n: u64) -> Duration {
@@ -41,7 +42,9 @@ fn a_recovery_is_due_five_seconds_after_the_last_change() {
     typ(&mut s, "y", sec(12));
     assert_eq!(s.recovery_wake(sec(13)), Some(sec(4)));
 
-    let doc = s.take_recovery(sec(17)).expect("due at 17 s");
+    let Some(Recovery::Write { document: doc, .. }) = s.take_recovery(sec(17)) else {
+        panic!("a write due at 17 s");
+    };
     assert_eq!(doc.shapes[0].text.plain(), "abxy");
     // Written: nothing more until the next change.
     assert_eq!(s.recovery_wake(sec(17)), None);
@@ -87,6 +90,34 @@ fn nothing_is_due_while_saved() {
 }
 
 #[test]
+fn undoing_back_to_saved_after_a_recovery_write_deletes_it() {
+    let mut s = session();
+    typ(&mut s, "x", sec(10));
+    assert!(matches!(
+        s.take_recovery(sec(15)),
+        Some(Recovery::Write { .. })
+    ));
+    s.handle(Input::Undo, sec(20));
+    assert!(s.is_saved());
+    assert_eq!(s.recovery_wake(sec(20)), Some(sec(5)));
+    assert_eq!(s.take_recovery(sec(25)), Some(Recovery::Delete));
+    assert_eq!(s.recovery_wake(sec(25)), None);
+}
+
+#[test]
+fn a_file_deleted_on_disk_makes_a_recovery_due() {
+    let bytes = b"willow 1\n\na: \"A\"\n\n@layout a 0,0 w210\n";
+    let loaded = load(bytes).unwrap();
+    let mut s = Session::open(loaded, bytes.to_vec(), &PAPER, Box::new(common::Fake));
+    s.disk_changed(None);
+    assert_eq!(s.recovery_wake(sec(0)), Some(sec(5)));
+    assert!(matches!(
+        s.take_recovery(sec(5)),
+        Some(Recovery::Write { .. })
+    ));
+}
+
+#[test]
 fn a_failed_save_leaves_the_recovery_due() {
     let mut s = session();
     typ(&mut s, "x", sec(10));
@@ -103,8 +134,8 @@ fn entry(id: &str, path: Option<&str>, recovered: u64, document: Option<u64>) ->
     RecoveryFile {
         id: id.into(),
         path: path.map(PathBuf::from),
-        recovered: at(recovered),
-        document: document.map(at),
+        recovered_at: at(recovered),
+        document_modified: document.map(at),
     }
 }
 
