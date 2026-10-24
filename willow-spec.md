@@ -278,6 +278,7 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 - Ctrl/Cmd+Shift+C opens the color picker, navigable by keyboard.
 - **Tab** shows the directional picker over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. Inserting and pushing work exactly as in Phase 4.
 - Ctrl/Cmd+Shift+N creates an unlinked shape.
+- **Select chain** (Ctrl/Cmd+L): selects every shape in the chains of the selected shapes. With nothing selected it does nothing. It is also an item in the shape menu and the multi-selection menu (shortcut shown). Not an undo step, like any selection change.
 
 ## Phase 6 — Zones
 
