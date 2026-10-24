@@ -1,0 +1,12 @@
+[package]
+name = "spike-gpui"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# GPUI pinned to zed-industries/zed main @ 79fe6a6 (committed 2026-10-23, picked 2026-10-24).
+# runtime_shaders: this Mac has no Metal Toolchain (xcodebuild -downloadComponent MetalToolchain); only affects startup.
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "79fe6a645f68f8c9230578f154bf99852d9f716f", features = ["profiler"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "79fe6a645f68f8c9230578f154bf99852d9f716f", features = ["font-kit", "runtime_shaders"] }
+unicode-segmentation = "1.10"
