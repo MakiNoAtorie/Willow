@@ -8,9 +8,9 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Windows and macOS from day one; both must build and feel equally good. Bundle one font so text renders identically on both; Phase 1 picks it, and Phase 0 checks emoji fallback on Windows.
 - Light theme only.
 - Memory and CPU efficiency matter: idle should be near-zero CPU, and large canvases must stay smooth. Animations must stop their redraw loop when they finish.
-- Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001). Shape height comes from text layout, which needs GPUI's text system, so the core takes a text-measuring function from the UI layer instead of measuring text itself (ADR 0002).
+- Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001). Shape height comes from text layout, which needs GPUI's text system, so the core takes a text-measuring function from the UI layer instead of measuring text itself (ADR 0003).
 - Tests that need large or many input files build them with file generators rather than hand-written fixtures. Parser edge cases (escaping, invalid files) may use small golden files. Any benchmark or tool output should be CSV.
-- Performance targets, measured on a generated 10,000-shape document: p95 frame time ≤ 8 ms while panning and zooming, draw ≤ 8 ms per keystroke while typing in a shape with the next vsync never missed (keystroke-to-paint is bounded by the display refresh, not draw cost; ADR 0002), idle CPU near zero within 1 s of the last input or animation. Reference machines: a MacBook Air M4, which must meet the targets, and a Windows desktop (Ryzen 5 9600X, RTX 5060 Ti), checked for correctness and feel. Optionally repeat the Windows run once on the 9600X's integrated graphics as a stand-in for a weak laptop.
+- Performance targets, measured on a generated 10,000-shape document: p95 frame time ≤ 8 ms while panning and zooming, draw ≤ 8 ms per keystroke while typing in a shape with the next vsync never missed (keystroke-to-paint is bounded by the display refresh, not draw cost; ADR 0003), idle CPU near zero within 1 s of the last input or animation. Reference machines: a MacBook Air M4, which must meet the targets, and a Windows desktop (Ryzen 5 9600X, RTX 5060 Ti), checked for correctness and feel. Optionally repeat the Windows run once on the 9600X's integrated graphics as a stand-in for a weak laptop.
 
 ## Look and feel (fixed decisions)
 
@@ -70,7 +70,7 @@ Goal: nail exactly how Willow looks before building any real UI. No Rust in this
 - Where motion matters (shape creation, insert-and-push, color change, selection), HTML mockups can animate to show timing and easing.
 - Everything shown must be achievable in GPUI; mockups are reference only and never ship.
 - Present options where there's a real choice, and refine based on the owner's feedback until approved.
-- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, plus a visual-language document with the concrete values (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades). Text is not drawn below about 7 px on screen, so text must have fully faded by the zoom where it would drop under that size (ADR 0002).
+- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, plus a visual-language document with the concrete values (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades). Text is not drawn below about 7 px on screen, so text must have fully faded by the zoom where it would drop under that size (ADR 0003).
 
 Done when: the owner has approved the mockups and the visual-language document exists.
 
@@ -94,7 +94,7 @@ Goal: an infinite canvas where shapes can be created, moved and written in, insi
   - Mouse-down on the shape that **is** being edited: dragging selects text. To move it, press Esc first (it stays selected) and then drag.
 - F2, or typing any character except Space, starts editing the selected shape with the caret at the end of its text (typing adds to the existing text).
 - Enter or Esc leaves editing; the shape stays selected.
-- Text is justified. The shape grows vertically to fit text; width stays fixed. A single word wider than the shape is broken across lines rather than widening the shape.
+- Text is justified. The shape grows vertically to fit text; width stays fixed. A single word wider than the shape is broken across lines rather than widening the shape. Line breaking follows UAX #14, so CJK text breaks between characters and is justified too, with kinsoku (no line starts with closing punctuation such as `。`) (ADR 0003).
 - Width: dragging either side edge resizes both sides symmetrically around the center. The cursor changes to a resize arrow near side edges.
 - Height: dragging the bottom edge extends the shape downward. Only the bottom edge resizes vertically.
 - A shape can never be smaller than its text.

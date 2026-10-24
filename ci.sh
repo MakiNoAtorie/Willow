@@ -11,9 +11,12 @@ if [ -f Cargo.toml ]; then
 else
   echo "No Cargo workspace yet: Rust checks skipped."
 fi
-# ADR 0001: the core crate stays GPUI-free.
-if git grep -q -i "gpui" -- "crates/*core*/Cargo.toml"; then
-  echo "GPUI dependency in the core crate"
-  exit 1
-fi
+# ADR 0001: the core crate stays GPUI-free, directly or through any dependency.
+for m in crates/*core*/Cargo.toml; do
+  [ -f "$m" ] || continue
+  if cargo tree --manifest-path "$m" --prefix none | grep -qi '^gpui'; then
+    echo "GPUI dependency in the core crate ($m)"
+    exit 1
+  fi
+done
 echo "CI checks passed."
