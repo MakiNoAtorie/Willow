@@ -82,13 +82,17 @@ Goal: an infinite canvas where shapes can be created, moved and written in, insi
 - Infinite canvas: pan and zoom.
   - Plain left-drag on empty space pans.
   - Middle-drag always pans.
+  - Holding Space turns left-drag into a pan anywhere, over shapes too.
   - Mouse wheel and two-finger trackpad scroll pan. Shift+wheel pans horizontally.
   - Ctrl/Cmd+wheel and pinch zoom, within the Phase 1 limits. Ctrl/Cmd+0 resets zoom.
+  - Each wheel zoom step eases to its new level with a short animation instead of jumping; a step that arrives mid-animation retargets it. Pinch follows the fingers directly.
   - Panning only happens when nothing is being edited. Clicking empty space while editing first exits editing.
 - A new document starts with one empty shape.
 - Mouse on shapes, resolved so moving and text selection never fight:
-  - Mouse-down on a shape that is **not** being edited: releasing without dragging selects it (clear active border), places the caret where you clicked and enters editing; dragging moves the shape instead.
+  - Mouse-down on a shape that is **not** selected: releasing without dragging selects it (clear active border); dragging moves the shape instead.
+  - Mouse-down on the **selected** shape: releasing without dragging places the caret where you clicked and enters editing; dragging moves the shape instead.
   - Mouse-down on the shape that **is** being edited: dragging selects text. To move it, press Esc first (it stays selected) and then drag.
+- F2, or typing any character except Space, starts editing the selected shape with the caret at the end of its text (typing adds to the existing text).
 - Enter or Esc leaves editing; the shape stays selected.
 - Text is justified. The shape grows vertically to fit text; width stays fixed. A single word wider than the shape is broken across lines rather than widening the shape.
 - Width: dragging either side edge resizes both sides symmetrically around the center. The cursor changes to a resize arrow near side edges.
@@ -166,7 +170,7 @@ Goal: build and reshape chains with the mouse.
 Goal: everything from Phases 2–4 (except multi-select) is fast to do without the mouse. Canvas shortcuts never fire while editing text. Canvas shortcuts use Ctrl/Cmd and Shift only, never Alt/Option: Ctrl+Alt is AltGr on some layouts, and Ctrl+Alt+Arrows rotates the screen on many Windows machines.
 
 - Arrow keys move the selection: follow a link in that direction if one exists, otherwise jump to the nearest shape in that direction.
-- F2, or simply typing, starts editing the selected shape (typing adds to the existing text). Enter or Esc leaves editing; Shift+Enter inserts a new line. Esc while not editing deselects.
+- Shift+Enter inserts a new line while editing. Esc while not editing deselects.
 - Ctrl/Cmd+Arrows move the shape.
 - Ctrl/Cmd+Shift+Left/Right change width (symmetric). Ctrl/Cmd+Shift+Up/Down move the bottom edge. Same minimum-size rule as the mouse.
 - Ctrl/Cmd+X/C/V cut, copy, paste. Ctrl/Cmd+D duplicates.
