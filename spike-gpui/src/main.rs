@@ -313,6 +313,10 @@ impl Spike {
     }
 
     fn on_mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // A release off the canvas sends no mouse-up here, so end the drag on the next move.
+        if e.pressed_button != Some(MouseButton::Left) {
+            self.drag = Drag::None;
+        }
         match self.drag {
             Drag::Pan(last) => {
                 let d = e.position - last;
@@ -814,6 +818,7 @@ impl Render for Spike {
                             .id("canvas")
                             .flex_1()
                             .h_full()
+                            .overflow_hidden()
                             .cursor(if editing { CursorStyle::IBeam } else { CursorStyle::Arrow })
                             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                             .on_mouse_down(MouseButton::Right, cx.listener(|s, e: &MouseDownEvent, _, cx| {

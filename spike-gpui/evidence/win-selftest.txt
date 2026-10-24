@@ -1,0 +1,7 @@
+PASS mouse selection across a justified line break selects "harbour while Mara waits for a letter" (got 26..63)
+PASS Cmd+B bolds the selection
+PASS typing grows the shape (144 -> 184)
+PASS IME marked range is set (Some(221..234))
+PASS IME commit and dead-key sequence produce " 日本語é"
+PASS Tab then Right adds a linked shape
+PASS right-click opens the context menu
