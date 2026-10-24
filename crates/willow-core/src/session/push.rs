@@ -1,12 +1,93 @@
 //! Pushes: moving a block of shapes out of the way as a saved move (ADR 0004), recorded in the
-//! open undo step, with a slide to the new place.
+//! open undo step, with a slide to the new place. Growth and creation push their own linked
+//! subtrees to the creation gap and other chains to the minimum gap, cascading.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use super::Session;
 use crate::input::Point;
 use crate::{Link, Shape, ShapeId, Side};
+
+/// A shape's drawn rectangle: its edges in canvas units.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Rect {
+    l: f32,
+    t: f32,
+    r: f32,
+    b: f32,
+}
+
+impl Rect {
+    fn moved(self, dx: i32, dy: i32) -> Rect {
+        let (dx, dy) = (dx as f32, dy as f32);
+        Rect {
+            l: self.l + dx,
+            t: self.t + dy,
+            r: self.r + dx,
+            b: self.b + dy,
+        }
+    }
+
+    fn union(self, o: Rect) -> Rect {
+        Rect {
+            l: self.l.min(o.l),
+            t: self.t.min(o.t),
+            r: self.r.max(o.r),
+            b: self.b.max(o.b),
+        }
+    }
+
+    fn grown(self, d: f32) -> Rect {
+        Rect {
+            l: self.l - d,
+            t: self.t - d,
+            r: self.r + d,
+            b: self.b + d,
+        }
+    }
+
+    fn overlaps(self, o: Rect) -> bool {
+        self.l < o.r && o.l < self.r && self.t < o.b && o.t < self.b
+    }
+}
+
+/// The sides a shape grows toward: its top never moves.
+const GROWING: [Side; 3] = [Side::Bottom, Side::Left, Side::Right];
+
+/// A move of `d` units toward `side`.
+fn toward(side: Side, d: i32) -> (i32, i32) {
+    match side {
+        Side::Bottom => (0, d),
+        Side::Top => (0, -d),
+        Side::Right => (d, 0),
+        Side::Left => (-d, 0),
+    }
+}
+
+/// How far `o` must move toward `side` to sit `gap` beyond mover `m`, in whole units; 0 when
+/// it needn't. `o` must lie within `gap` of `m`'s side lane, and have been wholly beyond `m`
+/// toward `side` before the change (`om`, `oo`: their rectangles then; `om` is `None` for a
+/// new shape, which crowds whatever is within `gap`), so shapes already overlapping stay.
+fn crowding(m: Rect, om: Option<Rect>, o: Rect, oo: Rect, side: Side, gap: f32) -> i32 {
+    let vertical = matches!(side, Side::Bottom | Side::Top);
+    let lane = if vertical {
+        o.l < m.r + gap && o.r > m.l - gap
+    } else {
+        o.t < m.b + gap && o.b > m.t - gap
+    };
+    let (beyond, need) = match side {
+        Side::Bottom => (om.map_or(o.b > m.t - gap, |p| oo.t >= p.b), m.b + gap - o.t),
+        Side::Top => (om.map_or(o.t < m.b + gap, |p| oo.b <= p.t), o.b + gap - m.t),
+        Side::Right => (om.map_or(o.r > m.l - gap, |p| oo.l >= p.r), m.r + gap - o.l),
+        Side::Left => (om.map_or(o.l < m.r + gap, |p| oo.r <= p.l), o.r + gap - m.l),
+    };
+    if lane && beyond && need > 0.0 {
+        need.ceil() as i32
+    } else {
+        0
+    }
+}
 
 /// A pushed shape's slide: drawn `from` canvas units off its saved place at `since`, easing to 0.
 #[derive(Debug)]
@@ -16,23 +97,166 @@ pub(super) struct Slide {
 }
 
 impl Session {
-    /// `root` and every shape linked beyond it, not through `from`: the subtree a push moves
-    /// as one block.
-    pub(super) fn subtree(&self, root: &ShapeId, from: &ShapeId) -> Vec<ShapeId> {
-        let (mut out, mut seen) = (vec![root.clone()], HashSet::from([root, from]));
-        let mut i = 0;
-        // ponytail: scans every link per shape; an adjacency map if subtrees get large.
-        while let Some(s) = out.get(i).cloned() {
-            for Link(a, b) in &self.doc.links {
-                let n = match (a == &s, b == &s) {
-                    (true, _) => b,
-                    (_, true) => a,
-                    _ => continue,
-                };
-                if seen.insert(n) {
-                    out.push(n.clone());
+    fn rect(&self, s: &Shape) -> Rect {
+        let (x, y) = (s.x as f32, s.y as f32);
+        Rect {
+            l: x,
+            t: y,
+            r: x + s.width as f32,
+            b: y + self.shape_height(s),
+        }
+    }
+
+    /// The drawn rectangle of shape `id`.
+    pub(super) fn rect_of(&self, id: &ShapeId) -> Option<Rect> {
+        let s = self.doc.shapes.iter().find(|s| &s.id == id)?;
+        Some(self.rect(s))
+    }
+
+    /// The drawn rectangle of the shape at index `i`.
+    pub(super) fn rect_at(&self, i: usize) -> Option<Rect> {
+        self.doc.shapes.get(i).map(|s| self.rect(s))
+    }
+
+    pub(super) fn index_of(&self, id: &ShapeId) -> Option<usize> {
+        self.doc.shapes.iter().position(|s| &s.id == id)
+    }
+
+    /// Makes room after shape `id` changed from `old`: on each side it grew toward, the
+    /// subtrees linked there move to keep the creation gap, and other chains it or they now
+    /// crowd move to the minimum gap. Shrinking moves nothing.
+    pub(super) fn make_room(&mut self, id: &ShapeId, old: Rect) {
+        let (Some(i), Some(new)) = (self.index_of(id), self.rect_of(id)) else {
+            return;
+        };
+        for side in GROWING {
+            let out = match side {
+                Side::Bottom => new.b > old.b,
+                Side::Left => new.l < old.l,
+                Side::Right => new.r > old.r,
+                Side::Top => false,
+            };
+            if !out {
+                continue;
+            }
+            let mut movers = vec![(i, Some(old))];
+            for n in self.linked_on(id, side) {
+                let Some(j) = self.index_of(&n) else { continue };
+                let (near, far) = (&self.doc.shapes[i], &self.doc.shapes[j]);
+                let (dx, dy) = self.clearance(near, far, side, self.theme.creation_gap);
+                if (dx, dy) != (0, 0) {
+                    let block = self.subtree(j, i);
+                    movers.extend(block.iter().map(|&k| (k, self.rect_at(k))));
+                    self.push(&block, dx, dy);
                 }
             }
+            self.clear_others(side, movers);
+        }
+    }
+
+    /// Pushes other chains clear of `movers` toward `side` to the minimum gap, then whatever
+    /// those crowd in turn. `movers` are shape indices with their rectangles before they moved
+    /// (`None`: just created); the first one's chain never moves, nor any chain twice.
+    pub(super) fn clear_others(&mut self, side: Side, start: Vec<(usize, Option<Rect>)>) {
+        let Some(&(first, _)) = start.first() else {
+            return;
+        };
+        let (gap, n) = (self.theme.min_gap, self.doc.shapes.len());
+        // ponytail: lays out and labels every shape once per growth (not per keystroke); a
+        // spatial index if 10k-shape growth shows up in the bench.
+        let chain = self.chains();
+        let mut members: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, &c) in chain.iter().enumerate() {
+            members.entry(c).or_default().push(i);
+        }
+        let mut rects: Vec<Rect> = self.doc.shapes.iter().map(|s| self.rect(s)).collect();
+        // Where each shape was before the change; order along `side` is judged there.
+        let mut orig: Vec<Option<Rect>> = rects.iter().copied().map(Some).collect();
+        for &(m, old) in &start {
+            orig[m] = old;
+        }
+        let mut movers: Vec<usize> = start.into_iter().map(|(m, _)| m).collect();
+        // Which chain last pushed each pushed chain. A chain never pushes one it was pushed by,
+        // directly or not, so cascades end (interleaved chains would push each other forever).
+        let mut by: HashMap<usize, usize> = HashMap::new();
+        let above = |by: &HashMap<usize, usize>, mut c: usize| {
+            let mut up = vec![c];
+            while let Some(&p) = by.get(&c) {
+                up.push(p);
+                c = p;
+            }
+            up
+        };
+        // Each round is one step of the cascade; the cap only guards against a bug.
+        for _ in 0..members.len() {
+            if movers.is_empty() {
+                break;
+            }
+            // Everything a mover could crowd lies within `gap` of where it went or came from.
+            let reach = (movers.iter())
+                .map(|&m| orig[m].map_or(rects[m], |p| p.union(rects[m])))
+                .reduce(Rect::union)
+                .expect("movers")
+                .grown(gap);
+            let mut need: BTreeMap<usize, (i32, usize)> = BTreeMap::new();
+            for o in (0..n).filter(|&o| chain[o] != chain[first] && reach.overlaps(rects[o])) {
+                let oo = orig[o].unwrap_or(rects[o]);
+                for &m in movers.iter().filter(|&&m| chain[m] != chain[o]) {
+                    let d = crowding(rects[m], orig[m], rects[o], oo, side, gap);
+                    if d > 0 {
+                        let e = need.entry(chain[o]).or_default();
+                        *e = (*e).max((d, chain[m]));
+                    }
+                }
+            }
+            movers.clear();
+            for (c, (d, pusher)) in need {
+                if above(&by, pusher).contains(&c) {
+                    continue;
+                }
+                by.insert(c, pusher);
+                let (dx, dy) = toward(side, d);
+                let block = &members[&c];
+                for &k in block {
+                    rects[k] = rects[k].moved(dx, dy);
+                }
+                movers.extend(block);
+                self.push(block, dx, dy);
+            }
+        }
+    }
+
+    /// Each shape's chain as a label (a shape index), by shape index.
+    fn chains(&self) -> Vec<usize> {
+        let n = self.doc.shapes.len();
+        let mut up: Vec<usize> = (0..n).collect();
+        fn root(up: &mut [usize], mut i: usize) -> usize {
+            while up[i] != i {
+                up[i] = up[up[i]];
+                i = up[i];
+            }
+            i
+        }
+        for &(a, b) in self.link_ends().iter().filter(|&&(a, b)| a < n && b < n) {
+            let (ra, rb) = (root(&mut up, a), root(&mut up, b));
+            up[ra] = rb;
+        }
+        (0..n).map(|i| root(&mut up, i)).collect()
+    }
+
+    /// `root` and every shape linked beyond it, not through `from` (shape indices): the
+    /// subtree a push moves as one block.
+    pub(super) fn subtree(&self, root: usize, from: usize) -> Vec<usize> {
+        let n = self.doc.shapes.len();
+        let mut next = vec![Vec::new(); n];
+        for &(a, b) in self.link_ends().iter().filter(|&&(a, b)| a < n && b < n) {
+            next[a].push(b);
+            next[b].push(a);
+        }
+        let (mut out, mut seen) = (vec![root], HashSet::from([root, from]));
+        let mut i = 0;
+        while let Some(&s) = out.get(i) {
+            out.extend(next[s].iter().filter(|&&k| seen.insert(k)));
             i += 1;
         }
         out
@@ -77,29 +301,23 @@ impl Session {
             Side::Right => nx + near.width as f32 + gap - fx,
             Side::Left => fx + far.width as f32 + gap - nx,
         };
-        let d = need.max(0.0).ceil() as i32;
-        match side {
-            Side::Bottom => (0, d),
-            Side::Top => (0, -d),
-            Side::Right => (d, 0),
-            Side::Left => (-d, 0),
-        }
+        toward(side, need.max(0.0).ceil() as i32)
     }
 
-    /// Moves `ids` by (dx, dy) as one block: a saved move in the open undo step (or its own),
-    /// sliding there from where they were drawn.
-    pub(super) fn push(&mut self, ids: &[ShapeId], dx: i32, dy: i32) {
+    /// Moves the shapes at indices `block` by (dx, dy): a saved move in the open undo step (or
+    /// its own), sliding there from where they were drawn.
+    pub(super) fn push(&mut self, block: &[usize], dx: i32, dy: i32) {
         if (dx, dy) == (0, 0) {
             return;
         }
         let now = self.now;
-        // ponytail: `change` finds each shape by a linear scan; index them if blocks get large.
         self.history.step(&mut self.doc, |h, doc| {
-            for id in ids {
-                h.change(doc, id, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
+            for &i in block {
+                h.change_at(doc, i, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
             }
         });
-        for id in ids {
+        for &i in block {
+            let id = &self.doc.shapes[i].id;
             let left = self.sliding(id, now);
             let from = Point {
                 x: left.x - dx as f32,

@@ -118,7 +118,7 @@ impl History {
     }
 
     /// `change` for the shape at draw-order index `i`.
-    fn change_at(&mut self, doc: &mut Document, i: usize, f: impl FnOnce(&mut Shape)) {
+    pub fn change_at(&mut self, doc: &mut Document, i: usize, f: impl FnOnce(&mut Shape)) {
         let shape = &mut doc.shapes[i];
         let before = shape.clone();
         f(shape);
@@ -217,6 +217,11 @@ impl History {
     }
 
     /// Opens a group: changes until `end` become one step.
+    /// Whether a group is open: `begin`/`end` around more changes would close it early.
+    pub fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
     pub fn begin(&mut self) {
         self.open.get_or_insert_default();
     }

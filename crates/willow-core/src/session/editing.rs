@@ -369,6 +369,7 @@ impl Session {
     fn replace(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
         let (id, pending, mut end) = (e.id.clone(), e.pending, range.start);
+        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = pending {
@@ -376,6 +377,9 @@ impl Session {
                 s.text.set_style(range.start..end, Style::Italic, italic);
             }
         });
+        if let Some(old) = old {
+            self.make_room(&id, old);
+        }
         self.set_caret(Caret {
             offset: end,
             upstream: false,

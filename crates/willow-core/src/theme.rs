@@ -292,6 +292,8 @@ pub struct Theme {
     /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
     /// linked to it.
     pub creation_gap: f32,
+    /// Edge-to-edge distance a push keeps between a shape and another chain.
+    pub min_gap: f32,
     pub connector: ConnectorStyle,
     pub zone: ZoneStyle,
     pub selection: SelectionStyle,
@@ -358,6 +360,7 @@ pub const PAPER: Theme = Theme {
         ],
     },
     creation_gap: 48.0,
+    min_gap: 24.0,
     connector: ConnectorStyle {
         color: hex(0xcbbfae),
         width: 2.0,

@@ -433,11 +433,19 @@ impl Session {
         }
     }
 
-    /// Sets a shape's x, width and extra height: one discrete change to the document.
+    /// Sets a shape's x, width and extra height, pushing what it grows into: one undo step.
     pub fn resize_shape(&mut self, id: &ShapeId, r: ResizeTo) {
+        let (opened, old) = (!self.history.is_open(), self.rect_of(id));
+        self.history.begin();
         self.history.change(&mut self.doc, id, |s| {
             (s.x, s.width, s.extra_height) = (r.x, r.width, r.extra_height)
         });
+        if let Some(old) = old {
+            self.make_room(id, old);
+        }
+        if opened {
+            self.history.end(&self.doc);
+        }
     }
 
     /// Drops a shape's extra height so it fits its text; the width stays.

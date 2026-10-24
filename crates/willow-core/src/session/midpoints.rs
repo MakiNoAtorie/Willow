@@ -116,22 +116,29 @@ impl Session {
         // Insert: the nearest shape already on that side links on from the new one instead,
         // its subtree pushed a creation gap clear of it.
         let insert = self.linked_on(id, side).into_iter().next().map(|n| {
-            let far = self.doc.shapes.iter().find(|s| s.id == n).expect("linked");
+            let j = self.index_of(&n).expect("linked");
+            let src = self.index_of(id).expect("source");
             (
-                self.clearance(&new, far, side, gap),
-                self.subtree(&n, id),
+                self.clearance(&new, &self.doc.shapes[j], side, gap),
+                self.subtree(j, src),
                 n,
             )
         });
+        // Then other chains it or the pushed block land on are pushed clear.
+        let mut movers = vec![(self.doc.shapes.len(), None)];
         // `start_editing`'s group is this one; `stop_editing` closes both as one step.
         self.history.begin();
         self.history.add(&mut self.doc, new);
         self.history.link(&mut self.doc, id, &new_id);
         if let Some(((dx, dy), block, n)) = insert {
+            if (dx, dy) != (0, 0) {
+                movers.extend(block.iter().map(|&k| (k, self.rect_at(k))));
+            }
             self.push(&block, dx, dy);
             self.history.unlink(&mut self.doc, id, &n);
             self.history.link(&mut self.doc, &new_id, &n);
         }
+        self.clear_others(side, movers);
         self.select([new_id.clone()]);
         self.start_editing(new_id.clone());
         self.mid = Midpoints {
