@@ -1,5 +1,10 @@
 #!/bin/sh
 # Local CI gates every push (CLAUDE.md). Enable once per clone: git config core.hooksPath .githooks
+# Pushes that only delete branches send nothing, so they skip CI.
+while read -r _ local_sha _ _; do
+  [ "$local_sha" = 0000000000000000000000000000000000000000 ] || send=1
+done
+[ -n "$send" ] || exit 0
 cd "$(git rev-parse --show-toplevel)" || exit 1
 log=$(mktemp)
 ./ci.sh 2 >"$log" 2>&1
