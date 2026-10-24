@@ -172,12 +172,26 @@ pub struct MenuStyle {
     pub shortcut_opacity: f32,
     /// A command that can't run now (Undo with nothing to undo).
     pub disabled_opacity: f32,
+    /// The color row's circles: diameter, space between, and the current one's ring width and
+    /// its gap from the circle.
+    pub swatch: f32,
+    pub swatch_gap: f32,
+    pub swatch_ring: f32,
+    pub swatch_ring_gap: f32,
     /// Ring, then drop shadow.
     pub shadow: [Shadow; 2],
     /// The menu's left edge from the window's.
     pub left: f32,
     /// Between the title bar and the menu, and between a menu and its cascade.
     pub gap: f32,
+}
+
+/// A color change rippling along a chain: each shape fades `fade` long, starting `step`
+/// after the one before it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RippleStyle {
+    pub fade: Transition,
+    pub step: Duration,
 }
 
 /// The window's title bar, in screen pixels.
@@ -267,6 +281,8 @@ pub struct Theme {
     pub zoom_step: Transition,
     pub zoom_pill: ZoomPillStyle,
     pub menu: MenuStyle,
+    /// A chain's color change rippling out from the shape that started it.
+    pub ripple: RippleStyle,
 }
 
 impl Theme {
@@ -410,6 +426,13 @@ pub const PAPER: Theme = Theme {
         duration: Duration::from_millis(120),
         easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
+    ripple: RippleStyle {
+        fade: Transition {
+            duration: Duration::from_millis(200),
+            easing: CubicBezier::EASE_OUT,
+        },
+        step: Duration::from_millis(40),
+    },
     zoom_pill: ZoomPillStyle {
         bg: rgba(59, 52, 44, 0.84),
         ink: hex(0xfffdf8),
@@ -440,6 +463,10 @@ pub const PAPER: Theme = Theme {
         font_size: 13.0,
         shortcut_opacity: 0.45,
         disabled_opacity: 0.4,
+        swatch: 18.0,
+        swatch_gap: 7.0,
+        swatch_ring: 1.5,
+        swatch_ring_gap: 2.0,
         shadow: [
             Shadow {
                 x: 0.0,

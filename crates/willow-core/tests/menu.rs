@@ -128,3 +128,77 @@ fn outside_every_zone_it_joins_none() {
     s.handle(Input::MenuChoose(MenuAction::NewShape), T);
     assert!(s.document().zones[0].members.is_empty());
 }
+
+/// Shapes a, b, c in a row, linked a-b-c, all neutral.
+fn chain_of_three() -> Session {
+    let mut doc = doc_with("a");
+    for (id, x) in [("b", 300), ("c", 600)] {
+        doc.shapes
+            .push(willow_core::Shape::new(ShapeId(id.into()), x, 0));
+    }
+    let id = |s: &str| ShapeId(s.into());
+    assert!(doc.link(&id("a"), &id("b")) && doc.link(&id("b"), &id("c")));
+    session_of(doc)
+}
+
+fn fill_of(s: &Session, id: &str, now: Duration) -> willow_core::Rgba {
+    let f = s.draw(pt(0.0, 0.0), pt(1000.0, 800.0), now);
+    f.shapes.iter().find(|v| v.shape.id.0 == id).unwrap().fill
+}
+
+#[test]
+fn right_click_on_an_unselected_shape_selects_it_and_marks_its_color() {
+    let mut s = chain_of_three();
+    s.select([ShapeId("a".into())]);
+    right_click(&mut s, pt(350.0, 20.0));
+    assert_eq!(s.selection(), [ShapeId("b".into())]);
+    let menu = s.menu().expect("menu open");
+    assert_eq!(menu.kind, MenuKind::Shape);
+    let colors = MenuEntry::Colors {
+        current: Some(Color::Neutral),
+    };
+    assert!(menu.entries.contains(&colors));
+}
+
+#[test]
+fn right_click_inside_a_multi_selection_keeps_it() {
+    let mut s = chain_of_three();
+    s.select(["a", "b"].map(|i| ShapeId(i.into())));
+    right_click(&mut s, pt(350.0, 20.0));
+    assert_eq!(s.selection().len(), 2);
+}
+
+#[test]
+fn recolor_paints_the_chain_as_one_undo_step() {
+    let mut s = chain_of_three();
+    right_click(&mut s, pt(350.0, 20.0));
+    s.handle(Input::MenuChoose(MenuAction::Recolor(Color::Rose)), T);
+    assert!(s.menu().is_none());
+    assert!(s.document().shapes.iter().all(|x| x.color == Color::Rose));
+    s.handle(Input::Undo, T);
+    assert!(
+        s.document()
+            .shapes
+            .iter()
+            .all(|x| x.color == Color::Neutral)
+    );
+}
+
+#[test]
+fn recolor_ripples_out_from_the_clicked_shape() {
+    let mut s = chain_of_three();
+    let theme = s.theme();
+    let (old, new) = (theme.pastel(Color::Neutral), theme.pastel(Color::Rose));
+    right_click(&mut s, pt(350.0, 20.0));
+    s.handle(Input::MenuChoose(MenuAction::Recolor(Color::Rose)), T);
+    let ms = Duration::from_millis;
+    assert!(s.animating(ms(100)));
+    assert_eq!(fill_of(&s, "b", T), old);
+    assert_ne!(fill_of(&s, "b", ms(100)), old);
+    assert_eq!(fill_of(&s, "b", ms(200)), new);
+    // The neighbours start 40 ms later per step.
+    assert_eq!(fill_of(&s, "a", ms(40)), old);
+    assert_eq!(fill_of(&s, "c", ms(80)), old);
+    assert_eq!(fill_of(&s, "c", ms(280)), new);
+    assert!(!s.animating(ms(280)));
+}

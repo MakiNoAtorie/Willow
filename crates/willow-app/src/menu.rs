@@ -2,7 +2,7 @@
 //! platforms. Choosing an item or clicking outside goes back to the core as input.
 
 use gpui::{AnyElement, Context, MouseButton, div, prelude::*, px, relative};
-use willow_core::{Menu, MenuEntry, MenuItem, Session, Shortcut};
+use willow_core::{Color, Menu, MenuAction, MenuEntry, MenuItem, Session, Shortcut};
 
 use crate::{Input, Willow, color, shadows};
 
@@ -35,6 +35,7 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
         .children(menu.entries.iter().enumerate().map(|(i, e)| {
             match e {
                 MenuEntry::Item(item) => row(&m, i, item, cx).into_any_element(),
+                MenuEntry::Colors { current } => colors(session, &m, i, *current, cx),
                 MenuEntry::Separator => div()
                     .py(px(m.separator_pad_y))
                     .px(px(m.padding))
@@ -82,6 +83,54 @@ fn row(
         )
 }
 
+/// The color row: a circle per picker color, the current one ringed.
+fn colors(
+    session: &Session,
+    m: &willow_core::MenuStyle,
+    row: usize,
+    current: Option<Color>,
+    cx: &mut Context<Willow>,
+) -> AnyElement {
+    let ring = color(m.ink);
+    div()
+        .flex()
+        .gap(px(m.swatch_gap))
+        .px(px(m.item_pad_x))
+        .py(px(m.item_pad_y))
+        .children(Color::ALL.into_iter().map(|c| {
+            // The ring is a shadow outside the circle, so every circle takes the same room.
+            div()
+                .id(("menu-color", row * 8 + c as usize))
+                .size(px(m.swatch))
+                .flex_none()
+                .rounded_full()
+                .bg(color(session.theme().picker[c as usize]))
+                .when(current == Some(c), |d| {
+                    d.shadow(vec![
+                        gpui::BoxShadow {
+                            color: ring,
+                            offset: gpui::point(px(0.0), px(0.0)),
+                            blur_radius: px(0.0),
+                            inset: false,
+                            spread_radius: px(m.swatch_ring_gap + m.swatch_ring),
+                        },
+                        gpui::BoxShadow {
+                            color: color(m.bg),
+                            offset: gpui::point(px(0.0), px(0.0)),
+                            blur_radius: px(0.0),
+                            inset: false,
+                            spread_radius: px(m.swatch_ring_gap),
+                        },
+                    ])
+                })
+                .cursor_pointer()
+                .on_click(cx.listener(move |w, _, _, cx| {
+                    w.input(Input::MenuChoose(MenuAction::Recolor(c)), cx)
+                }))
+        }))
+        .into_any_element()
+}
+
 fn shortcut(s: Shortcut) -> String {
     match (cfg!(target_os = "macos"), s.shift) {
         (true, true) => format!("\u{21e7}\u{2318}{}", s.key),
@@ -98,6 +147,7 @@ fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
         .map(|e| match e {
             MenuEntry::Item(_) => row,
             MenuEntry::Separator => 2.0 * m.separator_pad_y + 1.0,
+            MenuEntry::Colors { .. } => m.swatch + 2.0 * m.item_pad_y,
         })
         .sum::<f32>();
     (m.min_width, h + 2.0 * m.padding)

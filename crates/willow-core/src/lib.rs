@@ -25,8 +25,8 @@ pub use session::{
     Session, Shortcut, Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle,
-    Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, RippleStyle,
+    SelectionStyle, Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

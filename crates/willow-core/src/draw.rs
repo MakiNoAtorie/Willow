@@ -169,7 +169,10 @@ impl Session {
                 let ring = self.ring(&s.id, now);
                 let e = edited.filter(|e| e.id == s.id);
                 Some(Visible {
-                    fill: fills[s.color as usize],
+                    fill: match self.rippling(&s.id, now) {
+                        Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
+                        None => fills[s.color as usize],
+                    },
                     layout: self.layout(&s),
                     shape: s,
                     x,

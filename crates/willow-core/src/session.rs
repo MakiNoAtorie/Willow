@@ -4,6 +4,7 @@
 mod editing;
 mod file;
 mod menu;
+use menu::Ripple;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -160,6 +161,8 @@ pub struct Session {
     /// The pointer is over a shape's edge.
     over_edge: Option<Edge>,
     rings: HashMap<ShapeId, Ring>,
+    /// Shapes whose color is still fading in after a menu recolor.
+    ripples: HashMap<ShapeId, Ripple>,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -201,6 +204,7 @@ impl Session {
             over_text: false,
             over_edge: None,
             rings: HashMap::new(),
+            ripples: HashMap::new(),
             now: Duration::ZERO,
         }
     }
@@ -320,7 +324,12 @@ impl Session {
     /// The caret blink isn't: see `next_wake`.
     pub fn animating(&self, now: Duration) -> bool {
         let fade = &self.theme.selection.fade;
-        self.rings.values().any(|r| !r.done(now, fade)) || self.zoom.running(self.theme, now)
+        self.rings.values().any(|r| !r.done(now, fade))
+            || self
+                .ripples
+                .values()
+                .any(|r| now < r.start + self.theme.ripple.fade.duration)
+            || self.zoom.running(self.theme, now)
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -514,8 +523,9 @@ impl Session {
                 }
                 let hit = self.shape_at(pos);
                 if button == Button::Right && self.gesture.is_none() {
-                    if hit.is_none() {
-                        self.open_empty_menu(pos);
+                    match hit {
+                        None => self.open_empty_menu(pos),
+                        Some(i) => self.open_shape_menu(pos, i),
                     }
                     return self.respond(true);
                 }

@@ -4,16 +4,25 @@
 use super::Session;
 use crate::input::Point;
 use crate::{Color, Shape, ShapeId};
+use std::time::Duration;
+
+/// A shape's color fading in from `from`, begun at `start`.
+pub(super) struct Ripple {
+    pub from: Color,
+    pub start: Duration,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuKind {
     Empty,
+    Shape,
 }
 
 /// What an item does. One variant per item; `choose` runs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAction {
     NewShape,
+    Recolor(Color),
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -37,6 +46,10 @@ pub struct MenuItem {
 pub enum MenuEntry {
     Item(MenuItem),
     Separator,
+    /// The seven picker colors in a row; `current` is ringed.
+    Colors {
+        current: Option<Color>,
+    },
 }
 
 /// An open menu.
@@ -77,6 +90,29 @@ impl Session {
         });
     }
 
+    /// Opens the shape menu for the shape at screen point `at`, selecting it unless it is
+    /// already selected. Items for the selection as a whole come with the clipboard ticket.
+    pub(super) fn open_shape_menu(&mut self, at: Point, index: usize) {
+        self.stop_editing();
+        let shape = &self.doc.shapes[index];
+        let (id, current) = (shape.id.clone(), shape.color);
+        if !self.selected.contains(&id) {
+            self.select([id]);
+        }
+        // ponytail: a multi-selection has no menu until Cut/Copy/Paste land.
+        if self.selected.len() > 1 {
+            return;
+        }
+        self.menu = Some(Menu {
+            kind: MenuKind::Shape,
+            at,
+            canvas: self.viewport.to_canvas(at),
+            entries: vec![MenuEntry::Colors {
+                current: Some(current),
+            }],
+        });
+    }
+
     /// Runs `action` at the open menu's point and closes the menu.
     pub(super) fn choose(&mut self, action: MenuAction) {
         let Some(menu) = self.menu.take() else {
@@ -84,7 +120,42 @@ impl Session {
         };
         match action {
             MenuAction::NewShape => self.new_shape_at(menu.canvas),
+            MenuAction::Recolor(color) => {
+                let i = self.shape_at(self.viewport.to_screen(menu.canvas));
+                if let Some(id) = i.map(|i| self.doc.shapes[i].id.clone()) {
+                    self.ripple_recolor(&id, color);
+                }
+            }
         }
+    }
+
+    /// Paints `id`'s chain `color` as one undo step, each shape fading from its old color one
+    /// ripple step after the one before it along the chain.
+    fn ripple_recolor(&mut self, id: &ShapeId, color: Color) {
+        let r = self.theme.ripple;
+        let (now, fade) = (self.now, r.fade.duration);
+        self.ripples.retain(|_, x| now < x.start + fade);
+        let chain: Vec<ShapeId> = self.doc.chain(id).into_iter().cloned().collect();
+        for (i, id) in chain.iter().enumerate() {
+            if let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) {
+                let start = self.now + r.step * i as u32;
+                self.ripples.insert(
+                    id.clone(),
+                    Ripple {
+                        from: s.color,
+                        start,
+                    },
+                );
+            }
+        }
+        self.recolor(id, color);
+    }
+
+    /// The color `id` is fading in from and how far along (eased, 0 to 1), while it ripples.
+    pub(crate) fn rippling(&self, id: &ShapeId, now: Duration) -> Option<(Color, f32)> {
+        let r = self.ripples.get(id)?;
+        let p = self.theme.ripple.fade.progress(now.saturating_sub(r.start));
+        (now < r.start + self.theme.ripple.fade.duration).then_some((r.from, p))
     }
 
     /// An empty neutral shape centered on canvas point `c`, in the innermost zone under it,
