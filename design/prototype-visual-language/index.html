@@ -1,0 +1,308 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway (Phase 1, round 2; round 1 is round-1.html).
+  Question: what overall visual direction should Willow take?
+  A (candidate) plus bolder schemes G-K of the same scene, switchable via ?variant=,
+  the bottom bar, or the arrow keys. Open this file directly in a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE · Willow visual language · round 2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Nunito:ital,wght@0,500;0,600;0,700;0,800;1,500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,700;1,400&family=Manrope:wght@400;500;700;800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Figtree:ital,wght@0,400;0,450;0,500;0,700;1,400&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,700;1,6..72,400&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #2a2b2e; font-family: -apple-system, system-ui, sans-serif; color: #ddd; min-height: 100vh; }
+  #stage { display: flex; gap: 24px; padding: 24px 24px 90px; align-items: flex-start; justify-content: center; }
+
+  /* window */
+  .win { position: relative; width: 1180px; height: 740px; border-radius: 12px; overflow: hidden;
+         box-shadow: 0 0 0 0.5px rgba(0,0,0,.5), 0 20px 60px rgba(0,0,0,.45); }
+  .canvas { position: absolute; inset: 0; }
+  .titlebar { position: absolute; top: 0; left: 0; right: 0; height: 38px; display: flex; align-items: center; padding-left: 14px; gap: 8px; z-index: 5; }
+  .tl { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,.18); }
+  .doc-title { position: absolute; left: 0; right: 0; text-align: center; font: 500 13px -apple-system, system-ui; color: rgba(0,0,0,.45); pointer-events: none; }
+  svg.links { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+  .shape { position: absolute; text-align: justify; hyphens: auto; }
+  .shape b { font-weight: 700; }
+  .mid { position: absolute; transform: translate(-50%, -50%); }
+  .caret { display: inline-block; width: 1.5px; height: 1.15em; vertical-align: -0.2em; margin-left: 1px; animation: blink 1.06s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .sel-text { border-radius: 2px; }
+
+  .menu { position: absolute; z-index: 6; min-width: 196px; }
+  .menu .swatches { display: flex; gap: 7px; }
+  .menu .sw { width: 18px; height: 18px; border-radius: 50%; position: relative; }
+  .menu .item { display: flex; justify-content: space-between; }
+  .menu .item .k { opacity: .45; }
+  .cursor { position: absolute; z-index: 7; width: 16px; height: 20px; }
+
+  /* token panel */
+  #tokens { width: 300px; font: 12px/1.5 ui-monospace, Menlo, monospace; background: #1d1e20; border-radius: 10px; padding: 14px 16px; color: #cfd2d6; }
+  #tokens h3 { margin: 0 0 8px; font: 600 13px -apple-system, system-ui; color: #fff; }
+  #tokens .row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #2c2e31; padding: 3px 0; }
+  #tokens .row span:last-child { color: #fff; text-align: right; }
+  #tokens .pal { display: grid; grid-template-columns: 58px 1fr 1fr; gap: 4px 8px; align-items: center; margin-top: 8px; }
+  #tokens .chip { height: 16px; border-radius: 4px; display: flex; align-items: center; padding-left: 5px; font-size: 10px; color: rgba(0,0,0,.6); }
+  #tokens p { color: #9ba0a6; font-family: -apple-system, system-ui; font-size: 12px; margin: 10px 0 0; }
+
+  /* switcher: deliberately not part of the design */
+  #switcher { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px;
+              background: #000; color: #fff; border-radius: 999px; padding: 6px; font: 600 13px -apple-system, system-ui;
+              box-shadow: 0 6px 24px rgba(0,0,0,.5), 0 0 0 1px #ff0; z-index: 100; }
+  #switcher button { background: #222; color: #fff; border: 0; border-radius: 999px; width: 32px; height: 32px; font-size: 16px; cursor: pointer; }
+  #switcher button:hover { background: #444; }
+  #switcher .lbl { padding: 0 14px; min-width: 260px; text-align: center; }
+  body.shot #tokens, body.shot #switcher { display: none; }
+  body.shot #stage { padding: 0; justify-content: flex-start; }
+  body.shot .win { border-radius: 0; box-shadow: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="win" id="win">
+    <div class="canvas" id="canvas"><svg class="links" id="links"></svg></div>
+    <div class="titlebar"><div class="tl" style="background:#ff5f57"></div><div class="tl" style="background:#febc2e"></div><div class="tl" style="background:#28c840"></div><div class="doc-title">Gull Rock.willow</div></div>
+  </div>
+  <div id="tokens"></div>
+</div>
+<div id="switcher"><button id="prev">←</button><div class="lbl" id="lbl"></div><button id="next">→</button></div>
+
+<script>
+// Palette order is fixed; names are provisional.
+const NAMES = ['neutral', 'rose', 'peach', 'butter', 'sage', 'sky', 'lilac'];
+
+const VARIANTS = {
+  A: {
+    name: 'Paper ★ default theme',
+    blurb: 'Warm and writerly. Cream paper with a faint dot grid, a serif for story text, borderless shapes lifted by soft warm shadows.',
+    font: "'Literata', Georgia, serif", size: 15, lh: 1.5, weight: 400,
+    canvas: '#f6f3ec', grid: 'radial-gradient(circle, rgba(70,50,20,.10) 1px, transparent 1.2px) 0 0/24px 24px',
+    ink: '#3b342c', radius: 14, pad: '13px 16px', width: 210,
+    border: () => 'none',
+    shadow: '0 1px 2px rgba(70,50,20,.07), 0 4px 14px rgba(70,50,20,.08)',
+    link: { color: '#cbbfae', width: 2, cap: 'round' },
+    select: c => `0 0 0 2px ${'#f6f3ec'}, 0 0 0 4px #8b7760, 0 1px 2px rgba(70,50,20,.07), 0 6px 18px rgba(70,50,20,.12)`,
+    hoverLink: { color: '#8b7760', width: 3 },
+    mid: { size: 9, fill: '#fff', stroke: '#8b7760', sw: 1.5 },
+    caret: '#3b342c', textSel: 'rgba(139,119,96,.22)',
+    pastel: ['#e9e5dd', '#f3d8d3', '#f6dfc8', '#f2e8c0', '#d9e5cf', '#d3e0ea', '#e2d8ea'],
+    picker: ['#a39b8f', '#d9776c', '#e3955a', '#d2ad3a', '#7ea468', '#5d8fbf', '#9479b8'],
+    menu: { bg: '#fffdf8', ink: '#3b342c', radius: 10, shadow: '0 0 0 1px rgba(70,50,20,.08), 0 10px 30px rgba(70,50,20,.18)', font: "-apple-system, system-ui", hover: '#f1ebe0' },
+  },
+  G: {
+    name: 'Willow',
+    blurb: 'The metaphor made literal. Chains are wide soft ribbons in their own color and shapes sit on them like beads, so the trunk reads as a trunk and branches as boughs from any zoom.',
+    font: "'Figtree', system-ui, sans-serif", size: 14.5, lh: 1.5, weight: 450,
+    canvas: '#f3f5ef', grid: 'radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.9), transparent 60%)',
+    ink: '#26301f', radius: 20, pad: '13px 17px', width: 206,
+    border: () => '1.5px solid rgba(255,255,255,.85)',
+    shadow: '0 1px 2px rgba(38,48,31,.06), 0 6px 16px rgba(38,48,31,.08)',
+    link: { color: i => VARIANTS.G.picker[i] + '40', width: 16, cap: 'round' },
+    select: i => `0 0 0 3px #f3f5ef, 0 0 0 5.5px ${VARIANTS.G.picker[i]}, 0 8px 22px rgba(38,48,31,.14)`,
+    hoverLink: { color: i => VARIANTS.G.picker[i] + '80', width: 18 },
+    mid: { size: 11, fill: '#fff', stroke: 'rgba(38,48,31,.3)', sw: 1.5 },
+    caret: '#26301f', textSel: 'rgba(120,160,90,.28)',
+    pastel: ['#e7e9e3', '#f5d8d6', '#f7dfc8', '#f1e9bf', '#d6e8cd', '#d2e2ec', '#e1d9ec'],
+    picker: ['#9aa094', '#d97a74', '#e39a5c', '#cfae3e', '#6fa65a', '#5b92c0', '#9179bd'],
+    menu: { bg: '#ffffff', ink: '#26301f', radius: 18, shadow: '0 2px 6px rgba(38,48,31,.08), 0 18px 44px rgba(38,48,31,.16)', font: "'Figtree', system-ui", hover: '#eef3e8', sw: { size: 22 } },
+  },
+  H: {
+    name: 'Desk · optional theme',
+    blurb: 'Physical index cards on a linen desk. White typewritten cards with a color tab along the top, real paper shadows, and the selected card lifts off the desk.',
+    font: "'Courier Prime', 'Courier New', monospace", size: 14, lh: 1.5, weight: 400,
+    canvas: '#e6dfd1', grid: 'repeating-linear-gradient(0deg, rgba(120,100,70,.035) 0 1px, transparent 1px 3px), repeating-linear-gradient(90deg, rgba(120,100,70,.03) 0 1px, transparent 1px 4px)',
+    ink: '#2b2621', radius: 4, pad: '18px 15px 13px', width: 214,
+    border: () => 'none',
+    bg: i => `linear-gradient(${VARIANTS.H.picker[i]} 0 6px, ${VARIANTS.H.pastel[i]} 6px)`,
+    shadow: '0 1px 1px rgba(70,50,20,.18), 0 4px 10px rgba(70,50,20,.14)',
+    link: { color: '#9b8c74', width: 1.5, cap: 'round' },
+    select: () => '0 0 0 1.5px #2b2621, 0 16px 30px rgba(70,50,20,.28), 0 3px 6px rgba(70,50,20,.12)',
+    selStyle: () => ({ transform: 'translateY(-4px)' }),
+    hoverLink: { color: '#2b2621', width: 2.5 },
+    mid: { size: 10, fill: '#c79a3e', stroke: '#fff7e6', sw: 1.5 },
+    caret: '#2b2621', textSel: 'rgba(199,154,62,.32)',
+    pastel: ['#fbfaf6', '#fff3f1', '#fff6ec', '#fffbea', '#f5fbf1', '#f2f7fc', '#f8f4fc'],
+    picker: ['#b9b1a3', '#d8574c', '#e8873a', '#e2b52c', '#5c9d4d', '#4a84c4', '#8a66c0'],
+    menu: { bg: '#fffdf7', ink: '#2b2621', radius: 4, shadow: '0 1px 1px rgba(70,50,20,.2), 0 14px 30px rgba(70,50,20,.25)', font: "'Courier Prime', monospace", hover: '#f3ead6', sw: { size: 18, radius: 3 } },
+  },
+  I: {
+    name: 'Margin',
+    blurb: 'Text first, chrome last. A clean page, a large book serif, shapes reduced to a faint wash with no edge or shadow, hairline connectors. Selection is a bar in the margin, like an editor’s mark.',
+    font: "'Newsreader', Georgia, serif", size: 17, lh: 1.45, weight: 400,
+    canvas: '#fdfcf9', grid: 'none',
+    ink: '#1d1b18', radius: 12, pad: '14px 18px', width: 236,
+    border: () => 'none',
+    shadow: 'none',
+    link: { color: '#c9c3b8', width: 1, cap: 'butt' },
+    select: i => `-12px 0 0 -6px ${VARIANTS.I.picker[i]}`,
+    hoverLink: { color: '#1d1b18', width: 1.5 },
+    mid: { size: 6, fill: '#1d1b18', stroke: '#fdfcf9', sw: 2 },
+    caret: '#1d1b18', textSel: 'rgba(29,27,24,.10)',
+    pastel: ['#f2f0eb', '#fbe9e6', '#fcede0', '#faf3d9', '#e9f2e3', '#e5eef5', '#efe9f5'],
+    picker: ['#9b968c', '#cf6a5f', '#d98a4e', '#c9a332', '#6c9a58', '#5a8ab5', '#8a72b3'],
+    menu: { bg: '#fdfcf9', ink: '#1d1b18', radius: 4, shadow: '0 0 0 1px rgba(29,27,24,.12), 0 6px 18px rgba(29,27,24,.06)', font: "'Newsreader', Georgia, serif", hover: '#f2efe8', size: 15, sw: { size: 14 } },
+  },
+  J: {
+    name: 'Poster · optional theme',
+    blurb: 'Loud and confident. Thick black outlines, hard offset shadows, punchy pastels, a chunky grotesk. Selection pops the shape further off the page.',
+    font: "'Space Grotesk', system-ui, sans-serif", size: 14.5, lh: 1.45, weight: 500,
+    canvas: '#fbf6ea', grid: 'none',
+    ink: '#111111', radius: 10, pad: '12px 14px', width: 206,
+    border: () => '2.5px solid #111',
+    shadow: '4px 4px 0 #111',
+    link: { color: '#111', width: 2.5, cap: 'square' },
+    select: () => '8px 8px 0 #111',
+    selStyle: () => ({ transform: 'translate(-3px, -3px)' }),
+    hoverLink: { color: '#ff4d1a', width: 4.5 },
+    mid: { size: 11, fill: '#fff', stroke: '#111', sw: 2.5 },
+    caret: '#111', textSel: '#ffe066',
+    pastel: ['#e9e7e1', '#ffb8b0', '#ffc994', '#ffe57a', '#b6eda9', '#a9d6ff', '#d2bbff'],
+    picker: ['#8f8b82', '#ff4f3f', '#ff8a1f', '#ffc800', '#2fbf4a', '#1f8bff', '#8b4dff'],
+    menu: { bg: '#ffffff', ink: '#111', radius: 8, shadow: '0 0 0 2.5px #111, 5px 5px 0 2.5px #111', font: "'Space Grotesk', system-ui", hover: '#ffe57a', sw: { size: 22, radius: 6, ring: '#111' } },
+  },
+  K: {
+    name: 'Focus',
+    blurb: 'A behaviour, not a skin, shown on A’s look: the chain you are working in stays vivid and every other chain recedes, so a dense canvas reads one storyline at a time.',
+    dim: 0.38,
+    ...{},
+  },
+};
+VARIANTS.K = { ...VARIANTS.A, ...VARIANTS.K };
+const val = (x, i) => typeof x === 'function' ? x(i) : x;
+
+// Scene: a trunk with two branches beside it and one stray note. Color is per chain.
+const C = { trunk: 5, ferry: 1, mara: 4, note: 0 };
+const SHAPES = [
+  { id: 't1', x: 470, y: 70,  c: C.trunk, html: 'Mara inherits the lighthouse on Gull Rock from an aunt she never met.' },
+  { id: 't2', x: 470, y: 185, c: C.trunk, html: 'The lamp won’t light, and the town blames her for the wreck.', state: 'selected' },
+  { id: 't3', x: 470, y: 300, c: C.trunk, html: 'A storm strands the ferry and its passengers on the rock.', state: 'hover' },
+  { id: 't4', x: 470, y: 415, c: C.trunk, html: '<b>Someone</b> has been tending the lamp <i>at night</i><span class="caret"></span>', state: 'editing' },
+  { id: 't5', x: 470, y: 545, c: C.trunk, html: 'The keeper’s logbook names her <span class="sel-text">mother</span>.' },
+  { id: 'f1', x: 150, y: 265, c: C.ferry, html: 'Ferryman: hides the crates below deck.' },
+  { id: 'f2', x: 150, y: 370, c: C.ferry, html: 'Ferryman: lies to the harbourmaster about the cargo.' },
+  { id: 'm1', x: 790, y: 150, c: C.mara,  html: 'Mara: searches the parish archive.' },
+  { id: 'm2', x: 790, y: 255, c: C.mara,  html: 'Mara: finds a page torn from the logbook.' },
+  { id: 'n1', x: 150, y: 95,  c: C.note,  html: 'Who rings the bell at dawn?' },
+];
+const LINKS = [['t1','t2'],['t2','t3'],['t3','t4'],['t4','t5'],['f1','f2'],['m1','m2','hover']];
+const MENU_ON = 'm2';
+const SEL_CHAIN = C.trunk; // chain of the selected shape, for K (Focus)
+
+const keys = Object.keys(VARIANTS);
+let cur = new URLSearchParams(location.search).get('variant');
+if (!VARIANTS[cur]) cur = 'A';
+
+function render() {
+  const v = VARIANTS[cur];
+  const canvas = document.getElementById('canvas');
+  const links = document.getElementById('links');
+  canvas.querySelectorAll('.shape,.mid,.menu,.cursor').forEach(e => e.remove());
+  canvas.style.background = v.grid === 'none' ? v.canvas : `${v.grid}, ${v.canvas}`;
+  document.querySelector('.doc-title').style.color = v.ink + '88';
+
+  const els = {};
+  for (const s of SHAPES) {
+    const d = document.createElement('div');
+    d.className = 'shape';
+    d.innerHTML = s.html;
+    Object.assign(d.style, {
+      left: s.x + 'px', top: s.y + 'px', width: v.width + 'px', padding: v.pad,
+      background: v.bg ? v.bg(s.c) : v.pastel[s.c], color: v.ink, borderRadius: v.radius + 'px',
+      font: `${v.weight} ${v.size}px/${v.lh} ${v.font}`, border: v.border(s.c),
+      boxShadow: (s.state === 'selected' || s.state === 'editing') ? v.select(s.c) : val(v.shadow, s.c),
+      opacity: v.dim && s.c !== SEL_CHAIN ? v.dim : 1,
+    });
+    if ((s.state === 'selected' || s.state === 'editing') && v.selStyle) Object.assign(d.style, v.selStyle(s.c));
+    canvas.appendChild(d);
+    els[s.id] = d;
+    d.querySelectorAll('.caret').forEach(c => c.style.background = v.caret);
+    d.querySelectorAll('.sel-text').forEach(c => c.style.background = v.textSel);
+  }
+
+  // connectors: side midpoint to facing side midpoint, drawn under shapes
+  const r = id => { const e = els[id]; return { x: e.offsetLeft, y: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight }; };
+  links.innerHTML = '';
+  for (const [a, b, st] of LINKS) {
+    const A = r(a), B = r(b);
+    const vertical = Math.abs((B.y + B.h/2) - (A.y + A.h/2)) > Math.abs((B.x + B.w/2) - (A.x + A.w/2));
+    const [x1, y1, x2, y2] = vertical
+      ? [A.x + A.w/2, A.y + A.h, B.x + B.w/2, B.y]
+      : [A.x + A.w, A.y + A.h/2, B.x, B.y + B.h/2];
+    const L = st === 'hover' ? v.hoverLink : v.link;
+    const chain = SHAPES.find(s => s.id === a).c;
+    links.insertAdjacentHTML('beforeend', `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${val(L.color, chain)}" stroke-width="${L.width}" opacity="${v.dim && chain !== SEL_CHAIN ? v.dim : 1}" stroke-linecap="${v.link.cap}"/>`);
+  }
+
+  // hover midpoint circles on t3
+  const H = r('t3');
+  for (const [mx, my] of [[H.x + H.w/2, H.y], [H.x + H.w, H.y + H.h/2], [H.x + H.w/2, H.y + H.h], [H.x, H.y + H.h/2]]) {
+    const m = document.createElement('div');
+    m.className = 'mid';
+    Object.assign(m.style, { left: mx + 'px', top: my + 'px', width: v.mid.size + 'px', height: v.mid.size + 'px', borderRadius: v.mid.square ? '1px' : '50%',
+      background: v.mid.fill, boxShadow: `0 0 0 ${v.mid.sw}px ${v.mid.stroke}, 0 1px 3px rgba(0,0,0,.12)` });
+    canvas.appendChild(m);
+  }
+  // resize cursor near t1's right edge
+  const T1 = r('t1');
+  const cur1 = document.createElement('div');
+  cur1.className = 'cursor';
+  cur1.style.left = (T1.x + T1.w - 8) + 'px'; cur1.style.top = (T1.y + T1.h/2 - 10) + 'px';
+  cur1.innerHTML = `<svg width="22" height="16" viewBox="0 0 22 16"><path d="M1 8l5-5v3h10V3l5 5-5 5v-3H6v3z" fill="#000" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+  canvas.appendChild(cur1);
+
+  // shape context menu on m2
+  const M = r(MENU_ON);
+  const mv = v.menu;
+  const menu = document.createElement('div');
+  menu.className = 'menu';
+  Object.assign(menu.style, { left: (M.x + M.w - 30) + 'px', top: (M.y + M.h - 8) + 'px', background: mv.bg, color: mv.ink,
+    borderRadius: mv.radius + 'px', boxShadow: mv.shadow, font: `500 ${mv.size || 13}px/1 ${mv.font}`, padding: '6px', backdropFilter: mv.blur ? 'blur(18px) saturate(1.6)' : '' });
+  const item = (t, k, hov) => `<div class="item" style="padding:7px 10px;border-radius:${Math.max(mv.radius - 4, 3)}px;${hov ? `background:${mv.hover}` : ''}"><span>${t}</span><span class="k">${k}</span></div>`;
+  const S = mv.sw || {}, sz = S.size || 18;
+  const sw = v.picker.map((p, i) => `<div class="sw" title="${NAMES[i]}" style="width:${sz}px;height:${sz}px;border-radius:${S.radius ?? sz / 2}px;background:${p};box-shadow:${S.ring ? `inset 0 0 0 2px ${S.ring}` : 'none'}${i === C.mara ? `, 0 0 0 2px ${mv.bg}, 0 0 0 4px ${S.ring || p}` : ''}"></div>`).join('');
+  menu.innerHTML = item('Cut', '⌘X') + item('Copy', '⌘C', true) + item('Paste', '⌘V') + item('Duplicate', '⌘D')
+    + `<div style="height:1px;background:${mv.ink}18;margin:5px 4px"></div>`
+    + `<div style="padding:6px 10px 4px;opacity:.55;font-size:11.5px">Color</div><div class="swatches" style="padding:4px 10px 8px">${sw}</div>`;
+  canvas.appendChild(menu);
+  menu.style.left = Math.min(menu.offsetLeft, 1180 - menu.offsetWidth - 14) + 'px';
+
+  // tokens panel
+  const row = (a, b) => `<div class="row"><span>${a}</span><span>${b}</span></div>`;
+  document.getElementById('tokens').innerHTML = `<h3>${cur} · ${v.name}</h3>`
+    + row('font', v.font.split(',')[0].replace(/'/g, '') + ` ${v.size}/${v.lh} w${v.weight}`)
+    + row('shape width', v.width + ' px') + row('corner radius', v.radius + ' px') + row('padding', v.pad)
+    + row('border', v.edge ? '1.25 px, darker tone' : v.border(0).replace(/rgba\([^)]*\)/, 'tint')) + row('depth', v.shadow === 'none' ? 'flat' : typeof v.shadow === 'function' ? 'chain-tinted glow' : 'soft shadow')
+    + row('canvas', v.canvas + (v.grid === 'none' ? '' : v.grid.startsWith('radial') ? ' + dots' : ' + grid')) + row('connector', `${v.link.width} px ${typeof v.link.color === 'function' ? 'chain color' : v.link.color}`)
+    + row('midpoint', v.mid.size + ' px')
+    + `<div class="pal"><span></span><span style="opacity:.6">pastel</span><span style="opacity:.6">picker</span>`
+    + NAMES.map((n, i) => `<span>${n}</span><div class="chip" style="background:${v.pastel[i]}">${v.pastel[i]}</div><div class="chip" style="background:${v.picker[i]};color:#fff">${v.picker[i]}</div>`).join('')
+    + `</div><p>${v.blurb}</p>`;
+  document.getElementById('lbl').textContent = `${cur} (${v.name})  ·  ${keys.indexOf(cur) + 1}/${keys.length}`;
+}
+
+function go(d) {
+  cur = keys[(keys.indexOf(cur) + d + keys.length) % keys.length];
+  try { history.replaceState(null, '', '?variant=' + cur); } catch {} // data: URLs refuse this
+  render();
+}
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+addEventListener('keydown', e => {
+  if (e.target.closest('input,textarea,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') go(-1);
+  if (e.key === 'ArrowRight') go(1);
+});
+// ?shot: bare 1180x740 window for headless PNG capture
+if (new URLSearchParams(location.search).has('shot')) document.body.classList.add('shot');
+// Fit window + token panel to the viewport; the mockup itself stays 1:1 in its own coordinates.
+const fit = () => document.getElementById('stage').style.zoom = document.body.classList.contains('shot') ? 1 : Math.min(1, innerWidth / (1180 + 300 + 72));
+addEventListener('resize', fit); fit();
+document.fonts.ready.then(render);
+render();
+</script>
+</body>
+</html>

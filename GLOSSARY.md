@@ -53,6 +53,12 @@ _Avoid_: Group, frame, section, container
 **Member**:
 A shape or nested zone that belongs to a zone.
 
+### Look
+
+**Theme**:
+The app's whole look (font, palette values, shape and connector styles); Paper, Desk or Poster. An app preference, never part of a document.
+_Avoid_: Skin, style
+
 ### Writer's reading
 
 These are how the writer reads the canvas; the app has no concept of them.

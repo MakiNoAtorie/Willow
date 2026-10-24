@@ -5,8 +5,8 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 ## Stack and platform
 
 - Rust + **GPUI** (Zed's UI framework). GPUI is not a stable published crate: pin a git revision and expect to pay for upgrades.
-- Windows and macOS from day one; both must build and feel equally good. Bundle one font so text renders identically on both; Phase 1 picks it, and Phase 0 checks emoji fallback on Windows.
-- Light theme only.
+- Windows and macOS from day one; both must build and feel equally good. Bundle each theme's font so text renders identically on both; Phase 1 picks them, and Phase 0 checks emoji fallback on Windows.
+- Light themes only (see Themes below).
 - Memory and CPU efficiency matter: idle should be near-zero CPU, and large canvases must stay smooth. Animations must stop their redraw loop when they finish.
 - Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001). Shape height comes from text layout, which needs GPUI's text system, so the core takes a text-measuring function from the UI layer instead of measuring text itself (ADR 0003).
 - Tests that need large or many input files build them with file generators rather than hand-written fixtures. Parser edge cases (escaping, invalid files) may use small golden files. Any benchmark or tool output should be CSV.
@@ -18,6 +18,14 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Shapes are rounded rectangles. Connectors are **straight lines, no arrowheads**. Avoid anything that looks like spaghetti.
 - Six pastel colors plus one neutral light gray. The neutral is the default for new unlinked shapes and for zones. In the picker all seven appear as **more saturated** circles so they're easy to tell apart. On shapes and zones they're applied as the pastel version.
 - The full visual language is defined in Phase 1 and every later phase follows it.
+
+## Themes
+
+- Three themes, all light: **Paper** (the default), **Desk** and **Poster**, fixed in Phase 1. Paper is the one every phase builds and is reviewed against; Desk and Poster are added in Phase 8.
+- A theme sets the look only: font and typography, the pastel and picker value of each of the seven colors, canvas background, shape fill, borders, corner radii, padding, shadows, connector stroke, selection, hover and midpoint styles, and menus. It never changes the model or the file. Color names are shared, so a chain saved as sage is sage in every theme.
+- View > Theme switches it. The choice is an app preference, the same in every open window and remembered across launches; documents don't store it.
+- Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink and may overlap a neighbor, as text growth already can. Nothing is pushed, the document stays saved, and the switch is not undoable.
+- New shapes use one default width in every theme (Paper's), so the model never depends on the theme.
 
 ## Window
 
@@ -56,7 +64,7 @@ Record measurements as CSV. End with a short go/no-go note. If GPUI falls short,
 
 Goal: nail exactly how Willow looks before building any real UI. No Rust in this phase: recreate the app purely visually as SVG or HTML mockups, iterate on them with the owner, and record the result.
 
-- Mock up every state the app has, as it would actually appear:
+- Mock up every state the app has, as it would actually appear, in each of the three themes:
   - The window on both platforms (macOS title bar and menu bar, Windows custom title bar and menu button).
   - A canvas with a trunk and a couple of branches beside it, some colored.
   - A selected shape, a shape being edited (with caret, bold and italic text), hover midpoint circles, a hovered connector, and the resize cursor on side edges.
@@ -70,7 +78,7 @@ Goal: nail exactly how Willow looks before building any real UI. No Rust in this
 - Where motion matters (shape creation, insert-and-push, color change, selection), HTML mockups can animate to show timing and easing.
 - Everything shown must be achievable in GPUI; mockups are reference only and never ship.
 - Present options where there's a real choice, and refine based on the owner's feedback until approved.
-- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, plus a visual-language document with the concrete values (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades). Text is not drawn below about 7 px on screen, so text must have fully faded by the zoom where it would drop under that size (ADR 0003).
+- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, a PNG screenshot of every mocked-up state (so later phases and agents can compare against an image without opening the mockups), plus a visual-language document with the concrete values for each theme (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades). Text is not drawn below about 7 px on screen, so text must have fully faded by the zoom where it would drop under that size (ADR 0003).
 
 Done when: the owner has approved the mockups and the visual-language document exists.
 
@@ -79,6 +87,7 @@ Done when: the owner has approved the mockups and the visual-language document e
 Goal: an infinite canvas where shapes can be created, moved and written in, inside the final window, already looking like the Phase 1 mockups.
 
 - Window chrome as described above, on both platforms.
+- Drawing takes every visual value from one theme definition (Paper for now), so adding Desk and Poster in Phase 8 is new values, not new drawing code.
 - Infinite canvas: pan and zoom.
   - Plain left-drag on empty space pans.
   - Middle-drag always pans.
@@ -209,6 +218,7 @@ Goal: edit the diagram as text, live, alongside the canvas.
 Goal: the whole app feels finished and matches the Phase 1 visual language.
 
 - Review every interaction on both platforms against the approved mockups: animation timing, hover states, cursor changes, spacing and text rendering.
+- Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
 - Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
 
 ---
