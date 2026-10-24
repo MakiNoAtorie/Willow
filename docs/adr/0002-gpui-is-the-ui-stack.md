@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # GPUI is the UI stack, with our own text layout
@@ -13,7 +13,9 @@ Phase 0 showed GPUI (pinned to `zed-industries/zed` @ `79fe6a6`) can carry Willo
 
 The price is that we own text layout: GPUI has no justified alignment, so shapes use custom line breaking and glyph placement on top of `layout_line`/`paint_glyph`.
 
-The status stays *proposed* until the owner's Windows checks (`spike-gpui/WINDOWS-CHECKLIST.md`: IME, dead keys, snap layouts, mixed DPI, emoji) pass. It becomes *accepted* when they do. If one fails at the platform layer and a small patch to the pinned `gpui_windows` can't fix it, we switch stacks.
+The owner's Windows checks (`spike-gpui/WINDOWS-CHECKLIST.md`) passed on 2026-10-24: IME, dead keys, snap layouts and emoji. Mixed DPI is still untested (no second monitor). If it, or any later Windows check, fails at the platform layer and a small patch to the pinned `gpui_windows` can't fix it, we switch stacks.
+
+Windows (9600X + RTX 5060 Ti): draw p95 1.0–6.3 ms across pan and zoom sweep, idle renders 0, keystroke-to-paint p95 5.4 ms; rows `win-9600x-5060ti` in `spike-gpui/results.csv` on `prototype/gpui-viability`.
 
 ## Consequences
 
