@@ -4,11 +4,16 @@ use gpui::{
     App, Bounds, BoxShadow, Context, Corners, Hsla, KeyBinding, Pixels, TitlebarOptions, Window,
     WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
+#[cfg(target_os = "windows")]
+mod titlebar_windows;
+#[cfg(target_os = "windows")]
+use titlebar_windows::title_bar;
+
 use willow_core::{Document, PAPER, Rgba, Theme};
 
 actions!(willow, [Quit]);
 
-fn color(c: Rgba) -> Hsla {
+pub(crate) fn color(c: Rgba) -> Hsla {
     gpui::rgba(c.0).into()
 }
 
@@ -18,7 +23,7 @@ struct Willow {
 }
 
 impl Render for Willow {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let (doc, theme) = (self.doc.clone(), self.theme);
         let canvas = canvas(|_, _, _| (), move |b, (), w, _| paint(b, &doc, theme, w)).size_full();
         let root = div()
@@ -30,9 +35,9 @@ impl Render for Willow {
         let body = div().flex_1().overflow_hidden().child(canvas);
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         if cfg!(target_os = "windows") {
-            root.child(title_bar(theme)).child(body)
+            root.child(title_bar(theme, window)).child(body)
         } else {
-            root.child(body).child(title_bar(theme))
+            root.child(body).child(title_bar(theme, window))
         }
     }
 }
@@ -109,7 +114,7 @@ fn paint(bounds: Bounds<Pixels>, doc: &Document, t: &Theme, window: &mut Window)
 
 /// macOS: transparent title bar over the canvas; the traffic lights are native.
 #[cfg(not(target_os = "windows"))]
-fn title_bar(t: &Theme) -> impl IntoElement {
+fn title_bar(t: &Theme, _: &Window) -> impl IntoElement {
     div()
         .absolute()
         .top_0()
@@ -123,60 +128,6 @@ fn title_bar(t: &Theme) -> impl IntoElement {
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(color(t.chrome_title))
         .child("Untitled")
-}
-
-/// Windows: 34 px custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
-#[cfg(target_os = "windows")]
-fn title_bar(t: &Theme) -> impl IntoElement {
-    use gpui::WindowControlArea;
-    let hover = color(t.chrome_button_hover);
-    let button = move |id: &'static str, glyph: &'static str, area| {
-        div()
-            .id(id)
-            .w(px(46.))
-            .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .font_family("Segoe Fluent Icons")
-            .text_size(px(10.))
-            .hover(move |s| s.bg(hover))
-            .window_control_area(area)
-            .child(glyph)
-    };
-    div()
-        .h(px(34.))
-        .w_full()
-        .flex()
-        .items_center()
-        .text_color(color(t.ink))
-        // Menu button placeholder; the Edit menu arrives with #17.
-        .child(
-            div()
-                .id("menu")
-                .w(px(44.))
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(move |s| s.bg(hover))
-                .child("\u{2261}"),
-        )
-        .child(
-            div()
-                .flex_1()
-                .h_full()
-                .flex()
-                .items_center()
-                .text_size(px(12.5))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(color(t.chrome_title))
-                .window_control_area(WindowControlArea::Drag)
-                .child("Untitled"),
-        )
-        .child(button("min", "\u{e921}", WindowControlArea::Min))
-        .child(button("max", "\u{e922}", WindowControlArea::Max))
-        .child(button("close", "\u{e8bb}", WindowControlArea::Close))
 }
 
 fn main() {
