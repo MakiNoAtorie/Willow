@@ -26,7 +26,7 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 4. Use **implementer subagents** to implement each ticket, each in its own worktree on its own branch. Start them with `subagent_type: "implementer"` (`.claude/agents/implementer.md` holds the stable rules: tdd, filtered output, local checks only, no CI polling, report format). Pick `model` per ticket (Opus for tricky correctness, Sonnet for mechanical) and say why in one line. The prompt carries only the ticket, branch, integration branch, scratchpad path, files in flight and excerpts. Implementers don't wait on CI: check CI once when merging, and on red send the failing job's error back to the same implementer (continue it, don't start a new one).
 
-5. Once an **implementer subagent** completes, merge its work to the integration branch: fast-forward directly, and use a **merger subagent** (Sonnet) only for real conflicts. Fold the implementer's convention bullets into `docs/CONVENTIONS.md`.
+5. Once an **implementer subagent** completes, merge its work to the integration branch: fast-forward directly, and use a **merger subagent** (Sonnet) only for real conflicts. Fold the implementer's convention bullets into `docs/CONVENTIONS.md`, pruning so `ci.sh`'s 8 KB check passes. Post the implementer's `Windows:` line on the phase's Windows check issue. Resolve conflicts by staging the conflicted files by name, since agent worktrees sit inside the checkout.
 
 6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
 

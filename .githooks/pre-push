@@ -9,6 +9,6 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 log=$(mktemp)
 ./ci.sh 2 >"$log" 2>&1
 status=$?
-grep -E 'error|warning:|FAILED|passed' "$log" | grep -v 'ok\. [0-9]* passed' | tail -40
+grep -E 'error|warning:|FAILED|CI checks passed' "$log" | tail -40
 rm -f "$log"
 exit $status
