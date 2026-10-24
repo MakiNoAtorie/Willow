@@ -20,6 +20,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Text format in `willow-core/src/format.rs`: `save(&Document) -> String`, `load(&[u8]) -> Result<Loaded { document, repaired }, LoadError>`; `LoadError`'s `Display` is the alert's reason. Golden files in `crates/willow-core/tests/golden/*.willow` (git `-text`).
 - Session file state in `session/file.rs`: `Session::open(loaded, bytes, ..)`, `is_saved()`, `bytes()`, `save(|bytes| io::Result<()>)` (the failed-save test seam).
 - The app's only file I/O is `willow-app/src/file.rs`: saves via `write_beside` (temp file, then rename), alerts via `file::alert`, panels via `rfd`. Windows open through `open_window(Content, bench, cx)`; `Willow.path` is canonicalized; `Willow::blank()` decides Open's window reuse. Quit is `QuitMode::LastWindowClosed`.
+- Disk changes are decided in the core by `Session::disk_changed(Option<&[u8]>)` (`None` = missing); the app only compares mtimes and reads bytes in `Willow::check_disk`, on window activation.
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
@@ -42,7 +43,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context, since on macOS a context-free binding swallows the letter while editing.
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
 - Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries (`drag_preview`, `resize_preview`); the mutation lands once on release through a named `Session` method (`move_shape`, `resize_shape`, `autofit`). Side resizes keep width parity, so the minimum can land one unit above the theoretical one.
-- Undoable changes go through `History::change` from a named `Session` method; viewport and selection never do. An editing session is one `begin()`/`end()` group.
+- Undoable changes go through `History::change` from a named `Session` method; viewport and selection never do. Whole-document swaps (reload) go through `History::replace` (snapshots the whole `Document`); anything that can remove shapes calls `drop_missing_selection` after. An editing session is one `begin()`/`end()` group.
 
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Cull on position and width before asking for layout.
