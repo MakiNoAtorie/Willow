@@ -12,10 +12,13 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Visual values live as `Theme` fields in the core, never as constants in the app. Colors are `Rgba(0xRRGGBBAA)`; the app converts with `gpui::rgba(c.0).into()`.
 - Theme shadows keep the CSS values from `themes.js`; the app passes `blur / 2` as GPUI's `blur_radius` (GPUI blur is the Gaussian sigma).
 - macOS: the title bar floats over the canvas, so add it as the last child or the canvas paints over it.
-- Platform window chrome lives in `<name>_<os>.rs` modules gated by `#[cfg(target_os = ...)]` in `main.rs`, each exposing `title_bar(theme, window)` with the same signature.
+- Platform window chrome lives in `<name>_<os>.rs` modules gated by `#[cfg(target_os = ...)]` in `main.rs`, each exposing `title_bar(session, window, cx)` with the same signature.
+- Type-check Windows-only code on macOS with `cargo clippy -p willow-app --target x86_64-pc-windows-gnu -- -D warnings`.
+- Menu items enable from action-handler presence: register handlers with `.when(session.can_x(), …)` on the focused root. Never call `window.is_action_available` during render (GPUI panics); read core state. Menu visuals live in `Theme.menu` (screen px).
 
 ## Input and redraw
 - The app sends all input through `Session::handle(input, now)` and calls `cx.notify()` only when `Response.redraw` is true; it requests frames only while `Response.animating`. This keeps idle CPU near zero.
+- Undoable model changes go through `History::change` from a named `Session` method; viewport and selection never touch history. Editing sessions wrap changes in `History::begin()`/`end()`; undo while one is open reverts it and keeps it open.
 - Gesture mutations land once, on release, through a named `Session` method (e.g. `move_shape`); live previews are queries (`drag_preview`), never written into the document.
 - Time-based animations take a `Transition { duration, easing: CubicBezier }` from the theme and OR their state into `Session::animating(now)`. `render` calls `Session::tick(now)`; paint calls `window.request_animation_frame()` only while animating.
 - Paint multiplies every canvas-unit value (sizes, radii, shadows, ring widths, grid) by `vp.zoom`; screen-space chrome (the zoom pill) is not scaled. Low-zoom values extend `ZoomStyle`.
