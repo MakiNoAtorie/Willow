@@ -1,6 +1,6 @@
 # Phase 0: GPUI go/no-go
 
-**Verdict: GO on macOS and Windows.** Every question was answered yes on the MacBook Air M4 and on the Windows desktop (Ryzen 5 9600X, RTX 5060 Ti, [spike-gpui/WINDOWS-CHECKLIST.md](spike-gpui/WINDOWS-CHECKLIST.md)). Nothing failed at the platform layer. Still untested: mixed DPI (no second monitor), precision touchpad (none), the real-IME and dead-key checks on the Mac, and the iGPU run. Two caveats the owner should decide on:
+**Verdict: GO on macOS and Windows.** Every question was answered yes on the MacBook Air M4 and on the Windows desktop (Ryzen 5 9600X, RTX 5060 Ti, [spike-gpui/WINDOWS-CHECKLIST.md](spike-gpui/WINDOWS-CHECKLIST.md)). Nothing failed at the platform layer. Still untested: mixed DPI (no second monitor), a Windows precision touchpad (none; the Mac trackpad passed), the real-IME and dead-key checks on the Mac, and the iGPU run. Two caveats the owner should decide on:
 
 - Text has to stop drawing below about 7 px on screen for the zoom sweep to meet 8 ms.
 - The keystroke-to-paint target as written is bounded by vsync pacing, not by GPUI.
@@ -91,7 +91,7 @@ Shapes are `paint_quad` with corner radii. All visible connectors go into one `P
 
 - Present intervals stayed on vsync (p95 17.3–18.1 ms). Worst `draw_max` was 10.8 ms (cold zoom sweep).
 - By hand: wheel and Shift+wheel pan, Ctrl+wheel zooms, `L` loads the 10k document. The owner found Ctrl+wheel zoom choppy: each notch jumps about 49 % in one frame because the spike applies it with no easing. Draw time isn't the cause, and the spec now requires eased wheel zoom in Phase 2.
-- Precision touchpad pan and pinch are untested (none on this machine).
+- Precision touchpad pan and pinch are untested on Windows (none on this machine). The MacBook Air trackpad passed by hand on 2026-10-24: two-finger pan, momentum that stops, pinch around the fingers, Cmd+swipe zoom, smooth on the 10k document, tap-to-click and two-finger tap.
 
 ## 4. Idle CPU and memory after an animation: **GO**
 
