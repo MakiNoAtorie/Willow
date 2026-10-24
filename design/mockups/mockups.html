@@ -1,0 +1,432 @@
+<!doctype html>
+<!--
+  Willow Phase 1 mockups: every static app state, drawn from the tokens in themes.js.
+  Reference only, never shipped. Open directly in a browser.
+  URL: ?screen=<id>&theme=paper&os=mac|win   Add &shot for a bare 1280x820 frame (used by render.sh).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Willow mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400;1,7..72,700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="themes.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1f2023; font-family: -apple-system, system-ui, sans-serif; color: #ddd; }
+  #app { display: flex; min-height: 100vh; }
+  #nav { width: 230px; flex: none; padding: 16px 12px; font-size: 13px; border-right: 1px solid #333; }
+  #nav h1 { font-size: 14px; margin: 0 4px 12px; color: #fff; }
+  #nav a { display: block; padding: 5px 8px; border-radius: 6px; color: #bbb; text-decoration: none; }
+  #nav a.on { background: #3a3b40; color: #fff; }
+  #nav .os { display: flex; gap: 4px; margin: 0 4px 12px; }
+  #nav .os a { flex: 1; text-align: center; background: #2b2c30; }
+  #main { flex: 1; display: flex; align-items: flex-start; justify-content: center; padding: 20px; overflow: hidden; }
+  #main .note { position: fixed; bottom: 10px; right: 16px; font-size: 12px; color: #888; max-width: 520px; text-align: right; }
+  body.shot #nav, body.shot .note { display: none; }
+  body.shot #main { padding: 0; display: block; }
+
+  /* the frame: a 1280x820 desktop holding one 1180x740 window */
+  .desk { position: relative; width: 1280px; height: 820px; overflow: hidden; flex: none;
+          background: linear-gradient(160deg, #c9cfd6, #aeb6c0); }
+  .menubar { position: absolute; top: 0; left: 0; right: 0; height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 16px;
+             background: rgba(246,246,248,.78); backdrop-filter: blur(20px); font: 500 13px -apple-system, system-ui; color: #1d1d1f; z-index: 20; }
+  .menubar .app { font-weight: 700; }
+  .menubar .open { background: rgba(0,0,0,.1); border-radius: 5px; padding: 2px 8px; margin: 0 -8px; }
+  .menubar .right { margin-left: auto; }
+  .win { position: absolute; left: 50px; top: 52px; width: 1180px; height: 740px; border-radius: 12px; overflow: hidden;
+         box-shadow: 0 0 0 .5px rgba(0,0,0,.35), 0 24px 70px rgba(0,0,0,.30); display: flex; flex-direction: column; }
+  .win.win11 { border-radius: 8px; top: 40px; }
+  .titlebar { height: 38px; flex: none; position: relative; display: flex; align-items: center; z-index: 10; }
+  .mac .titlebar { position: absolute; top: 0; left: 0; right: 0; }
+  .tl { width: 12px; height: 12px; border-radius: 50%; margin-left: 8px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.18); }
+  .tl:first-child { margin-left: 14px; }
+  .doc { position: absolute; left: 0; right: 0; text-align: center; pointer-events: none; font: 500 13px -apple-system, system-ui; }
+  .tbtn { width: 46px; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .body { flex: 1; display: flex; min-height: 0; position: relative; }
+  .viewport { position: relative; flex: 1; overflow: hidden; }
+  .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .world svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .shape { position: absolute; text-align: justify; }
+  .zone { position: absolute; }
+  .zone .ztitle { position: absolute; left: 18px; top: 13px; white-space: nowrap; }
+  .caret { display: inline-block; vertical-align: -0.2em; height: 1.2em; margin-left: 1px; }
+  .ov { position: absolute; z-index: 5; }
+  .menu { position: absolute; z-index: 6; min-width: 200px; padding: 6px; }
+  .menu .it { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 6px 10px; white-space: nowrap; }
+  .menu .it .k { opacity: .45; }
+  .menu .it .k.sub::after { content: '›'; font-size: 15px; }
+  .menu .sep { height: 1px; margin: 5px 6px; }
+  .menu .lbl { padding: 6px 10px 3px; font-size: 11.5px; opacity: .55; }
+  .menu .sws { display: flex; gap: 7px; padding: 5px 10px 8px; }
+  .menu .sw { border-radius: 50%; }
+  .menu .danger { color: #b5463b; }
+  .key { position: absolute; z-index: 6; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+         transform: translate(-50%,-50%); }
+  .pill { position: absolute; z-index: 6; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 5px 11px; border-radius: 999px;
+          font: 600 12px -apple-system, system-ui; letter-spacing: .02em; }
+  .code { flex: none; width: 420px; overflow: hidden; padding: 14px 0; white-space: pre; position: relative; }
+  .code .ln { display: flex; }
+  .code .ln .g { width: 40px; flex: none; text-align: right; padding-right: 14px; }
+  .code .ln.cur { }
+  .code .bad { text-decoration: underline wavy; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+</style>
+</head>
+<body>
+<div id="app"><div id="nav"></div><div id="main"><div id="frame"></div><div class="note" id="note"></div></div></div>
+<script>
+const P = new URLSearchParams(location.search);
+const T = THEMES[P.get('theme')] || THEMES.paper;
+const SHOT = P.has('shot');
+if (SHOT) document.body.classList.add('shot');
+
+// ---------- scenes ----------
+const C = { neutral: 0, rose: 1, peach: 2, butter: 3, sage: 4, sky: 5, lilac: 6 };
+const gull = () => ({
+  shapes: [
+    { id: 'a', x: 470, y: 70,  c: C.sky,  t: 'Mara inherits the lighthouse on Gull Rock from her aunt.' },
+    { id: 'b', x: 470, y: 195, c: C.sky,  t: 'The lamp won’t light, and the town blames her for the wreck.' },
+    { id: 'c', x: 470, y: 320, c: C.sky,  t: 'A storm strands the ferry and its passengers on the rock.' },
+    { id: 'd', x: 470, y: 445, c: C.sky,  t: '<b>Someone</b> has been tending the lamp <i>at night</i>.' },
+    { id: 'e', x: 470, y: 570, c: C.sky,  t: 'The keeper’s logbook names her mother.' },
+    { id: 'f', x: 150, y: 95,  c: C.neutral, t: 'Who rings the bell at dawn?' },
+    { id: 'g', x: 790, y: 150, c: C.sage, t: 'Mara: searches the parish archive.' },
+    { id: 'h', x: 790, y: 255, c: C.sage, t: 'Mara: finds a page torn from the logbook.' },
+    { id: 'i', x: 150, y: 265, c: C.rose, t: 'Ferryman: hides the crates below deck.' },
+    { id: 'j', x: 150, y: 370, c: C.rose, t: 'Ferryman: lies to the harbourmaster about the cargo.' },
+  ],
+  links: [['a','b'],['b','c'],['c','d'],['d','e'],['g','h'],['i','j']],
+  zones: [],
+});
+const S = (scene, id) => scene.shapes.find(s => s.id === id);
+
+function zoned() {
+  const sc = gull();
+  const pos = { a: [470, 85], b: [470, 210], c: [470, 335], i: [155, 240], j: [155, 345], d: [470, 590], e: [470, 705], g: [790, 590], h: [790, 705], f: [850, 110] };
+  for (const [id, [x, y]] of Object.entries(pos)) Object.assign(S(sc, id), { x, y });
+  sc.zones = [
+    { id: 'act1', x: 100, y: 40, w: 640, h: 460, c: C.neutral, title: 'Act I · The Rock' },
+    { id: 'ferry', x: 128, y: 185, w: 264, h: 290, c: C.rose, title: 'The ferry', parent: 'act1' },
+    { id: 'act2', x: 100, y: 535, w: 940, h: 300, c: C.butter, title: 'Act II · The Logbook' },
+  ];
+  return sc;
+}
+
+// A larger generated story for the low-zoom views: a long trunk with willow-like branches hanging beside it.
+function willow() {
+  const words = ['The tide turns', 'A letter arrives', 'Mara climbs the stair', 'The bell rings twice', 'Rain on the lamp glass', 'A stranger at the quay',
+                 'The ferry is late', 'Smoke on the headland', 'She reads the logbook', 'The town meets at night', 'A rope is cut', 'The keeper returns'];
+  const sc = { shapes: [], links: [], zones: [] };
+  let n = 0; const id = () => 's' + (n++);
+  const tx = 1600, trunk = [];
+  for (let k = 0; k < 18; k++) {
+    const s = { id: id(), x: tx, y: 80 + k * 135, c: C.sky, t: words[k % words.length] + ', and nothing is the same again.' };
+    sc.shapes.push(s); if (trunk.length) sc.links.push([trunk.at(-1).id, s.id]); trunk.push(s);
+  }
+  const branches = [[-1, 1, C.sage, 4], [1, 2, C.rose, 3], [-2, 4, C.peach, 5], [1, 6, C.lilac, 4], [-1, 8, C.butter, 3], [2, 9, C.sage, 5],
+                    [-2, 11, C.rose, 4], [1, 12, C.peach, 3], [-1, 14, C.lilac, 3], [2, 14, C.butter, 2], [-3, 6, C.neutral, 2], [3, 3, C.neutral, 1]];
+  for (const [side, at, c, len] of branches) {
+    let prev = null;
+    for (let k = 0; k < len; k++) {
+      const s = { id: id(), x: tx + side * 290 + Math.sign(side) * (Math.abs(side) - 1) * 10, y: 80 + at * 135 + 40 + k * 120, c, t: words[(at + k) % words.length] + '.' };
+      sc.shapes.push(s); if (prev) sc.links.push([prev.id, s.id]); prev = s;
+    }
+  }
+  sc.zones = [
+    { id: 'z1', x: 640, y: 30, w: 2130, h: 1110, c: C.neutral, title: 'Act I' },
+    { id: 'z2', x: 640, y: 1180, w: 2130, h: 1340, c: C.butter, title: 'Act II' },
+  ];
+  return sc;
+}
+
+// ---------- screens ----------
+const SCREENS = [
+  { id: 'mac-window', title: 'macOS window · Edit menu', os: 'mac', sc: gull, macMenu: 'Edit', edited: true },
+  { id: 'mac-view-menu', title: 'macOS · View menu, Theme', os: 'mac', sc: gull, macMenu: 'View' },
+  { id: 'win-window', title: 'Windows title bar · menu', os: 'win', sc: gull, winMenu: true, edited: true },
+  { id: 'canvas', title: 'Canvas: select, edit, hover', sc: gull, sel: ['b'], edit: 'd', hover: 'c', hoverLink: ['g','h'], resize: 'a' },
+  { id: 'menu-shape', title: 'Shape menu', sc: gull, sel: ['h'], menu: 'shape' },
+  { id: 'menu-multi', title: 'Multi-selection menu', sc: gull, sel: ['f','i','j'], menu: 'multi' },
+  { id: 'menu-connector', title: 'Connector menu', sc: gull, hoverLink: ['b','c'], menu: 'connector' },
+  { id: 'menu-empty', title: 'Empty-space menu', sc: gull, menu: 'empty' },
+  { id: 'marquee', title: 'Marquee multi-select', sc: gull, sel: ['i','j'], marquee: [110, 245, 400, 480] },
+  { id: 'picker', title: 'Directional picker', sc: gull, sel: ['h'], picker: 'h' },
+  { id: 'zones', title: 'Zones, one nested', sc: zoned, zoom: 0.8, pan: [60, 22] },
+  { id: 'menu-zone', title: 'Zone menu', sc: zoned, zoom: 0.8, pan: [60, 22], menu: 'zone' },
+  { id: 'zoom-pill', title: 'Zoom indicator', sc: gull, zoom: 0.8, pan: [110, 40], pill: '80%' },
+  { id: 'low-zoom-fading', title: 'Zooming out: text fading', sc: willow, zoom: 0.62, pan: [-330, 30], pill: '62%' },
+  { id: 'low-zoom', title: 'Low zoom: colored blocks', sc: willow, zoom: 0.27, pan: [160, 20] },
+  { id: 'code-panel', title: 'Code panel, invalid line', sc: gull, zoom: 0.74, pan: [-90, 30], code: true, sel: ['d'] },
+];
+
+// ---------- helpers ----------
+const mix = (a, b, t) => t <= 0 ? a : `color-mix(in srgb, ${b} ${Math.round(t * 100)}%, ${a})`;
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const el = (tag, cls, css, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (css) Object.assign(e.style, css); if (html != null) e.innerHTML = html; return e; };
+const sel = (c, extra = '') => `0 0 0 ${T.selection.gap}px ${T.canvas}, 0 0 0 ${T.selection.gap + T.selection.ring}px ${T.selection.color}, ${T.selection.shadow}${extra}`;
+
+function key(os, k, shift) {
+  if (os === 'mac') return (shift ? '⇧' : '') + '⌘' + k;
+  return 'Ctrl+' + (shift ? 'Shift+' : '') + k;
+}
+
+function menuEl(os, items, hover) {
+  const m = el('div', 'menu', { background: T.menu.bg, color: T.menu.ink, borderRadius: T.menu.radius + 'px', boxShadow: T.menu.shadow,
+    font: `500 ${T.menu.size}px/1.2 ${T.uiFont}` });
+  items.forEach((it, i) => {
+    if (it === '-') return m.append(el('div', 'sep', { background: T.menu.ink + '18' }));
+    if (it.label) return m.append(el('div', 'lbl', null, it.label));
+    if (it.colors != null) {
+      const row = el('div', 'sws');
+      T.picker.forEach((p, ci) => row.append(el('div', 'sw', { width: T.menu.swatch + 'px', height: T.menu.swatch + 'px', background: p,
+        boxShadow: ci === it.colors ? `0 0 0 2px ${T.menu.bg}, 0 0 0 3.5px ${p}` : 'none' })));
+      return m.append(row);
+    }
+    const [t, k, cls] = it;
+    const row = el('div', 'it' + (cls ? ' ' + cls : ''), { borderRadius: T.menu.itemRadius + 'px', background: i === hover ? T.menu.hover : '' },
+      `<span>${t}</span><span class="k${k === '>' ? ' sub' : ''}">${k === '>' ? '' : k || ''}</span>`);
+    m.append(row);
+  });
+  return m;
+}
+
+const icons = {
+  arrow: `<svg width="18" height="24" viewBox="0 0 18 24"><path d="M2 1v18l4.5-4.2 3 6.7 3-1.3-3-6.6H16z" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
+  ew: `<svg width="24" height="16" viewBox="0 0 24 16"><path d="M1 8l5.5-5.5v3.5h11V2.5L23 8l-5.5 5.5V10h-11v3.5z" fill="#000" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/></svg>`,
+  panel: on => `<svg width="16" height="14" viewBox="0 0 16 14"><rect x=".75" y=".75" width="14.5" height="12.5" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10 1v12" stroke="currentColor" stroke-width="1.3"/>${on ? '<rect x="10" y="1.4" width="4.6" height="11.2" rx="1.6" fill="currentColor" opacity=".55"/>' : ''}</svg>`,
+  menu: `<svg width="16" height="12" viewBox="0 0 16 12"><path d="M1 1.5h14M1 6h14M1 10.5h14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
+  min: `<svg width="10" height="10"><path d="M0 5.5h10" stroke="currentColor"/></svg>`,
+  max: `<svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor"/></svg>`,
+  close: `<svg width="10" height="10"><path d="M.5.5l9 9M9.5.5l-9 9" stroke="currentColor"/></svg>`,
+};
+
+// ---------- render ----------
+function render(screen) {
+  const os = P.get('os') || screen.os || 'mac';
+  const sc = screen.sc();
+  const zoom = screen.zoom || 1, [panX, panY] = screen.pan || [0, 0];
+  const fade = clamp((zoom - T.zoom.fadeEnd) / (T.zoom.fadeStart - T.zoom.fadeEnd), 0, 1);
+
+  const desk = el('div', 'desk');
+  const frame = document.getElementById('frame');
+  frame.innerHTML = ''; frame.append(desk);   // build live: shapes and menus are measured as we go
+  const win = el('div', 'win ' + (os === 'mac' ? 'mac' : 'win11'), { background: T.canvas });
+  desk.append(win);
+
+  // title bar
+  const tb = el('div', 'titlebar', { color: T.chrome.title });
+  const docName = 'Gull Rock' + (os === 'mac' && screen.edited ? ' — Edited' : '');
+  if (os === 'mac') {
+    tb.append(el('div', 'tl', { background: '#ff5f57' }), el('div', 'tl', { background: '#febc2e' }), el('div', 'tl', { background: '#28c840' }));
+    tb.append(el('div', 'doc', { color: T.chrome.title }, docName));
+    tb.append(el('div', null, { marginLeft: 'auto', marginRight: '14px', display: 'flex', color: screen.code ? T.ink : T.chrome.title }, icons.panel(screen.code)));
+  } else {
+    tb.style.height = '34px';
+    tb.append(el('div', 'tbtn', { width: '44px', color: T.ink, background: screen.winMenu ? T.chrome.winButtonHover : '' }, icons.menu));
+    tb.append(el('div', null, { font: `500 12.5px ${T.uiFont}`, color: T.chrome.title, display: 'flex', alignItems: 'center', gap: '7px' },
+      'Gull Rock' + (screen.edited ? `<span style="width:6px;height:6px;border-radius:50%;background:${T.chrome.title}"></span>` : '')));
+    const r = el('div', null, { marginLeft: 'auto', display: 'flex', height: '100%', color: T.ink });
+    r.append(el('div', 'tbtn', { color: screen.code ? T.ink : T.chrome.title }, icons.panel(screen.code)),
+      el('div', 'tbtn', null, icons.min), el('div', 'tbtn', null, icons.max), el('div', 'tbtn', null, icons.close));
+    tb.append(r);
+  }
+  win.append(tb);
+
+  const body = el('div', 'body');
+  const vp = el('div', 'viewport', { background: zoom >= T.zoom.fadeEnd ? `${T.canvasTexture}, ${T.canvas}` : T.canvas,
+    backgroundSize: `${T.textureSize * zoom}px ${T.textureSize * zoom}px`, backgroundPosition: `${panX}px ${panY}px` });
+  body.append(vp); win.append(body);
+  const world = el('div', 'world', { transform: `translate(${panX}px, ${panY + (os === 'win' ? -34 : 0)}px) scale(${zoom})` });
+  vp.append(world);
+  // Screen position (inside the viewport) of a world point.
+  const scr = (x, y) => [panX + x * zoom, panY + (os === 'win' ? -34 : 0) + y * zoom];
+
+  // zones, parents first
+  const zEls = {};
+  for (const z of sc.zones) {
+    const pastel = T.pastel[z.c], pick = T.picker[z.c];
+    const d = el('div', 'zone', { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px', borderRadius: T.zone.radius + 'px',
+      background: mix(T.canvas, pastel, z.parent ? T.zone.nestedFillMix : T.zone.fillMix), boxShadow: `inset 0 0 0 1px ${mix(pastel, pick, T.zone.borderMix)}` });
+    const ts = Math.max(T.zone.titleSize, T.zone.titleMinScreen / zoom);
+    d.append(el('div', 'ztitle', { font: `${T.zone.titleWeight} ${ts}px ${T.font}`, color: T.ink, left: 18 / Math.min(zoom, 1) + 'px', top: 13 / Math.min(zoom, 1) + 'px' }, z.title));
+    world.append(d); zEls[z.id] = d;
+  }
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', 1); svg.setAttribute('height', 1);
+  world.append(svg);
+
+  const els = {};
+  for (const s of sc.shapes) {
+    const selected = (screen.sel || []).includes(s.id) || screen.edit === s.id;
+    const d = el('div', 'shape', {
+      left: s.x + 'px', top: s.y + 'px', width: (s.w || T.shape.width) + 'px', padding: `${T.shape.padY}px ${T.shape.padX}px`,
+      borderRadius: T.shape.radius + 'px', border: T.shape.border, color: T.ink,
+      font: `${T.weight} ${T.fontSize}px/${T.lineHeight} ${T.font}`,
+      background: mix(T.pastel[s.c], T.picker[s.c], T.zoom.blockMix * (1 - fade)),
+      boxShadow: selected ? sel(s.c) : fade > 0.4 ? T.shape.shadow : 'none',
+    }, `<span style="opacity:${fade}">${s.t}</span>`);
+    if (screen.edit === s.id) d.firstChild.insertAdjacentHTML('beforeend', `<span class="caret" style="width:${T.caret.width}px;background:${T.caret.color}"></span>`);
+    world.append(d); els[s.id] = d;
+  }
+  const R = id => { const e = els[id]; return { x: e.offsetLeft, y: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight }; };
+
+  // connectors: from the side of each shape that faces the other
+  const ends = (a, b) => {
+    const A = R(a), B = R(b);
+    const vertical = Math.abs((B.y + B.h / 2) - (A.y + A.h / 2)) > Math.abs((B.x + B.w / 2) - (A.x + A.w / 2));
+    const [p, q] = (vertical ? A.y < B.y : A.x < B.x) ? [A, B] : [B, A];
+    return vertical ? [p.x + p.w / 2, p.y + p.h, q.x + q.w / 2, q.y] : [p.x + p.w, p.y + p.h / 2, q.x, q.y + q.h / 2];
+  };
+  for (const [a, b] of sc.links) {
+    const hov = screen.hoverLink && screen.hoverLink[0] === a && screen.hoverLink[1] === b;
+    const [x1, y1, x2, y2] = ends(a, b);
+    const w = Math.max(hov ? T.connector.hoverWidth : T.connector.width, 1 / zoom);
+    svg.insertAdjacentHTML('beforeend', `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${hov ? T.connector.hoverColor : T.connector.color}" stroke-width="${w}" stroke-linecap="round"/>`);
+  }
+
+  // overlays
+  const put = (node, x, y) => { Object.assign(node.style, { left: x + 'px', top: y + 'px' }); vp.append(node); return node; };
+  const cursor = (svgStr, x, y) => put(el('div', 'ov', null, svgStr), x, y);
+
+  if (screen.hover) {
+    const H = R(screen.hover);
+    for (const [mx, my] of [[H.x + H.w / 2, H.y], [H.x + H.w, H.y + H.h / 2], [H.x + H.w / 2, H.y + H.h], [H.x, H.y + H.h / 2]]) {
+      const m = T.midpoint, [sx, sy] = scr(mx, my);
+      put(el('div', 'ov', { width: m.size + 'px', height: m.size + 'px', borderRadius: '50%', transform: 'translate(-50%,-50%)',
+        background: m.fill, boxShadow: `0 0 0 ${m.strokeWidth}px ${m.stroke}, 0 1px 3px rgba(0,0,0,.12)` }), sx, sy);
+    }
+  }
+  if (screen.resize) { const A = R(screen.resize); const [x, y] = scr(A.x + A.w - 6, A.y + A.h / 2 - 8); cursor(icons.ew, x, y); }
+
+  if (screen.marquee) {
+    const [x1, y1, x2, y2] = screen.marquee, [a, b] = scr(x1, y1), [c, d] = scr(x2, y2);
+    put(el('div', 'ov', { width: (c - a) + 'px', height: (d - b) + 'px', background: T.marquee.fill, border: `1px solid ${T.marquee.border}`, borderRadius: T.marquee.radius + 'px' }), a, b);
+    cursor(icons.arrow, c - 2, d - 2);
+  }
+
+  if (screen.picker) {
+    const H = R(screen.picker);
+    const sides = [['↑', H.x + H.w / 2, H.y, 0, -1], ['→', H.x + H.w, H.y + H.h / 2, 1, 0], ['↓', H.x + H.w / 2, H.y + H.h, 0, 1], ['←', H.x, H.y + H.h / 2, -1, 0]];
+    for (const [g, x, y, dx, dy] of sides) {
+      const [sx, sy] = scr(x, y), off = 30;
+      svg.insertAdjacentHTML('beforeend', `<line x1="${x}" y1="${y}" x2="${x + dx * (off - 12) / zoom}" y2="${y + dy * (off - 12) / zoom}" stroke="${T.picker2.ghost}" stroke-width="2" stroke-dasharray="3 3"/>`);
+      put(el('div', 'key', { background: T.picker2.keycap, color: T.ink, font: `600 14px ${T.uiFont}`,
+        boxShadow: `0 0 0 1px rgba(70,50,20,.10), 0 2px 0 rgba(70,50,20,.12), 0 6px 14px rgba(70,50,20,.14)` }, g), sx + dx * off, sy + dy * off);
+    }
+  }
+
+  if (screen.pill) {
+    const p = el('div', 'pill', { background: T.zoomPill.bg, color: T.zoomPill.ink }, screen.pill);
+    vp.append(p);
+  }
+
+  // context menus
+  const K = (k, sh) => key(os, k, sh);
+  if (screen.menu) {
+    let items, at, hover;
+    if (screen.menu === 'shape') { const A = R('h'); at = scr(A.x + A.w - 40, A.y + A.h - 10); items = [['Cut', K('X')], ['Copy', K('C')], ['Paste', K('V')], ['Duplicate', K('D')], '-', { label: 'Color' }, { colors: S(sc, 'h').c }]; hover = 1; }
+    if (screen.menu === 'multi') { const A = R('j'); at = scr(A.x + A.w - 50, A.y + A.h - 14); items = [['Cut', K('X')], ['Copy', K('C')], ['Duplicate', K('D')], ['Delete', os === 'mac' ? '⌫' : 'Del'], '-', ['Create zone', '']]; hover = 5; }
+    if (screen.menu === 'connector') { const [x1, y1, x2, y2] = ends('b', 'c'); at = scr(x1 + 16, (y1 + y2) / 2 + 4); items = [['Remove link', '']]; hover = 0; }
+    if (screen.menu === 'empty') { at = scr(740, 470); items = [['New shape', K('N', true)]]; hover = 0; }
+    if (screen.menu === 'zone') { at = scr(300, 548); items = [['Rename', ''], '-', { label: 'Color' }, { colors: C.butter }, '-', ['Dissolve', ''], ['Delete', '', 'danger']]; hover = 0; }
+    const m = put(menuEl(os, items, hover), at[0], at[1]);
+    m.style.left = Math.min(at[0], vp.clientWidth - m.offsetWidth - 12) + 'px';
+    if (screen.menu === 'empty' || screen.menu === 'connector') cursor(icons.arrow, at[0] - 2, at[1] - 4);
+  }
+
+  // code panel
+  if (screen.code) body.append(codePanel());
+
+  // macOS menu bar
+  if (os === 'mac') {
+    const mb = el('div', 'menubar', null, `<span>&#xF8FF;</span><span class="app">Willow</span><span>File</span>` +
+      `<span class="${screen.macMenu === 'Edit' ? 'open' : ''}">Edit</span><span class="${screen.macMenu === 'View' ? 'open' : ''}">View</span>` +
+      `<span>Window</span><span>Help</span><span class="right">Sat 24 Oct  10:41</span>`);
+    desk.append(mb);
+    if (screen.macMenu) desk.append(macMenu(screen.macMenu));
+  } else if (screen.winMenu) {
+    const m1 = menuEl(os, [['File', '>'], ['Edit', '>'], ['View', '>'], '-', ['Exit', 'Alt+F4']], 1);
+    Object.assign(m1.style, { left: '58px', top: '76px' }); desk.append(m1);
+    const m2 = menuEl(os, [['Undo', 'Ctrl+Z'], ['Redo', 'Ctrl+Y'], '-', ['Cut', 'Ctrl+X'], ['Copy', 'Ctrl+C'], ['Paste', 'Ctrl+V']], 4);
+    desk.append(m2);
+    Object.assign(m2.style, { left: (58 + m1.offsetWidth + 2) + 'px', top: '76px' });
+  }
+  return desk;
+}
+
+function macMenu(which) {
+  const box = (items, left, top) => {
+    const m = el('div', 'menu', { left: left + 'px', top: top + 'px', background: 'rgba(244,244,246,.88)', backdropFilter: 'blur(24px)', color: '#1d1d1f',
+      borderRadius: '11px', boxShadow: '0 0 0 .5px rgba(0,0,0,.18), 0 12px 34px rgba(0,0,0,.22)', font: '400 13px/1.2 -apple-system, system-ui', padding: '5px', zIndex: 30 });
+    items.forEach(it => {
+      if (it === '-') return m.append(el('div', 'sep', { background: 'rgba(0,0,0,.1)' }));
+      const [t, k, on, check] = it;
+      m.append(el('div', 'it', { padding: '4px 10px', borderRadius: '6px', background: on ? '#2a7cf6' : '', color: on ? '#fff' : '' },
+        `<span>${check ? '✓ ' : '<span style="display:inline-block;width:1em"></span>'}${t}</span><span class="k${k === '>' ? ' sub' : ''}" style="opacity:${on ? .85 : .45}">${k === '>' ? '' : k}</span>`));
+    });
+    return m;
+  };
+  const wrap = el('div');
+  if (which === 'Edit') wrap.append(box([['Undo', '⌘Z'], ['Redo', '⇧⌘Z'], '-', ['Cut', '⌘X'], ['Copy', '⌘C', true], ['Paste', '⌘V']], 156, 27));
+  if (which === 'View') {
+    const v = box([['Show Code Panel', '⌘E'], '-', ['Zoom In', '⌘+'], ['Zoom Out', '⌘−'], ['Actual Size', '⌘0'], '-', ['Theme', '>', true], '-', ['Enter Full Screen', '⌃⌘F']], 196, 27);
+    wrap.append(v);
+    queueMicrotask(() => { const row = v.querySelectorAll('.it')[4]; wrap.append(box([['Paper', '', false, true], ['Desk', ''], ['Poster', '']], 196 + v.offsetWidth - 4, 27 + row.offsetTop - 5)); });
+  }
+  return wrap;
+}
+
+function codePanel() {
+  const c = T.code;
+  const q = s => `<span style="color:${c.string}">"${s}"</span>`;
+  const id = s => `<span style="color:${c.id};font-weight:600">${s}</span>`;
+  const dir = s => `<span style="color:${c.dir}">${s}</span>`;
+  const kw = s => `<span style="color:${c.keyword}">${s}</span>`;
+  const lay = s => `<span style="color:${c.layout}">${s}</span>`;
+  const lines = [
+    kw('willow') + ' 1', '',
+    id('a') + ': ' + q('Mara inherits the lighthous…') + ' ' + kw('color') + ' sky',
+    id('b') + ': ' + q('The lamp won’t light, and…') + ' ' + dir('below') + ' a',
+    id('c') + ': ' + q('A storm strands the ferry…') + ' ' + dir('below') + ' b',
+    id('d') + ': ' + q('**Someone** has been tend…') + ' ' + dir('below') + ' c',
+    id('e') + ': ' + q('The keeper’s logbook names…') + ' ' + dir('below') + ' d', '',
+    id('f') + ': ' + q('Who rings the bell at dawn?'), '',
+    id('g') + ': ' + q('Mara: searches the parish…') + ' ' + kw('color') + ' sage',
+    id('h') + ': ' + q('Mara: finds a page torn…') + ' ' + dir('below') + ' g', '',
+    id('i') + ': ' + q('Ferryman: hides the crates…') + ' ' + kw('color') + ' rose',
+    id('j') + ': ' + q('Ferryman: lies to the har…') + ' ' + dir('below') + ' i',
+    { bad: id('k') + ': ' + q('Ferryman: bribes the keeper') + ' ' + dir('below') + ' zz' }, '',
+    ...[['a', '470,70'], ['b', '470,195'], ['c', '470,320'], ['d', '470,445'], ['e', '470,570'], ['f', '150,95'], ['g', '790,150'], ['h', '790,255'], ['i', '150,265'], ['j', '150,370']]
+      .map(([i, p]) => lay('@layout') + ' ' + i + ' ' + p + ' w210'),
+  ];
+  const p = el('div', 'code', { paddingTop: '46px', background: c.bg, borderLeft: `1px solid ${c.border}`, font: `400 ${c.size}px/${c.lineHeight} ${T.codeFont}`, color: T.ink });
+  lines.forEach((l, n) => {
+    const bad = typeof l === 'object';
+    const row = el('div', 'ln', bad ? { background: 'rgba(217,119,108,.06)' } : null,
+      `<span class="g" style="color:${c.gutter}">${n + 1}</span><span class="${bad ? 'bad' : ''}" style="${bad ? `text-decoration-color:${c.invalid}` : ''}">${bad ? l.bad : l}${bad ? `<span class="caret" style="width:${T.caret.width}px;background:${T.caret.color};height:1.1em"></span>` : ''}</span>`);
+    p.append(row);
+  });
+  return p;
+}
+
+// ---------- page ----------
+let cur = SCREENS.find(s => s.id === P.get('screen')) || SCREENS[0];
+function nav() {
+  const n = document.getElementById('nav');
+  const link = (id, extra) => '?' + new URLSearchParams({ screen: id, theme: P.get('theme') || 'paper', ...(P.get('os') ? { os: P.get('os') } : {}), ...extra });
+  n.innerHTML = `<h1>Willow · ${T.name}</h1><div class="os"><a href="${link(cur.id, { os: 'mac' })}">macOS</a><a href="${link(cur.id, { os: 'win' })}">Windows</a></div>`
+    + SCREENS.map(s => `<a class="${s === cur ? 'on' : ''}" href="${link(s.id)}">${s.title}</a>`).join('');
+}
+function show() {
+  const f = document.getElementById('frame');
+  render(cur);
+  if (!SHOT) { const z = Math.min(1, (innerWidth - 270) / 1280, (innerHeight - 40) / 820); f.style.zoom = z; }
+  document.getElementById('note').textContent = 'Theme tokens: themes.js · Reference only, never ships.';
+}
+nav();
+document.fonts.ready.then(show);
+</script>
+</body>
+</html>

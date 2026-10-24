@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  Willow Phase 1 motion mockups: timing and easing for each animation, looping, from themes.js.
+  Reference only, never shipped. ?theme=paper
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Willow motion</title>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&display=swap" rel="stylesheet">
+<script src="themes.js"></script>
+<style>
+  body { margin: 0; padding: 24px; background: #1f2023; font: 13px -apple-system, system-ui, sans-serif; color: #ccc; }
+  h1 { font-size: 15px; color: #fff; margin: 0 0 16px; }
+  #grid { display: grid; grid-template-columns: repeat(3, 400px); gap: 20px; }
+  .tile { background: #2a2b2f; border-radius: 10px; overflow: hidden; }
+  .tile header { display: flex; justify-content: space-between; padding: 9px 12px; }
+  .tile header b { color: #fff; font-weight: 600; }
+  .tile header span { color: #999; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .stage { position: relative; height: 280px; overflow: hidden; }
+  .shape { position: absolute; width: 170px; text-align: justify; }
+  .link { position: absolute; width: 2px; transform-origin: top; }
+</style>
+</head>
+<body>
+<h1>Willow motion · <span id="tn"></span> · each tile loops</h1>
+<div id="grid"></div>
+<script>
+const T = THEMES[new URLSearchParams(location.search).get('theme')] || THEMES.paper;
+document.getElementById('tn').textContent = T.name;
+const M = T.motion;
+const ring = `0 0 0 ${T.selection.gap}px ${T.canvas}, 0 0 0 ${T.selection.gap + T.selection.ring}px ${T.selection.color}, ${T.selection.shadow}`;
+const noRing = `0 0 0 0 ${T.canvas}, 0 0 0 0 ${T.selection.color}, ${T.shape.shadow}`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function tile(title, timing, run) {
+  const t = document.createElement('div');
+  t.className = 'tile';
+  t.innerHTML = `<header><b>${title}</b><span>${timing}</span></header>`;
+  const st = document.createElement('div');
+  st.className = 'stage';
+  st.style.background = `${T.canvasTexture} 0 0/${T.textureSize}px ${T.textureSize}px, ${T.canvas}`;
+  t.append(st);
+  document.getElementById('grid').append(t);
+  (async () => { for (;;) { st.innerHTML = ''; await run(st); await sleep(1100); } })();
+}
+function shape(st, x, y, c, text, extra = {}) {
+  const d = document.createElement('div');
+  d.className = 'shape';
+  Object.assign(d.style, { left: x + 'px', top: y + 'px', padding: `${T.shape.padY * .8}px ${T.shape.padX * .8}px`, borderRadius: T.shape.radius + 'px',
+    background: T.pastel[c], color: T.ink, font: `${T.weight} ${T.fontSize * .85}px/${T.lineHeight} ${T.font}`, boxShadow: noRing }, extra);
+  d.textContent = text;
+  st.append(d);
+  return d;
+}
+function link(st, x, y, h) {
+  const l = document.createElement('div');
+  l.className = 'link';
+  Object.assign(l.style, { left: x - 1 + 'px', top: y + 'px', height: h + 'px', background: T.connector.color });
+  st.insertBefore(l, st.firstChild);
+  return l;
+}
+const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+// 1. Create a linked shape from a midpoint: connector draws, shape rises in, editing ring and caret appear.
+tile('Create linked shape', 'create ' + M.create, async st => {
+  const a = shape(st, 115, 40, 5, 'Mara inherits the lighthouse.');
+  const mid = document.createElement('div');
+  const ms = T.midpoint.size;
+  Object.assign(mid.style, { position: 'absolute', left: 115 + a.offsetWidth / 2 - ms / 2 + 'px', top: a.offsetTop + a.offsetHeight - ms / 2 + 'px', width: T.midpoint.size + 'px', height: T.midpoint.size + 'px', borderRadius: '50%',
+    background: T.midpoint.fill, boxShadow: `0 0 0 ${T.midpoint.strokeWidth}px ${T.midpoint.stroke}` });
+  st.append(mid);
+  await sleep(700);
+  mid.style.transition = 'opacity 100ms'; mid.style.opacity = 0;
+  const l = link(st, 200, a.offsetTop + a.offsetHeight, 36);
+  l.style.transform = 'scaleY(0)'; l.style.transition = `transform ${M.create}`;
+  const b = shape(st, 115, a.offsetTop + a.offsetHeight + 36, 5, '', { opacity: 0, transform: 'translateY(-8px) scale(.96)', transition: `opacity ${M.create}, transform ${M.create}, box-shadow ${M.select}`, minHeight: '42px' });
+  await frame();
+  l.style.transform = 'scaleY(1)'; b.style.opacity = 1; b.style.transform = 'none'; b.style.boxShadow = ring;
+  b.innerHTML = `<span style="display:inline-block;width:${T.caret.width}px;height:1.2em;vertical-align:-.2em;background:${T.caret.color}"></span>`;
+  await sleep(1400);
+});
+
+// 2. Insert-and-push: the new shape takes the spot, the subtree beyond it slides along.
+tile('Insert and push', 'push ' + M.push, async st => {
+  const step = 78;
+  const a = shape(st, 115, 18, 5, 'The lamp won’t light.');
+  const b = shape(st, 115, 18 + step, 5, 'A storm strands the ferry.', { transition: `top ${M.push}` });
+  const c = shape(st, 115, 18 + 2 * step, 5, 'Someone tends the lamp.', { transition: `top ${M.push}` });
+  const l1 = link(st, 200, 18 + a.offsetHeight, step - a.offsetHeight);
+  const l2 = link(st, 200, 18 + step + b.offsetHeight, step - b.offsetHeight);
+  l2.style.transition = `top ${M.push}`;
+  await sleep(800);
+  b.style.top = 18 + 2 * step + 'px'; c.style.top = 18 + 3 * step + 'px'; l2.style.top = 18 + 2 * step + b.offsetHeight + 'px';
+  const ln = link(st, 200, 18 + step + a.offsetHeight - 6, step - a.offsetHeight + 6); ln.style.top = 18 + step + 40 + 'px'; ln.style.height = step - 40 + 'px';
+  const n = shape(st, 115, 18 + step, 5, '', { opacity: 0, transform: 'scale(.96)', transition: `opacity ${M.create} 60ms, transform ${M.create} 60ms`, minHeight: '42px', boxShadow: ring });
+  await frame();
+  n.style.opacity = 1; n.style.transform = 'none';
+  n.innerHTML = `<span style="display:inline-block;width:${T.caret.width}px;height:1.2em;vertical-align:-.2em;background:${T.caret.color}"></span>`;
+  await sleep(1400);
+});
+
+// 3. Color change: the whole chain repaints, rippling outward from the shape that was changed.
+tile('Color change', 'color ' + M.color + ', 40ms ripple', async st => {
+  const ys = [22, 100, 178], sh = ys.map((y, i) => shape(st, 115, y, 0, ['A letter arrives.', 'Mara reads it twice.', 'She burns it.'][i]));
+  sh.forEach((s, i) => { if (i) link(st, 200, ys[i - 1] + sh[i - 1].offsetHeight, ys[i] - ys[i - 1] - sh[i - 1].offsetHeight); s.style.transition = `background-color ${M.color}`; });
+  sh[1].style.boxShadow = ring;
+  await sleep(800);
+  for (const [i, s] of sh.entries()) s.style.transitionDelay = Math.abs(i - 1) * 40 + 'ms', s.style.backgroundColor = T.pastel[4];
+  await sleep(1300);
+});
+
+// 4. Selection: the ring settles in quickly; deselect fades out.
+tile('Select / deselect', 'select ' + M.select, async st => {
+  const a = shape(st, 115, 100, 1, 'Ferryman: hides the crates below deck.', { transition: `box-shadow ${M.select}` });
+  await sleep(600); a.style.boxShadow = ring;
+  await sleep(1200); a.style.boxShadow = noRing;
+  await sleep(400);
+});
+
+// 5. Wheel zoom step: eases to the new level; the zoom pill shows, holds, then fades.
+tile('Wheel zoom step + pill', `zoom ${M.zoomStep}; pill hold ${M.zoomPillHold}ms, fade ${M.zoomPillFade}`, async st => {
+  const w = document.createElement('div');
+  Object.assign(w.style, { position: 'absolute', inset: 0, transformOrigin: '200px 140px', transition: `transform ${M.zoomStep}` });
+  st.append(w);
+  const ys = [40, 118, 196];
+  ys.forEach((y, i) => { const s = shape(w, 115, y, 5, ['The tide turns.', 'A letter arrives.', 'Mara climbs the stair.'][i]); });
+  const pill = document.createElement('div');
+  Object.assign(pill.style, { position: 'absolute', left: '50%', bottom: '14px', transform: 'translateX(-50%)', padding: '4px 10px', borderRadius: '999px',
+    background: T.zoomPill.bg, color: T.zoomPill.ink, font: '600 11.5px -apple-system, system-ui', opacity: 0 });
+  st.append(pill);
+  let z = 1;
+  for (const step of [1.1, 1.1, 1 / 1.1, 1 / 1.1, 1 / 1.1]) {
+    await sleep(320);
+    z *= step; w.style.transform = `scale(${z})`;
+    pill.textContent = Math.round(z * 100) + '%'; pill.style.transition = 'none'; pill.style.opacity = 1;
+  }
+  await sleep(M.zoomPillHold);
+  pill.style.transition = `opacity ${M.zoomPillFade}`; pill.style.opacity = 0;
+  await sleep(900);
+});
+
+// 6. Text fade on zoom out: text fades between fadeStart and fadeEnd while fills deepen into blocks.
+tile('Zoom out: text fades', `text gone at ${T.zoom.fadeEnd * 100}%`, async st => {
+  const w = document.createElement('div');
+  Object.assign(w.style, { position: 'absolute', inset: 0, transformOrigin: '200px 140px' });
+  st.append(w);
+  const items = [[115, 30, 5, 'The tide turns.'], [115, 108, 5, 'A letter arrives.'], [115, 186, 5, 'Mara climbs the stair.'], [-90, 70, 4, 'Mara searches.'], [320, 120, 1, 'The ferryman lies.']];
+  const sh = items.map(([x, y, c, t]) => shape(w, x, y, c, t));
+  const t0 = performance.now(), dur = 1800;
+  await new Promise(done => {
+    const tick = now => {
+      const k = Math.min(1, (now - t0) / dur), e = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2, z = 1 - e * .7;
+      const fade = Math.max(0, Math.min(1, (z - T.zoom.fadeEnd) / (T.zoom.fadeStart - T.zoom.fadeEnd)));
+      w.style.transform = `scale(${z})`;
+      sh.forEach((s, i) => { s.style.color = `color-mix(in srgb, ${T.ink} ${fade * 100}%, transparent)`;
+        s.style.background = `color-mix(in srgb, ${T.picker[items[i][2]]} ${(1 - fade) * T.zoom.blockMix * 100}%, ${T.pastel[items[i][2]]})`; });
+      k < 1 ? requestAnimationFrame(tick) : done();
+    };
+    requestAnimationFrame(tick);
+  });
+  await sleep(900);
+});
+</script>
+</body>
+</html>
