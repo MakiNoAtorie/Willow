@@ -17,7 +17,9 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 ## Input and redraw
 - The app sends all input through `Session::handle(input, now)` and calls `cx.notify()` only when `Response.redraw` is true; it requests frames only while `Response.animating`. This keeps idle CPU near zero.
 - Gesture mutations land once, on release, through a named `Session` method (e.g. `move_shape`); live previews are queries (`drag_preview`), never written into the document.
-- Time-based animations report through `Session::animating(now)`; the app calls `window.request_animation_frame()` from paint only while it is true.
+- Time-based animations take a `Transition { duration, easing: CubicBezier }` from the theme and OR their state into `Session::animating(now)`. `render` calls `Session::tick(now)`; paint calls `window.request_animation_frame()` only while animating.
+- Paint multiplies every canvas-unit value (sizes, radii, shadows, ring widths, grid) by `vp.zoom`; screen-space chrome (the zoom pill) is not scaled. Low-zoom values extend `ZoomStyle`.
+- Wheel and pinch inputs carry the canvas-relative pointer position. Modified shortcuts (Cmd/Ctrl+key) go through GPUI actions mapped to `Input` variants, not through `Key`.
 - Press-versus-drag uses one threshold, `DRAG_START` (3 screen px) in `session.rs`.
 - Screen positions given to the core are relative to the canvas top-left (the app subtracts `canvas_origin`, saved during paint).
 - Pointer move/up listen window-wide in paint (`window.on_mouse_event`) so drags continue outside the canvas; pointer down and scroll listen on the canvas div.
