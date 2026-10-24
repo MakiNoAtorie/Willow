@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::history::History;
 use crate::zoom::{Zoom, ZoomPill};
 use crate::{Document, ShapeId, Theme};
 
@@ -67,6 +68,9 @@ pub enum Input {
     },
     /// Ctrl/Cmd+0: back to 100% around the canvas center.
     ResetZoom,
+    /// Undoes the last document change. Viewport and selection are untouched.
+    Undo,
+    Redo,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -167,6 +171,7 @@ impl Ring {
 
 pub struct Session {
     doc: Document,
+    history: History,
     theme: &'static Theme,
     viewport: Viewport,
     gesture: Option<Gesture>,
@@ -182,6 +187,7 @@ impl Session {
     pub fn new(doc: Document, theme: &'static Theme) -> Self {
         Session {
             doc,
+            history: History::default(),
             theme,
             viewport: Viewport {
                 origin: Point::default(),
@@ -265,9 +271,17 @@ impl Session {
 
     /// Moves a shape's top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
-        if let Some(s) = self.doc.shapes.iter_mut().find(|s| &s.id == id) {
-            (s.x, s.y) = (x, y);
-        }
+        self.history
+            .change(&mut self.doc, id, |s| (s.x, s.y) = (x, y));
+    }
+
+    /// Whether there is a document change to undo; the Undo menu item enables from it.
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
     }
 
     pub fn viewport(&self) -> Viewport {
@@ -380,6 +394,14 @@ impl Session {
             }
             Input::KeyUp(Key::Space) => {
                 self.space_held = false;
+                self.respond(true)
+            }
+            Input::Undo => {
+                self.history.undo(&mut self.doc);
+                self.respond(true)
+            }
+            Input::Redo => {
+                self.history.redo(&mut self.doc);
                 self.respond(true)
             }
             Input::ResetZoom => {

@@ -1,13 +1,14 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
+mod history;
 mod session;
 mod theme;
 mod zoom;
 
 pub use session::{Button, Cursor, Input, Key, Modifiers, Point, Response, Session, Viewport};
 pub use theme::{
-    CubicBezier, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme, Transition, ZoomPillStyle,
-    ZoomStyle,
+    CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme, Transition,
+    ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

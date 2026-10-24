@@ -108,6 +108,36 @@ pub struct ZoomPillStyle {
     pub fade: Transition,
 }
 
+/// App menus drawn in the window (Windows' menu button), in screen pixels. Text is the
+/// system UI font. macOS uses the native menus instead.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MenuStyle {
+    pub bg: Rgba,
+    pub ink: Rgba,
+    pub hover: Rgba,
+    pub separator: Rgba,
+    /// Space above and below a separator line.
+    pub separator_pad_y: f32,
+    pub radius: f32,
+    pub item_radius: f32,
+    /// Inside the menu, around the items.
+    pub padding: f32,
+    pub item_pad_x: f32,
+    pub item_pad_y: f32,
+    pub min_width: f32,
+    pub font_size: f32,
+    /// Shortcut text and the submenu arrow.
+    pub shortcut_opacity: f32,
+    /// A command that can't run now (Undo with nothing to undo).
+    pub disabled_opacity: f32,
+    /// Ring, then drop shadow.
+    pub shadow: [Shadow; 2],
+    /// The menu's left edge from the window's.
+    pub left: f32,
+    /// Between the title bar and the menu, and between a menu and its cascade.
+    pub gap: f32,
+}
+
 /// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
 /// in place of the resting one. Fades in and out over `fade`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,6 +177,7 @@ pub struct Theme {
     /// One wheel zoom step easing to its new level.
     pub zoom_step: Transition,
     pub zoom_pill: ZoomPillStyle,
+    pub menu: MenuStyle,
 }
 
 impl Theme {
@@ -254,5 +285,40 @@ pub const PAPER: Theme = Theme {
             duration: Duration::from_millis(400),
             easing: CubicBezier::EASE_IN,
         },
+    },
+    menu: MenuStyle {
+        bg: hex(0xfffdf8),
+        ink: hex(0x3b342c),
+        hover: hex(0xf1ebe0),
+        // The mockups' ink at 0x18 alpha.
+        separator: rgba(59, 52, 44, 0.094),
+        separator_pad_y: 5.0,
+        radius: 10.0,
+        item_radius: 6.0,
+        padding: 6.0,
+        item_pad_x: 10.0,
+        item_pad_y: 6.0,
+        min_width: 200.0,
+        font_size: 13.0,
+        shortcut_opacity: 0.45,
+        disabled_opacity: 0.4,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 0.0,
+                spread: 1.0,
+                color: rgba(70, 50, 20, 0.08),
+            },
+            Shadow {
+                x: 0.0,
+                y: 10.0,
+                blur: 30.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.18),
+            },
+        ],
+        left: 8.0,
+        gap: 2.0,
     },
 };

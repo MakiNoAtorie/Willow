@@ -284,3 +284,64 @@ fn the_selection_ring_fades_in_and_out_over_120_ms_and_then_stops() {
     assert_eq!(s.selection_rings(ms(2120)), vec![]);
     assert!(!s.animating(ms(2120)));
 }
+
+fn pos(s: &Session) -> (i32, i32) {
+    let shape = &s.document().shapes[0];
+    (shape.x, shape.y)
+}
+
+#[test]
+fn a_move_is_one_undo_step_that_redo_reapplies() {
+    let mut s = session();
+    assert!(!s.can_undo() && !s.can_redo());
+
+    drag(&mut s, Button::Left, ON_SHAPE, pt(530.0, 420.0));
+    assert_eq!(pos(&s), (30, 20));
+    assert!(s.can_undo() && !s.can_redo());
+
+    s.handle(Input::Undo, T);
+    assert_eq!(pos(&s), (0, 0));
+    assert!(!s.can_undo() && s.can_redo());
+
+    s.handle(Input::Redo, T);
+    assert_eq!(pos(&s), (30, 20));
+    assert!(s.can_undo() && !s.can_redo());
+}
+
+#[test]
+fn pan_zoom_and_selection_are_not_undo_steps_and_undo_leaves_them_alone() {
+    let mut s = session();
+    drag(&mut s, Button::Left, ON_SHAPE, pt(530.0, 420.0));
+
+    click(&mut s, pt(560.0, 425.0), T);
+    drag(&mut s, Button::Left, pt(50.0, 50.0), pt(80.0, 10.0));
+    wheel(&mut s, 5.0, 7.0, Modifiers::default());
+    let pinch = Input::Pinch {
+        pos: pt(200.0, 100.0),
+        delta: 0.5,
+    };
+    s.handle(pinch, T);
+    let vp = s.viewport();
+
+    s.handle(Input::Undo, T);
+    assert_eq!(pos(&s), (0, 0));
+    assert_eq!(s.viewport(), vp);
+    assert_eq!(s.selection(), Some(&id("a")));
+    assert!(!s.can_undo());
+}
+
+#[test]
+fn a_new_move_after_undo_clears_redo() {
+    let mut s = session();
+    drag(&mut s, Button::Left, ON_SHAPE, pt(530.0, 420.0));
+    s.handle(Input::Undo, T);
+
+    drag(&mut s, Button::Left, ON_SHAPE, pt(490.0, 400.0));
+    assert!(!s.can_redo());
+    s.handle(Input::Redo, T);
+    assert_eq!(pos(&s), (-10, 0));
+
+    s.handle(Input::Undo, T);
+    assert_eq!(pos(&s), (0, 0));
+    assert!(!s.can_undo());
+}

@@ -18,6 +18,8 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
+// Edit menu. Cut, Copy and Paste have no handler yet, so their menu items stay disabled.
+actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 
 /// Pixels per line for wheels that report lines (Windows already multiplies by its lines per notch).
 const WHEEL_LINE: f32 = 20.0;
@@ -184,7 +186,15 @@ impl Render for Willow {
                     w.input(Input::KeyUp(k), cx);
                 }
             }))
-            .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)));
+            .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            // A menu item is enabled only while its action has a handler, so register these only
+            // while the core has something to undo or redo.
+            .when(self.session.can_undo(), |d| {
+                d.on_action(cx.listener(|w, _: &Undo, _, cx| w.input(Input::Undo, cx)))
+            })
+            .when(self.session.can_redo(), |d| {
+                d.on_action(cx.listener(|w, _: &Redo, _, cx| w.input(Input::Redo, cx)))
+            });
         let body = div()
             .flex_1()
             .overflow_hidden()
@@ -203,9 +213,9 @@ impl Render for Willow {
             .children(pill);
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         if cfg!(target_os = "windows") {
-            root.child(title_bar(theme, window)).child(body)
+            root.child(title_bar(&self.session, window, cx)).child(body)
         } else {
-            root.child(body).child(title_bar(theme, window))
+            root.child(body).child(title_bar(&self.session, window, cx))
         }
     }
 }
@@ -324,7 +334,12 @@ fn paint(
 }
 
 /// The resting shadow eased toward the selected one by `k` (0 to 1), scaled by zoom `z`.
-fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32, z: f32) -> Vec<BoxShadow> {
+pub(crate) fn shadows(
+    rest: &[Shadow; 2],
+    selected: &[Shadow; 2],
+    k: f32,
+    z: f32,
+) -> Vec<BoxShadow> {
     let mix = |a: f32, b: f32| a + (b - a) * k;
     let zmix = |a: f32, b: f32| mix(a, b) * z;
     rest.iter()
@@ -346,7 +361,8 @@ fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32, z: f32) -> Vec<Bo
 
 /// macOS: transparent title bar over the canvas; the traffic lights are native.
 #[cfg(not(target_os = "windows"))]
-fn title_bar(t: &Theme, _: &Window) -> impl IntoElement {
+fn title_bar(session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
+    let t = session.theme();
     div()
         .absolute()
         .top_0()
@@ -360,6 +376,23 @@ fn title_bar(t: &Theme, _: &Window) -> impl IntoElement {
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(color(t.chrome_title))
         .child("Untitled")
+}
+
+/// The native menu bar: app menu and Edit. Items enable while their action has a handler.
+#[cfg(target_os = "macos")]
+fn set_menus(cx: &mut App) {
+    use gpui::{Menu, MenuItem, OsAction};
+    cx.set_menus([
+        Menu::new("Willow").items([MenuItem::action("Quit Willow", Quit)]),
+        Menu::new("Edit").items([
+            MenuItem::os_action("Undo", Undo, OsAction::Undo),
+            MenuItem::os_action("Redo", Redo, OsAction::Redo),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", Cut, OsAction::Cut),
+            MenuItem::os_action("Copy", Copy, OsAction::Copy),
+            MenuItem::os_action("Paste", Paste, OsAction::Paste),
+        ]),
+    ]);
 }
 
 fn main() {
@@ -378,6 +411,26 @@ fn main() {
             KeyBinding::new(quit, Quit, None),
             KeyBinding::new(reset_zoom, ResetZoom, None),
         ]);
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([
+                KeyBinding::new("cmd-z", Undo, None),
+                KeyBinding::new("cmd-shift-z", Redo, None),
+                KeyBinding::new("cmd-x", Cut, None),
+                KeyBinding::new("cmd-c", Copy, None),
+                KeyBinding::new("cmd-v", Paste, None),
+            ]);
+        } else {
+            cx.bind_keys([
+                KeyBinding::new("ctrl-z", Undo, None),
+                KeyBinding::new("ctrl-y", Redo, None),
+                KeyBinding::new("ctrl-shift-z", Redo, None),
+                KeyBinding::new("ctrl-x", Cut, None),
+                KeyBinding::new("ctrl-c", Copy, None),
+                KeyBinding::new("ctrl-v", Paste, None),
+            ]);
+        }
+        #[cfg(target_os = "macos")]
+        set_menus(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_window_closed(|cx, _| cx.quit()).detach();
         let bounds = Bounds::centered(None, size(px(1180.), px(740.)), cx);
