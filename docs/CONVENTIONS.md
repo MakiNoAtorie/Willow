@@ -40,6 +40,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 
 ## Text
 - Offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). A caret is `Caret { offset, upstream }` (`upstream`: a soft-wrap offset shown at the end of the earlier line); the selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
+- Every way of opening a document calls `Session::measure_ahead(n)` from idle afterwards (lays out ahead so saves don't stall). The app's `TextMeasure::new(ts)` caches shaped words per style.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
 - Justification gaps are spaces plus UAX #14 break opportunities next to a CJK cluster; new gap kinds go in the `stretch` closure.
 - Style toggles take `edit::Style`. With an empty selection they set `Editing.pending`, which `set_caret` clears and `Session::replace` applies in the same `history.change`. A toggle turns the style on unless the whole selection has it.
@@ -63,7 +64,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1; shapes and zones share one ID counter). Tool output is CSV.
-- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). It feeds input through `Session::handle` and typing through `window.dispatch_keystroke`; gpui keeps the `profiler` feature. Judge idle by `renders == 0` (~0.5% CPU is GPUI's display link).
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). It feeds input through `Session::handle` and typing through `window.dispatch_keystroke`; gpui keeps the `profiler` feature. Rows `file_10k` (`save_unwarmed`, `save`, `save_again`, `load`) then swap in the loaded session via `Willow::show`. Bench rows go in their own commit after the code they measure. Judge idle by `renders == 0` (~0.5% CPU is GPUI's display link).
 
 ## Workflow
 - Model per task: Opus for concurrency, state/serialization, rendering, security-sensitive parsing, cross-module refactors, unexplained failures; Sonnet for mechanical work (pattern-following modules, UI screens, wiring, config, docs, small fixes, merges). State the pick and why in one line.
