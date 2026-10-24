@@ -18,20 +18,41 @@ mod text;
 use std::{borrow::Cow, ops::Range, rc::Rc, time::Instant};
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler,
-    EntityInputHandler, FocusHandle, Focusable, Hsla, KeyBinding, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, PinchEvent, Pixels, Point,
-    ScrollDelta, ScrollEvent, TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions,
-    actions, anchored, canvas, deferred, div, point, prelude::*, px, quad, rgb, size,
+    App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
+    FocusHandle, Focusable, Hsla, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PathBuilder, PinchEvent, Pixels, Point, ScrollDelta, ScrollEvent,
+    TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions, actions, anchored,
+    canvas, deferred, div, point, prelude::*, px, quad, rgb, size,
 };
 use text::{LINE_HEIGHT, Layout, Style};
 
 actions!(
     spike,
     [
-        Backspace, Delete, Left, Right, Up, Down, SelectLeft, SelectRight, SelectUp, SelectDown,
-        SelectAll, Home, End, Enter, Escape, Bold, Italic, Copy, Cut, Paste, Picker, TogglePanel,
-        LoadLarge, Quit,
+        Backspace,
+        Delete,
+        Left,
+        Right,
+        Up,
+        Down,
+        SelectLeft,
+        SelectRight,
+        SelectUp,
+        SelectDown,
+        SelectAll,
+        Home,
+        End,
+        Enter,
+        Escape,
+        Bold,
+        Italic,
+        Copy,
+        Cut,
+        Paste,
+        Picker,
+        TogglePanel,
+        LoadLarge,
+        Quit,
     ]
 );
 
@@ -39,7 +60,9 @@ const PAD: f32 = 12.0;
 const MIN_H: f32 = 44.0;
 const RADIUS: f32 = 10.0;
 /// Six pastels plus the neutral. Placeholder values; Phase 1 picks the real ones.
-const PASTELS: [u32; 7] = [0xeeeeee, 0xfde2e4, 0xfff1c1, 0xd8f3dc, 0xd7e9fb, 0xe7dcf7, 0xffe5d0];
+const PASTELS: [u32; 7] = [
+    0xeeeeee, 0xfde2e4, 0xfff1c1, 0xd8f3dc, 0xd7e9fb, 0xe7dcf7, 0xffe5d0,
+];
 
 pub struct Shape {
     pub x: f32,
@@ -53,7 +76,15 @@ pub struct Shape {
 
 impl Shape {
     pub fn new(x: f32, y: f32, w: f32, color: usize, text: String, styles: Vec<Style>) -> Self {
-        Shape { x, y, w, color, text, styles, layout: None }
+        Shape {
+            x,
+            y,
+            w,
+            color,
+            text,
+            styles,
+            layout: None,
+        }
     }
     fn h(&self) -> f32 {
         let text_h = self.layout.as_ref().map_or(LINE_HEIGHT, |l| l.height);
@@ -144,7 +175,10 @@ impl Spike {
     }
 
     fn to_screen(&self, p: Point<f32>) -> Point<Pixels> {
-        point(px((p.x - self.offset.x) * self.zoom), px((p.y - self.offset.y) * self.zoom))
+        point(
+            px((p.x - self.offset.x) * self.zoom),
+            px((p.y - self.offset.y) * self.zoom),
+        )
     }
 
     fn hit(&self, p: Point<f32>) -> Option<usize> {
@@ -167,7 +201,11 @@ impl Spike {
     }
 
     fn cursor(&self) -> usize {
-        if self.reversed { self.sel.start } else { self.sel.end }
+        if self.reversed {
+            self.sel.start
+        } else {
+            self.sel.end
+        }
     }
 
     fn move_to(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -178,7 +216,11 @@ impl Spike {
     }
 
     fn select_to(&mut self, i: usize, cx: &mut Context<Self>) {
-        if self.reversed { self.sel.start = i } else { self.sel.end = i }
+        if self.reversed {
+            self.sel.start = i
+        } else {
+            self.sel.end = i
+        }
         if self.sel.end < self.sel.start {
             self.reversed = !self.reversed;
             self.sel = self.sel.end..self.sel.start;
@@ -195,7 +237,11 @@ impl Spike {
     fn prev_boundary(&self, i: usize) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
         let Some(s) = self.edited() else { return 0 };
-        s.text.grapheme_indices(true).rev().find_map(|(j, _)| (j < i).then_some(j)).unwrap_or(0)
+        s.text
+            .grapheme_indices(true)
+            .rev()
+            .find_map(|(j, _)| (j < i).then_some(j))
+            .unwrap_or(0)
     }
 
     fn next_boundary(&self, i: usize) -> usize {
@@ -208,7 +254,9 @@ impl Spike {
     }
 
     fn vertical(&self, i: usize, dir: isize) -> usize {
-        let Some(layout) = self.edited().and_then(|s| s.layout.clone()) else { return i };
+        let Some(layout) = self.edited().and_then(|s| s.layout.clone()) else {
+            return i;
+        };
         let stop = layout.stop_for(i);
         let line = stop.line as isize + dir;
         if line < 0 {
@@ -225,7 +273,8 @@ impl Spike {
         let style = self.typing_style;
         let s = &mut self.shapes[idx];
         s.text.replace_range(range.clone(), new);
-        s.styles.splice(range.clone(), std::iter::repeat_n(style, new.len()));
+        s.styles
+            .splice(range.clone(), std::iter::repeat_n(style, new.len()));
         s.layout = None; // relaid out (and the shape regrown) on the next render
         self.marked = None;
         let end = range.start + new.len();
@@ -258,7 +307,13 @@ impl Spike {
         cx.notify();
     }
 
-    fn start_editing(&mut self, idx: usize, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_editing(
+        &mut self,
+        idx: usize,
+        at: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.editing = Some(idx);
         self.marked = None;
         self.picker = false;
@@ -279,9 +334,23 @@ impl Spike {
         let (x, y) = if dir.x != 0.0 {
             (f.x + dir.x * (f.w + gap), f.y)
         } else {
-            (f.x, if dir.y > 0.0 { f.y + f.h() + gap } else { f.y - MIN_H - gap })
+            (
+                f.x,
+                if dir.y > 0.0 {
+                    f.y + f.h() + gap
+                } else {
+                    f.y - MIN_H - gap
+                },
+            )
         };
-        let s = Shape::new(x.round(), y.round(), f.w, f.color, String::new(), Vec::new());
+        let s = Shape::new(
+            x.round(),
+            y.round(),
+            f.w,
+            f.color,
+            String::new(),
+            Vec::new(),
+        );
         self.shapes.push(s);
         let to = self.shapes.len() - 1;
         self.links.push((from, to));
@@ -296,7 +365,11 @@ impl Spike {
         match self.hit(p) {
             Some(i) if Some(i) == self.editing => {
                 let at = self.index_at(p);
-                if e.modifiers.shift { self.select_to(at, cx) } else { self.move_to(at, cx) }
+                if e.modifiers.shift {
+                    self.select_to(at, cx)
+                } else {
+                    self.move_to(at, cx)
+                }
                 self.drag = Drag::Select;
             }
             Some(i) => {
@@ -385,14 +458,22 @@ impl Spike {
         if s.picked(point(-1.0, 0.0), w, cx) {
             return;
         }
-        let to = if s.sel.is_empty() { s.prev_boundary(s.cursor()) } else { s.sel.start };
+        let to = if s.sel.is_empty() {
+            s.prev_boundary(s.cursor())
+        } else {
+            s.sel.start
+        };
         s.move_to(to, cx)
     });
     act!(right, Right, |s, w, cx| {
         if s.picked(point(1.0, 0.0), w, cx) {
             return;
         }
-        let to = if s.sel.is_empty() { s.next_boundary(s.cursor()) } else { s.sel.end };
+        let to = if s.sel.is_empty() {
+            s.next_boundary(s.cursor())
+        } else {
+            s.sel.end
+        };
         s.move_to(to, cx)
     });
     act!(up, Up, |s, w, cx| {
@@ -405,21 +486,27 @@ impl Spike {
             s.move_to(s.vertical(s.cursor(), 1), cx)
         }
     });
-    act!(select_left, SelectLeft, |s, w, cx| s.select_to(s.prev_boundary(s.cursor()), cx));
-    act!(select_right, SelectRight, |s, w, cx| s.select_to(s.next_boundary(s.cursor()), cx));
-    act!(select_up, SelectUp, |s, w, cx| s.select_to(s.vertical(s.cursor(), -1), cx));
-    act!(select_down, SelectDown, |s, w, cx| s.select_to(s.vertical(s.cursor(), 1), cx));
+    act!(select_left, SelectLeft, |s, w, cx| s
+        .select_to(s.prev_boundary(s.cursor()), cx));
+    act!(select_right, SelectRight, |s, w, cx| s
+        .select_to(s.next_boundary(s.cursor()), cx));
+    act!(select_up, SelectUp, |s, w, cx| s
+        .select_to(s.vertical(s.cursor(), -1), cx));
+    act!(select_down, SelectDown, |s, w, cx| s
+        .select_to(s.vertical(s.cursor(), 1), cx));
     act!(select_all, SelectAll, |s, w, cx| {
         let n = s.edited().map_or(0, |e| e.text.len());
         s.sel = 0..n;
         cx.notify()
     });
     act!(home, Home, |s, w, cx| s.move_to(0, cx));
-    act!(end, End, |s, w, cx| s.move_to(s.edited().map_or(0, |e| e.text.len()), cx));
+    act!(end, End, |s, w, cx| s
+        .move_to(s.edited().map_or(0, |e| e.text.len()), cx));
     act!(enter, Enter, |s, w, cx| s.replace(s.sel.clone(), "\n", cx));
     act!(escape, Escape, |s, w, cx| s.stop_editing(cx));
     act!(bold, Bold, |s, w, cx| s.toggle_style(|st| &mut st.bold, cx));
-    act!(italic, Italic, |s, w, cx| s.toggle_style(|st| &mut st.italic, cx));
+    act!(italic, Italic, |s, w, cx| s
+        .toggle_style(|st| &mut st.italic, cx));
     act!(picker, Picker, |s, w, cx| {
         s.picker = s.editing.is_some() && !s.picker;
         cx.notify()
@@ -481,7 +568,8 @@ impl Spike {
         s.text.len()
     }
     fn to_utf16(&self, b: usize) -> usize {
-        self.edited().map_or(0, |s| s.text[..b.min(s.text.len())].encode_utf16().count())
+        self.edited()
+            .map_or(0, |s| s.text[..b.min(s.text.len())].encode_utf16().count())
     }
     fn range_from16(&self, r: &Range<usize>) -> Range<usize> {
         self.utf16_to(r.start)..self.utf16_to(r.end)
@@ -494,7 +582,10 @@ impl Spike {
         let s = self.edited()?;
         let st = s.layout.as_ref()?.stop_for(i);
         let o = self.canvas_origin
-            + self.to_screen(point(s.x + PAD + st.x, s.y + PAD + st.line as f32 * LINE_HEIGHT));
+            + self.to_screen(point(
+                s.x + PAD + st.x,
+                s.y + PAD + st.line as f32 * LINE_HEIGHT,
+            ));
         Some(Bounds::new(o, size(px(1.5), px(LINE_HEIGHT * self.zoom))))
     }
 }
@@ -518,7 +609,10 @@ impl EntityInputHandler for Spike {
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         self.editing?;
-        Some(UTF16Selection { range: self.range_to16(&self.sel), reversed: self.reversed })
+        Some(UTF16Selection {
+            range: self.range_to16(&self.sel),
+            reversed: self.reversed,
+        })
     }
     fn set_selected_text_range(&mut self, r: Range<usize>, _: &mut Window, cx: &mut Context<Self>) {
         self.sel = self.range_from16(&r);
@@ -609,19 +703,28 @@ impl Spike {
         let vw = f32::from(viewport.width) / self.zoom;
         let vh = f32::from(viewport.height) / self.zoom;
         let (x0, y0) = (self.offset.x, self.offset.y);
-        let visible = |s: &Shape| {
-            s.x < x0 + vw && s.x + s.w > x0 && s.y < y0 + vh && s.y + s.h() > y0
-        };
+        let visible =
+            |s: &Shape| s.x < x0 + vw && s.x + s.w > x0 && s.y < y0 + vh && s.y + s.h() > y0;
         let draw_text = self.zoom * text::FONT_SIZE >= self.text_cutoff;
         let ts = window.text_system().clone();
-        let mut f = Frame { shapes: vec![], lines: vec![], overlay: vec![], zoom: self.zoom };
+        let mut f = Frame {
+            shapes: vec![],
+            lines: vec![],
+            overlay: vec![],
+            zoom: self.zoom,
+        };
 
         // Every shape's height comes from its layout, so lay out all shapes that
         // lack one (a new document, or an edited shape), whatever is on screen.
         // ponytail: a 10k document blocks the first frame for ~590 ms; store
         // heights in the file or lay out off the main thread if that matters.
         for s in self.shapes.iter_mut().filter(|s| s.layout.is_none()) {
-            s.layout = Some(Rc::new(text::layout(&s.text, &s.styles, s.w - 2.0 * PAD, &ts)));
+            s.layout = Some(Rc::new(text::layout(
+                &s.text,
+                &s.styles,
+                s.w - 2.0 * PAD,
+                &ts,
+            )));
         }
 
         for s in &self.shapes {
@@ -656,7 +759,11 @@ impl Spike {
                 point(s.x + s.w, c.y),
             ] {
                 let p = self.to_screen(m);
-                f.overlay.push((Bounds::new(p - point(px(4.), px(4.)), size(px(8.), px(8.))), accent, 4.0));
+                f.overlay.push((
+                    Bounds::new(p - point(px(4.), px(4.)), size(px(8.), px(8.))),
+                    accent,
+                    4.0,
+                ));
             }
         }
         if let Some(s) = self.edited()
@@ -666,22 +773,45 @@ impl Spike {
             if !self.sel.is_empty() {
                 for (li, line) in layout.lines.iter().enumerate() {
                     let (a, b) = (self.sel.start.max(line.start), self.sel.end.min(line.end));
-                    if a >= b && !(a == b && self.sel.contains(&line.start) && line.start == line.end) {
+                    if a >= b
+                        && !(a == b && self.sel.contains(&line.start) && line.start == line.end)
+                    {
                         continue;
                     }
-                    let xa = layout.stops.iter().find(|st| st.line == li && st.index >= a).map_or(0.0, |st| st.x);
-                    let xb = layout.stops.iter().rev().find(|st| st.line == li && st.index <= b).map_or(0.0, |st| st.x);
+                    let xa = layout
+                        .stops
+                        .iter()
+                        .find(|st| st.line == li && st.index >= a)
+                        .map_or(0.0, |st| st.x);
+                    let xb = layout
+                        .stops
+                        .iter()
+                        .rev()
+                        .find(|st| st.line == li && st.index <= b)
+                        .map_or(0.0, |st| st.x);
                     let o = self.to_screen(point(s.x + PAD + xa, s.y + PAD + line.top));
                     let w = ((xb - xa).max(3.0)) * self.zoom;
-                    f.overlay.push((Bounds::new(o, size(px(w), px(LINE_HEIGHT * self.zoom))), sel_color, 0.0));
+                    f.overlay.push((
+                        Bounds::new(o, size(px(w), px(LINE_HEIGHT * self.zoom))),
+                        sel_color,
+                        0.0,
+                    ));
                 }
             }
             if let Some(m) = &self.marked {
                 let (a, b) = (layout.stop_for(m.start), layout.stop_for(m.end));
                 let y = s.y + PAD + (a.line as f32 + 1.0) * LINE_HEIGHT - 2.0;
                 let o = self.to_screen(point(s.x + PAD + a.x, y));
-                let w = if a.line == b.line { b.x - a.x } else { s.w - 2.0 * PAD - a.x };
-                f.overlay.push((Bounds::new(o, size(px(w * self.zoom), px(1.5))), gpui::black(), 0.0));
+                let w = if a.line == b.line {
+                    b.x - a.x
+                } else {
+                    s.w - 2.0 * PAD - a.x
+                };
+                f.overlay.push((
+                    Bounds::new(o, size(px(w * self.zoom), px(1.5))),
+                    gpui::black(),
+                    0.0,
+                ));
             }
             if let Some(r) = self.caret_rect(self.cursor()) {
                 let r = Bounds::new(r.origin - self.canvas_origin, r.size);
@@ -696,7 +826,11 @@ impl Spike {
                     point(s.x + s.w + 24.0, c.y),
                 ] {
                     let p = self.to_screen(m);
-                    f.overlay.push((Bounds::new(p - point(px(12.), px(12.)), size(px(24.), px(24.))), accent.opacity(0.8), 12.0));
+                    f.overlay.push((
+                        Bounds::new(p - point(px(12.), px(12.)), size(px(24.), px(24.))),
+                        accent.opacity(0.8),
+                        12.0,
+                    ));
                 }
             }
         }
@@ -721,7 +855,14 @@ fn paint_frame(bounds: Bounds<Pixels>, f: Frame, window: &mut Window) {
     let radius = px(RADIUS * f.zoom);
     for (b, color, _) in &f.shapes {
         let b = Bounds::new(o + b.origin, b.size);
-        window.paint_quad(quad(b, radius, *color, px(0.), gpui::transparent_black(), Default::default()));
+        window.paint_quad(quad(
+            b,
+            radius,
+            *color,
+            px(0.),
+            gpui::transparent_black(),
+            Default::default(),
+        ));
     }
     for (b, _, layout) in &f.shapes {
         if let Some(l) = layout {
@@ -731,7 +872,14 @@ fn paint_frame(bounds: Bounds<Pixels>, f: Frame, window: &mut Window) {
     }
     for (b, color, r) in &f.overlay {
         let b = Bounds::new(o + b.origin, b.size);
-        window.paint_quad(quad(b, px(*r), *color, px(0.), gpui::transparent_black(), Default::default()));
+        window.paint_quad(quad(
+            b,
+            px(*r),
+            *color,
+            px(0.),
+            gpui::transparent_black(),
+            Default::default(),
+        ));
     }
 }
 
@@ -747,7 +895,10 @@ impl Render for Spike {
             let age = t.elapsed().as_secs_f32();
             if age < 1.2 {
                 window.request_animation_frame();
-                Some((1.0 - ((age - 0.6) / 0.6).clamp(0.0, 1.0), format!("{:.0}%", self.zoom * 100.0)))
+                Some((
+                    1.0 - ((age - 0.6) / 0.6).clamp(0.0, 1.0),
+                    format!("{:.0}%", self.zoom * 100.0),
+                ))
             } else {
                 self.zoom_badge = None;
                 None
@@ -762,7 +913,11 @@ impl Render for Spike {
                 paint_frame(bounds, frame, window);
                 let focus = entity.read(cx).focus.clone();
                 if editing {
-                    window.handle_input(&focus, ElementInputHandler::new(bounds, entity.clone()), cx);
+                    window.handle_input(
+                        &focus,
+                        ElementInputHandler::new(bounds, entity.clone()),
+                        cx,
+                    );
                 }
                 entity.update(cx, |s, _| {
                     s.canvas_origin = bounds.origin;
@@ -815,16 +970,26 @@ impl Render for Spike {
                             .flex_1()
                             .h_full()
                             .overflow_hidden()
-                            .cursor(if editing { CursorStyle::IBeam } else { CursorStyle::Arrow })
+                            .cursor(if editing {
+                                CursorStyle::IBeam
+                            } else {
+                                CursorStyle::Arrow
+                            })
                             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                            .on_mouse_down(MouseButton::Right, cx.listener(|s, e: &MouseDownEvent, _, cx| {
-                                let p = s.to_canvas(e.position);
-                                if let Some(i) = s.hit(p) {
-                                    s.menu = Some((e.position, i));
-                                    cx.notify();
-                                }
-                            }))
-                            .on_mouse_up(MouseButton::Left, cx.listener(|s, _: &MouseUpEvent, _, _| s.drag = Drag::None))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|s, e: &MouseDownEvent, _, cx| {
+                                    let p = s.to_canvas(e.position);
+                                    if let Some(i) = s.hit(p) {
+                                        s.menu = Some((e.position, i));
+                                        cx.notify();
+                                    }
+                                }),
+                            )
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|s, _: &MouseUpEvent, _, _| s.drag = Drag::None),
+                            )
                             .on_mouse_move(cx.listener(Self::on_mouse_move))
                             .on_scroll(cx.listener(Self::on_scroll))
                             .on_pinch(cx.listener(Self::on_pinch))
@@ -847,12 +1012,19 @@ impl Render for Spike {
                         .child(label),
                 )
             })
-            .when_some(self.menu, |d, (pos, shape)| d.child(self.context_menu(pos, shape, cx)))
+            .when_some(self.menu, |d, (pos, shape)| {
+                d.child(self.context_menu(pos, shape, cx))
+            })
     }
 }
 
 impl Spike {
-    fn context_menu(&self, pos: Point<Pixels>, shape: usize, cx: &mut Context<Self>) -> impl IntoElement {
+    fn context_menu(
+        &self,
+        pos: Point<Pixels>,
+        shape: usize,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let swatches = (0..PASTELS.len()).map(|c| {
             div()
                 .id(("color", c))
@@ -955,7 +1127,11 @@ fn title_bar(window: &mut Window) -> impl IntoElement {
         .child(button("min", "\u{e921}", WindowControlArea::Min))
         .child(button(
             "max",
-            if window.is_maximized() { "\u{e923}" } else { "\u{e922}" },
+            if window.is_maximized() {
+                "\u{e923}"
+            } else {
+                "\u{e922}"
+            },
             WindowControlArea::Max,
         ))
         .child(button("close", "\u{e8bb}", WindowControlArea::Close))
@@ -982,10 +1158,44 @@ pub fn generate(n: usize) -> (Vec<Shape>, Vec<(usize, usize)>) {
         x % m
     };
     const WORDS: &[&str] = &[
-        "the", "storm", "breaks", "over", "harbour", "while", "Mara", "waits", "for", "a",
-        "letter", "that", "never", "comes", "and", "her", "brother", "lies", "about", "where",
-        "he", "was", "on", "night", "of", "fire", "everyone", "remembers", "differently",
-        "quietly", "betrayal", "returns", "with", "an", "old", "map", "uncertain", "promise",
+        "the",
+        "storm",
+        "breaks",
+        "over",
+        "harbour",
+        "while",
+        "Mara",
+        "waits",
+        "for",
+        "a",
+        "letter",
+        "that",
+        "never",
+        "comes",
+        "and",
+        "her",
+        "brother",
+        "lies",
+        "about",
+        "where",
+        "he",
+        "was",
+        "on",
+        "night",
+        "of",
+        "fire",
+        "everyone",
+        "remembers",
+        "differently",
+        "quietly",
+        "betrayal",
+        "returns",
+        "with",
+        "an",
+        "old",
+        "map",
+        "uncertain",
+        "promise",
     ];
     let mut shapes = Vec::with_capacity(n);
     let mut links = Vec::new();
@@ -1004,11 +1214,21 @@ pub fn generate(n: usize) -> (Vec<Shape>, Vec<(usize, usize)>) {
                 for w in 0..words {
                     let word = WORDS[rnd(WORDS.len() as u64) as usize];
                     let st = match rnd(12) {
-                        0 => Style { bold: true, italic: false },
-                        1 => Style { bold: false, italic: true },
+                        0 => Style {
+                            bold: true,
+                            italic: false,
+                        },
+                        1 => Style {
+                            bold: false,
+                            italic: true,
+                        },
                         _ => Style::default(),
                     };
-                    let piece = if w + 1 < words { format!("{word} ") } else { format!("{word}.") };
+                    let piece = if w + 1 < words {
+                        format!("{word} ")
+                    } else {
+                        format!("{word}.")
+                    };
                     styles.extend(std::iter::repeat_n(st, piece.len()));
                     text.push_str(&piece);
                 }
@@ -1062,8 +1282,18 @@ fn demo() -> (Vec<Shape>, Vec<(usize, usize)>) {
         (text, styles)
     };
     let items = [
-        (0.0, 0.0, 1, "The **storm** breaks over the harbour while _Mara_ waits for a letter that never comes. Justified text, with **bold** and _italic_ words mixed into one paragraph so the shaper sees several fonts."),
-        (0.0, 220.0, 1, "Her brother lies about where he was on the night of the fire. 日本語のテキストも折り返します。 Emoji 🌳🍂 fallback check."),
+        (
+            0.0,
+            0.0,
+            1,
+            "The **storm** breaks over the harbour while _Mara_ waits for a letter that never comes. Justified text, with **bold** and _italic_ words mixed into one paragraph so the shaper sees several fonts.",
+        ),
+        (
+            0.0,
+            220.0,
+            1,
+            "Her brother lies about where he was on the night of the fire. 日本語のテキストも折り返します。 Emoji 🌳🍂 fallback check.",
+        ),
         (300.0, 0.0, 0, "Click to edit. Type to grow the shape."),
         (300.0, 220.0, 0, "Tab, then an arrow, adds a linked shape."),
     ];
@@ -1080,10 +1310,18 @@ fn main() {
     let flag = |f: &str| args.iter().any(|a| a == f);
     let bench = flag("--bench");
     let selftest = flag("--selftest");
-    let opt = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1).cloned());
+    let opt = |f: &str| {
+        args.iter()
+            .position(|a| a == f)
+            .and_then(|i| args.get(i + 1).cloned())
+    };
     let machine = opt("--machine").unwrap_or_else(|| "unknown".into());
     let cutoff: Option<f32> = opt("--text-cutoff").and_then(|v| v.parse().ok());
-    let doc = if flag("--large") || bench { generate(10_000) } else { demo() };
+    let doc = if flag("--large") || bench {
+        generate(10_000)
+    } else {
+        demo()
+    };
 
     gpui_platform::application().run(move |cx: &mut App| {
         let fonts: Vec<Cow<'static, [u8]>> = vec![
@@ -1093,7 +1331,11 @@ fn main() {
             Cow::Borrowed(include_bytes!("../assets/IBMPlexSans-SemiBoldItalic.ttf")),
         ];
         cx.text_system().add_fonts(fonts).expect("bundled fonts");
-        let m = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
+        let m = if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "ctrl"
+        };
         let k = |s: &str| -> &'static str { format!("{m}-{s}").leak() };
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
@@ -1140,8 +1382,10 @@ fn main() {
                         s.text_cutoff = cutoff.unwrap_or(4.0);
                         window.focus(&s.focus, cx);
                         if selftest {
-                            cx.spawn_in(window, async move |this, cx| bench::selftest(this, cx).await)
-                                .detach();
+                            cx.spawn_in(window, async move |this, cx| {
+                                bench::selftest(this, cx).await
+                            })
+                            .detach();
                         }
                         if bench {
                             let mut b = bench::Bench::new(machine);

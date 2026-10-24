@@ -27,7 +27,14 @@ pub struct Bench {
 
 impl Bench {
     pub fn new(machine: String) -> Self {
-        Bench { machine, tag: String::new(), rows: Vec::new(), frames: Vec::new(), key_sent: None, key_to_paint: Vec::new() }
+        Bench {
+            machine,
+            tag: String::new(),
+            rows: Vec::new(),
+            frames: Vec::new(),
+            key_sent: None,
+            key_to_paint: Vec::new(),
+        }
     }
 
     /// End of the canvas paint; present follows in the same `Window::draw` turn.
@@ -45,7 +52,11 @@ impl Bench {
 
     fn write_csv(&self) {
         let new = !Path::new(CSV).exists();
-        let mut f = OpenOptions::new().create(true).append(true).open(CSV).expect("results.csv");
+        let mut f = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(CSV)
+            .expect("results.csv");
         if new {
             writeln!(f, "machine,gpui_rev,scenario,metric,value,unit").unwrap();
         }
@@ -60,7 +71,9 @@ impl Bench {
 /// coming until this scenario's script runs out.
 pub fn step(s: &mut Spike, window: &mut Window) {
     let Some(b) = &mut s.bench else { return };
-    let Some((dx, factor)) = b.frames.pop() else { return };
+    let Some((dx, factor)) = b.frames.pop() else {
+        return;
+    };
     s.offset.x += dx / s.zoom;
     if factor != 1.0 {
         let c = window.viewport_size();
@@ -73,7 +86,12 @@ fn ms(ns: u64) -> f64 {
     ns as f64 / 1e6
 }
 
-fn frame_rows(b: &mut Bench, scenario: &str, before: &FrameDurationSnapshot, after: &FrameDurationSnapshot) {
+fn frame_rows(
+    b: &mut Bench,
+    scenario: &str,
+    before: &FrameDurationSnapshot,
+    after: &FrameDurationSnapshot,
+) {
     let mut draw = after.draw_duration_histogram.clone();
     let _ = draw.subtract(&before.draw_duration_histogram);
     let mut total = after.dirty_to_present_histogram.clone();
@@ -84,8 +102,18 @@ fn frame_rows(b: &mut Bench, scenario: &str, before: &FrameDurationSnapshot, aft
     b.row(scenario, "draw_p50", ms(draw.value_at_quantile(0.50)), "ms");
     b.row(scenario, "draw_p95", ms(draw.value_at_quantile(0.95)), "ms");
     b.row(scenario, "draw_max", ms(draw.max()), "ms");
-    b.row(scenario, "dirty_to_present_p95", ms(total.value_at_quantile(0.95)), "ms");
-    b.row(scenario, "present_interval_p95", ms(interval.value_at_quantile(0.95)), "ms");
+    b.row(
+        scenario,
+        "dirty_to_present_p95",
+        ms(total.value_at_quantile(0.95)),
+        "ms",
+    );
+    b.row(
+        scenario,
+        "present_interval_p95",
+        ms(interval.value_at_quantile(0.95)),
+        "ms",
+    );
 }
 
 async fn wait(cx: &mut AsyncWindowContext, d: Duration) {
@@ -119,7 +147,9 @@ fn process_stats() -> (f64, f64) {
             .output()
             .expect("powershell");
         let s = String::from_utf8_lossy(&out.stdout);
-        let mut it = s.split_whitespace().map(|v| v.replace(',', ".").parse::<f64>().unwrap_or(0.0));
+        let mut it = s
+            .split_whitespace()
+            .map(|v| v.replace(',', ".").parse::<f64>().unwrap_or(0.0));
         let cpu = it.next().unwrap_or(0.0);
         (cpu, it.next().unwrap_or(0.0) / 1_048_576.0)
     }
@@ -147,14 +177,25 @@ pub async fn run(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         let ts = window.text_system().clone();
         let t = Instant::now();
         for sh in &mut s.shapes {
-            sh.layout = Some(std::rc::Rc::new(crate::text::layout(&sh.text, &sh.styles, sh.w - 2.0 * crate::PAD, &ts)));
+            sh.layout = Some(std::rc::Rc::new(crate::text::layout(
+                &sh.text,
+                &sh.styles,
+                sh.w - 2.0 * crate::PAD,
+                &ts,
+            )));
         }
         let ms = t.elapsed().as_secs_f64() * 1e3;
-        s.bench.as_mut().unwrap().row("load_10k", "layout_all", ms, "ms");
+        s.bench
+            .as_mut()
+            .unwrap()
+            .row("load_10k", "layout_all", ms, "ms");
     })
     .ok();
     let (_, rss) = process_stats();
-    this.update(cx, |s, _| s.bench.as_mut().unwrap().row("load_10k", "rss", rss, "MB")).ok();
+    this.update(cx, |s, _| {
+        s.bench.as_mut().unwrap().row("load_10k", "rss", rss, "MB")
+    })
+    .ok();
 
     // Pan scenarios: (name, zoom, frames, px per frame). Each pans right then
     // back over the same ground, so "cold" includes first-time text layout of
@@ -181,7 +222,12 @@ pub async fn run(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
             drain(&this, cx).await;
             this.update_in(cx, |s, window, _| {
                 let after = window.frame_duration_snapshot();
-                frame_rows(s.bench.as_mut().unwrap(), &format!("{name}_{pass}"), &before, &after);
+                frame_rows(
+                    s.bench.as_mut().unwrap(),
+                    &format!("{name}_{pass}"),
+                    &before,
+                    &after,
+                );
             })
             .ok();
         }
@@ -206,7 +252,12 @@ pub async fn run(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         drain(&this, cx).await;
         this.update_in(cx, |s, window, _| {
             let after = window.frame_duration_snapshot();
-            frame_rows(s.bench.as_mut().unwrap(), &format!("zoom_sweep_{pass}"), &before, &after);
+            frame_rows(
+                s.bench.as_mut().unwrap(),
+                &format!("zoom_sweep_{pass}"),
+                &before,
+                &after,
+            );
         })
         .ok();
     }
@@ -232,7 +283,10 @@ pub async fn run(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     let h0 = this.update(cx, |s, _| s.shapes[0].h()).unwrap();
     for i in 0..200 {
         let key = keys[i % keys.len()];
-        this.update(cx, |s, _| s.bench.as_mut().unwrap().key_sent = Some(Instant::now())).ok();
+        this.update(cx, |s, _| {
+            s.bench.as_mut().unwrap().key_sent = Some(Instant::now())
+        })
+        .ok();
         // Dispatch outside any entity update, as the platform would.
         cx.update(|window, cx| window.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx))
             .ok();
@@ -273,7 +327,12 @@ pub async fn run(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     this.update_in(cx, |s, _, cx| {
         let renders = s.renders - r0;
         let b = s.bench.as_mut().unwrap();
-        b.row("idle_after_anim", "cpu", (c1 - c0) / secs * 100.0, "percent");
+        b.row(
+            "idle_after_anim",
+            "cpu",
+            (c1 - c0) / secs * 100.0,
+            "percent",
+        );
         b.row("idle_after_anim", "renders", renders as f64, "count");
         b.row("idle_after_anim", "rss", rss, "MB");
         b.write_csv();
@@ -294,7 +353,11 @@ fn shot(window: &Window, name: &str) {
     );
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/evidence/");
     let _ = std::process::Command::new("screencapture")
-        .args(["-x", &format!("-R{x},{y},{w},{h}"), &format!("{path}mac-{name}.png")])
+        .args([
+            "-x",
+            &format!("-R{x},{y},{w},{h}"),
+            &format!("{path}mac-{name}.png"),
+        ])
         .status();
 }
 
@@ -316,7 +379,10 @@ fn pos_of(s: &mut Spike, idx: usize, i: usize, window: &mut Window) -> gpui::Poi
 }
 
 pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
-    use gpui::{EntityInputHandler, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput};
+    use gpui::{
+        EntityInputHandler, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+        PlatformInput,
+    };
     let step = Duration::from_millis(400);
     wait(cx, Duration::from_millis(1200)).await;
     this.update_in(cx, |_, w, _| shot(w, "1-demo")).ok();
@@ -335,17 +401,58 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         .unwrap();
     cx.update(|w, cx| {
         let m = Modifiers::default();
-        w.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: pa, modifiers: m, click_count: 1, first_mouse: false }), cx);
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: pa,
+                modifiers: m,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
     })
     .ok();
     wait(cx, step).await;
     // second press now that the shape is in editing mode and laid out
     cx.update(|w, cx| {
         let m = Modifiers::default();
-        w.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: pa, modifiers: m, click_count: 1 }), cx);
-        w.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: pa, modifiers: m, click_count: 1, first_mouse: false }), cx);
-        w.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: pb, pressed_button: Some(MouseButton::Left), modifiers: m }), cx);
-        w.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: pb, modifiers: m, click_count: 1 }), cx);
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: pa,
+                modifiers: m,
+                click_count: 1,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: pa,
+                modifiers: m,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: pb,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: m,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: pb,
+                modifiers: m,
+                click_count: 1,
+            }),
+            cx,
+        );
     })
     .ok();
     wait(cx, step).await;
@@ -362,9 +469,14 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     this.update_in(cx, |_, w, _| shot(w, "2-selection")).ok();
 
     // Bold the selection.
-    cx.update(|w, cx| w.dispatch_action(Box::new(crate::Bold), cx)).ok();
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::Bold), cx))
+        .ok();
     wait(cx, step).await;
-    let bold = this.update(cx, |s, _| s.shapes[0].styles[from..to].iter().all(|st| st.bold)).unwrap();
+    let bold = this
+        .update(cx, |s, _| {
+            s.shapes[0].styles[from..to].iter().all(|st| st.bold)
+        })
+        .unwrap();
     check("Cmd+B bolds the selection", bold);
     this.update_in(cx, |_, w, _| shot(w, "3-bold")).ok();
 
@@ -395,16 +507,31 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         .unwrap();
     wait(cx, step).await;
     let marked = this.update(cx, |s, _| s.marked.clone()).unwrap();
-    check(&format!("IME marked range is set ({marked:?})"), marked == Some(n..n + " にほんご".len()));
+    check(
+        &format!("IME marked range is set ({marked:?})"),
+        marked == Some(n..n + " にほんご".len()),
+    );
     this.update_in(cx, |_, w, _| shot(w, "5-ime-marked")).ok();
-    this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, " 日本語", w, cx)).ok();
+    this.update_in(cx, |s, w, cx| {
+        s.replace_text_in_range(None, " 日本語", w, cx)
+    })
+    .ok();
     // Dead key: ´ is marked, then e commits é.
-    this.update_in(cx, |s, w, cx| s.replace_and_mark_text_in_range(None, "´", Some(1..1), w, cx)).ok();
-    this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, "é", w, cx)).ok();
+    this.update_in(cx, |s, w, cx| {
+        s.replace_and_mark_text_in_range(None, "´", Some(1..1), w, cx)
+    })
+    .ok();
+    this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, "é", w, cx))
+        .ok();
     wait(cx, step).await;
-    let ok = this.update(cx, |s, _| s.shapes[0].text.ends_with(" 日本語é") && s.marked.is_none()).unwrap();
+    let ok = this
+        .update(cx, |s, _| {
+            s.shapes[0].text.ends_with(" 日本語é") && s.marked.is_none()
+        })
+        .unwrap();
     check("IME commit and dead-key sequence produce \" 日本語é\"", ok);
-    this.update_in(cx, |_, w, _| shot(w, "6-ime-committed")).ok();
+    this.update_in(cx, |_, w, _| shot(w, "6-ime-committed"))
+        .ok();
 
     // Directional picker on the top-right shape: Tab, then Right adds a linked shape.
     let n0 = this
@@ -413,18 +540,27 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
             s.shapes.len()
         })
         .unwrap();
-    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("tab").unwrap(), cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("tab").unwrap(), cx))
+        .ok();
     wait(cx, step).await;
     this.update_in(cx, |_, w, _| shot(w, "7-picker")).ok();
-    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("right").unwrap(), cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("right").unwrap(), cx))
+        .ok();
     wait(cx, step).await;
     for key in "n e w space b r a n c h".split(' ') {
-        cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx)).ok();
+        cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx))
+            .ok();
     }
     wait(cx, step).await;
-    let (n1, linked) = this.update(cx, |s, _| (s.shapes.len(), s.links.last().copied())).unwrap();
-    check("Tab then Right adds a linked shape", n1 == n0 + 1 && linked == Some((2, n0)));
-    cx.update(|w, cx| w.dispatch_action(Box::new(crate::TogglePanel), cx)).ok();
+    let (n1, linked) = this
+        .update(cx, |s, _| (s.shapes.len(), s.links.last().copied()))
+        .unwrap();
+    check(
+        "Tab then Right adds a linked shape",
+        n1 == n0 + 1 && linked == Some((2, n0)),
+    );
+    cx.update(|w, cx| w.dispatch_action(Box::new(crate::TogglePanel), cx))
+        .ok();
     wait(cx, step).await;
     this.update_in(cx, |_, w, _| shot(w, "8-panel")).ok();
 
@@ -440,8 +576,25 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         .unwrap();
     cx.update(|w, cx| {
         let m = Modifiers::default();
-        w.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Right, position: p, modifiers: m, click_count: 1, first_mouse: false }), cx);
-        w.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Right, position: p, modifiers: m, click_count: 1 }), cx);
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Right,
+                position: p,
+                modifiers: m,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Right,
+                position: p,
+                modifiers: m,
+                click_count: 1,
+            }),
+            cx,
+        );
     })
     .ok();
     wait(cx, step).await;
@@ -456,38 +609,64 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         s.start_editing(0, n, w, cx);
     })
     .ok();
-    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx))
+        .ok();
     wait(cx, step).await;
-    let ok = this.update(cx, |s, _| s.shapes[0].text.ends_with('l')).unwrap();
+    let ok = this
+        .update(cx, |s, _| s.shapes[0].text.ends_with('l'))
+        .unwrap();
     check("typing l while editing inserts it", ok);
 
     // A trailing space at the end of a paragraph moves the caret.
     let caret = |s: &mut Spike| {
-        let st = s.shapes[0].layout.clone().expect("laid out").stop_for(s.cursor());
+        let st = s.shapes[0]
+            .layout
+            .clone()
+            .expect("laid out")
+            .stop_for(s.cursor());
         (st.line, st.x)
     };
     let before = this.update(cx, |s, _| caret(s)).unwrap();
-    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("space").unwrap(), cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("space").unwrap(), cx))
+        .ok();
     wait(cx, step).await;
     let after = this.update(cx, |s, _| caret(s)).unwrap();
-    check(&format!("a trailing space moves the caret ({before:?} -> {after:?})"), after > before);
+    check(
+        &format!("a trailing space moves the caret ({before:?} -> {after:?})"),
+        after > before,
+    );
 
     // Caret stops sit only on grapheme boundaries (e + combining acute is one).
-    this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, "e\u{301}x", w, cx)).ok();
+    this.update_in(cx, |s, w, cx| {
+        s.replace_text_in_range(None, "e\u{301}x", w, cx)
+    })
+    .ok();
     wait(cx, step).await;
     let ok = this
         .update(cx, |s, _| {
             use unicode_segmentation::UnicodeSegmentation;
             let sh = &s.shapes[0];
-            let bounds: Vec<usize> =
-                sh.text.grapheme_indices(true).map(|(i, _)| i).chain([sh.text.len()]).collect();
-            sh.layout.as_ref().expect("laid out").stops.iter().all(|st| bounds.contains(&st.index))
+            let bounds: Vec<usize> = sh
+                .text
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .chain([sh.text.len()])
+                .collect();
+            sh.layout
+                .as_ref()
+                .expect("laid out")
+                .stops
+                .iter()
+                .all(|st| bounds.contains(&st.index))
         })
         .unwrap();
     check("caret stops only on grapheme boundaries", ok);
 
     // Clicking another shape mid-composition drops the composition.
-    this.update_in(cx, |s, w, cx| s.replace_and_mark_text_in_range(None, "か", Some(1..1), w, cx)).ok();
+    this.update_in(cx, |s, w, cx| {
+        s.replace_and_mark_text_in_range(None, "か", Some(1..1), w, cx)
+    })
+    .ok();
     let p = this
         .update(cx, |s, _| {
             let sh = &s.shapes[3];
@@ -496,21 +675,51 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         .unwrap();
     cx.update(|w, cx| {
         let m = Modifiers::default();
-        w.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: p, modifiers: m, click_count: 1, first_mouse: false }), cx);
-        w.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: p, modifiers: m, click_count: 1 }), cx);
+        w.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: p,
+                modifiers: m,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        w.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: p,
+                modifiers: m,
+                click_count: 1,
+            }),
+            cx,
+        );
     })
     .ok();
     wait(cx, step).await;
-    let ok = this.update(cx, |s, _| s.editing == Some(3) && s.marked.is_none()).unwrap();
-    check("switching shapes mid-composition clears the marked range", ok);
+    let ok = this
+        .update(cx, |s, _| s.editing == Some(3) && s.marked.is_none())
+        .unwrap();
+    check(
+        "switching shapes mid-composition clears the marked range",
+        ok,
+    );
     this.update(cx, |s, cx| s.stop_editing(cx)).ok();
-    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx))
+        .ok();
     wait(cx, step).await;
     let n = this.update(cx, |s, _| s.shapes.len()).unwrap();
-    check(&format!("L loads the 10k document when not editing ({n} shapes)"), n == 10_000);
+    check(
+        &format!("L loads the 10k document when not editing ({n} shapes)"),
+        n == 10_000,
+    );
 
     // The generated 10k document at three zoom levels.
-    for (zoom, name) in [(0.6, "10-large-zoom60"), (0.25, "11-large-zoom25"), (0.03, "12-large-zoom3")] {
+    for (zoom, name) in [
+        (0.6, "10-large-zoom60"),
+        (0.25, "11-large-zoom25"),
+        (0.03, "12-large-zoom3"),
+    ] {
         this.update(cx, |s, cx| {
             s.menu = None;
             (s.shapes, s.links) = crate::generate(10_000);
@@ -524,7 +733,12 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     }
     // Loaded and only seen far out, below the text cutoff: shapes still have
     // their real heights, not the minimum.
-    let ok = this.update(cx, |s, _| s.shapes.iter().all(|sh| sh.layout.is_some())).unwrap();
-    check("a document first seen below the text cutoff has every shape's height", ok);
+    let ok = this
+        .update(cx, |s, _| s.shapes.iter().all(|sh| sh.layout.is_some()))
+        .unwrap();
+    check(
+        "a document first seen below the text cutoff has every shape's height",
+        ok,
+    );
     this.update(cx, |_, cx| cx.quit()).ok();
 }

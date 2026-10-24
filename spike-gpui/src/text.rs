@@ -8,8 +8,8 @@
 //! positioned-glyph table, so editing and drawing can't disagree.
 
 use gpui::{
-    Font, FontId, FontStyle, FontWeight, GlyphId, Hsla, Pixels, Point, TextRun, Window, WindowTextSystem,
-    point, px,
+    Font, FontId, FontStyle, FontWeight, GlyphId, Hsla, Pixels, Point, TextRun, Window,
+    WindowTextSystem, point, px,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -148,8 +148,16 @@ fn layout_paragraph(
     let line_no = |out: &Layout| out.lines.len();
     if para.is_empty() {
         let top = line_no(out) as f32 * LINE_HEIGHT;
-        out.stops.push(Stop { index: base, x: 0.0, line: line_no(out) });
-        out.lines.push(Line { top, start: base, end: base });
+        out.stops.push(Stop {
+            index: base,
+            x: 0.0,
+            line: line_no(out),
+        });
+        out.lines.push(Line {
+            top,
+            start: base,
+            end: base,
+        });
         return;
     }
     let shaped = ts.layout_line(para, px(FONT_SIZE), &runs_for(para, base, styles), None);
@@ -161,7 +169,13 @@ fn layout_paragraph(
     let mut flat: Vec<(usize, f32, FontId, GlyphId, bool)> = Vec::new();
     for run in &shaped.runs {
         for g in &run.glyphs {
-            flat.push((g.index, f32::from(g.position.x), run.font_id, g.id, g.is_emoji));
+            flat.push((
+                g.index,
+                f32::from(g.position.x),
+                run.font_id,
+                g.id,
+                g.is_emoji,
+            ));
         }
     }
     flat.sort_by_key(|g| g.0);
@@ -191,7 +205,10 @@ fn layout_paragraph(
         let x0 = x_at(start);
         let mut end = para.len();
         let mut last_space = None;
-        for (i, g) in para[start..].grapheme_indices(true).map(|(i, g)| (i + start, g)) {
+        for (i, g) in para[start..]
+            .grapheme_indices(true)
+            .map(|(i, g)| (i + start, g))
+        {
             let next = i + g.len();
             if x_at(next) - x0 > width && g != " " {
                 end = match last_space {
@@ -215,11 +232,19 @@ fn layout_paragraph(
         let top = line as f32 * LINE_HEIGHT;
         let x0 = x_at(s);
         // Trailing space doesn't count toward the line's width.
-        let content_end = if e > s && bytes[e - 1] == b' ' { e - 1 } else { e };
+        let content_end = if e > s && bytes[e - 1] == b' ' {
+            e - 1
+        } else {
+            e
+        };
         let natural = x_at(content_end) - x0;
         let gaps = spaces_before[content_end] - spaces_before[s];
         let justify = li + 1 < n && gaps > 0;
-        let per_gap = if justify { (width - natural) / gaps as f32 } else { 0.0 };
+        let per_gap = if justify {
+            (width - natural) / gaps as f32
+        } else {
+            0.0
+        };
 
         let shifted = |i: usize| -> f32 {
             let before = spaces_before[i.min(content_end)] - spaces_before[s];
@@ -236,12 +261,24 @@ fn layout_paragraph(
         }
         // One stop per grapheme, so the caret never lands inside a cluster.
         for (i, _) in para[s..e].grapheme_indices(true).map(|(i, g)| (i + s, g)) {
-            out.stops.push(Stop { index: base + i, x: shifted(i), line });
+            out.stops.push(Stop {
+                index: base + i,
+                x: shifted(i),
+                line,
+            });
         }
         // End-of-line stop: after the last char, past any trailing space.
         // The next line's first stop has the same index.
         let end_x = if justify { width } else { x_at(e) - x0 };
-        out.stops.push(Stop { index: base + e, x: end_x, line });
-        out.lines.push(Line { top, start: base + s, end: base + e });
+        out.stops.push(Stop {
+            index: base + e,
+            x: end_x,
+            line,
+        });
+        out.lines.push(Line {
+            top,
+            start: base + s,
+            end: base + e,
+        });
     }
 }
