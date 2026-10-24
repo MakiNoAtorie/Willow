@@ -8,6 +8,12 @@ if [ -f Cargo.toml ]; then
   cargo build -j "$J" --workspace --all-targets
   cargo test -j "$J" --workspace -- --test-threads=2
   cargo clippy -j "$J" --workspace --all-targets -- -D warnings
+  # Windows is verified by hand later; keep its code compiling meanwhile.
+  if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$'; then
+    cargo clippy -j "$J" -p willow-app --target x86_64-pc-windows-gnu -- -D warnings
+  else
+    echo "warning: x86_64-pc-windows-gnu not installed: Windows type-check skipped (rustup target add x86_64-pc-windows-gnu)"
+  fi
 else
   echo "No Cargo workspace yet: Rust checks skipped."
 fi
