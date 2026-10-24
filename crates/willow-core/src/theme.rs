@@ -44,6 +44,11 @@ pub struct ConnectorStyle {
     /// Canvas units, but never thinner than `min_screen` screen pixels.
     pub width: f32,
     pub min_screen: f32,
+    /// Hovered: `hover` color, `hover_width` canvas units (same floor).
+    pub hover: Rgba,
+    pub hover_width: f32,
+    /// Screen pixels either side of the line that hover or right-click it.
+    pub hit: f32,
 }
 
 /// A zone: a rounded rectangle of its pastel mixed into the canvas, with an inset edge and a
@@ -362,6 +367,9 @@ pub const PAPER: Theme = Theme {
         color: hex(0xcbbfae),
         width: 2.0,
         min_screen: 1.0,
+        hover: hex(0x8b7760),
+        hover_width: 3.0,
+        hit: 8.0,
     },
     zone: ZoneStyle {
         radius: 22.0,

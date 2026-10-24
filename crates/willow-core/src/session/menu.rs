@@ -16,6 +16,7 @@ pub(super) struct Ripple {
 pub enum MenuKind {
     Empty,
     Shape,
+    Connector,
 }
 
 /// What an item does. One variant per item; `choose` runs it.
@@ -23,6 +24,7 @@ pub enum MenuKind {
 pub enum MenuAction {
     NewShape,
     Recolor(Color),
+    RemoveLink,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -126,6 +128,7 @@ impl Session {
                     self.ripple_recolor(&id, color);
                 }
             }
+            MenuAction::RemoveLink => self.remove_link_at(menu.canvas),
         }
     }
 

@@ -6,6 +6,7 @@ mod editing;
 mod file;
 mod menu;
 use menu::Ripple;
+mod link;
 mod midpoints;
 mod push;
 mod select;
@@ -183,6 +184,8 @@ pub struct Session {
     slides: push::Slides,
     /// The selection when the marquee started.
     marquee_base: Vec<ShapeId>,
+    /// A link drag in progress and the hovered connector.
+    links: link::Links,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -228,6 +231,7 @@ impl Session {
             mid: Default::default(),
             slides: HashMap::new(),
             marquee_base: Vec::new(),
+            links: Default::default(),
             now: Duration::ZERO,
         }
     }
@@ -549,6 +553,9 @@ impl Session {
                 let hit = self.shape_at(pos);
                 if button == Button::Right && self.gesture.is_none() {
                     match hit {
+                        None if let Some(l) = self.connector_at(pos) => {
+                            self.open_connector_menu(pos, l)
+                        }
                         None => self.open_empty_menu(pos),
                         Some(i) => self.open_shape_menu(pos, i),
                     }
@@ -673,6 +680,10 @@ impl Session {
                 Some(Gesture::Midpoint { from, dragged, .. }) => {
                     let d = pos - *from;
                     *dragged |= d.x.hypot(d.y) >= DRAG_START;
+                    if *dragged {
+                        let redraw = self.drag_link(pos);
+                        return self.respond(redraw);
+                    }
                     self.respond(false)
                 }
                 Some(Gesture::Marquee { .. }) => self.respond(false),
@@ -686,6 +697,7 @@ impl Session {
                     });
                     let changed = over != self.over_text;
                     let changed = self.track_hover(pos) || changed;
+                    let changed = self.track_connector(pos) || changed;
                     self.over_text = over;
                     self.respond(changed || edge_changed)
                 }
@@ -733,6 +745,8 @@ impl Session {
                         if !dragged {
                             let id = self.doc.shapes[index].id.clone();
                             self.create_linked(&id, side);
+                        } else {
+                            self.drop_link(index);
                         }
                     }
                     Some(Gesture::Marquee { .. }) if button == Button::Left => self.gesture = None,

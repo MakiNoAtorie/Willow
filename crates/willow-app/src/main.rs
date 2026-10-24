@@ -547,25 +547,14 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
+    let cs = &t.connector;
+    let (hover_width, hover) = ((cs.hover_width * z).max(cs.min_screen), color(cs.hover));
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
-        let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
-        if dx.max(dy) < 1.0 {
-            // Under a pixel long: nothing to see.
-            continue;
-        }
-        if dx < 1.0 || dy < 1.0 {
-            // Within a pixel of straight across or down: a quad is far cheaper than a path.
-            let half = point(px(width / 2.0), px(width / 2.0));
-            let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
-            window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
-            continue;
-        }
-        let mut path = gpui::PathBuilder::stroke(px(width));
-        path.move_to(p);
-        path.line_to(q);
-        if let Ok(path) = path.build() {
-            window.paint_path(path, ink);
+        if c.hovered {
+            line(window, p, q, hover_width, hover);
+        } else {
+            line(window, p, q, width, ink);
         }
     }
 
@@ -646,6 +635,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
     }
 
+    // A link drag's band over every shape, in the hovered connector's style.
+    if let Some(l) = frame.link_drag {
+        line(window, at(l.from), at(l.to), hover_width, hover);
+    }
+
     // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
     let m = &t.midpoint;
     let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
@@ -684,6 +678,34 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(sel.marquee),
             Default::default(),
         ));
+    }
+}
+
+/// A straight line from `p` to `q`, `width` screen pixels wide.
+fn line(
+    window: &mut Window,
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+    ink: Hsla,
+) {
+    let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
+    if dx.max(dy) < 1.0 {
+        // Under a pixel long: nothing to see.
+        return;
+    }
+    if dx < 1.0 || dy < 1.0 {
+        // Within a pixel of straight across or down: a quad is far cheaper than a path.
+        let half = point(px(width / 2.0), px(width / 2.0));
+        let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
+        window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
+        return;
+    }
+    let mut path = gpui::PathBuilder::stroke(px(width));
+    path.move_to(p);
+    path.line_to(q);
+    if let Ok(path) = path.build() {
+        window.paint_path(path, ink);
     }
 }
 
