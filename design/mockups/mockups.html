@@ -10,7 +10,7 @@
 <title>Willow mockups</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400;1,7..72,700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400;1,7..72,700&family=JetBrains+Mono:wght@400;600&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="themes.js"></script>
 <style>
   * { box-sizing: border-box; }
@@ -61,7 +61,6 @@
   .menu .lbl { padding: 6px 10px 3px; font-size: 11.5px; opacity: .55; }
   .menu .sws { display: flex; gap: 7px; padding: 5px 10px 8px; }
   .menu .sw { border-radius: 50%; }
-  .menu .danger { color: #b5463b; }
   .key { position: absolute; z-index: 6; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
          transform: translate(-50%,-50%); }
   .pill { position: absolute; z-index: 6; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 5px 11px; border-radius: 999px;
@@ -161,10 +160,8 @@ const SCREENS = [
 ];
 
 // ---------- helpers ----------
-const mix = (a, b, t) => t <= 0 ? a : `color-mix(in srgb, ${b} ${Math.round(t * 100)}%, ${a})`;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const el = (tag, cls, css, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (css) Object.assign(e.style, css); if (html != null) e.innerHTML = html; return e; };
-const sel = (c, extra = '') => `0 0 0 ${T.selection.gap}px ${T.canvas}, 0 0 0 ${T.selection.gap + T.selection.ring}px ${T.selection.color}, ${T.selection.shadow}${extra}`;
 
 function key(os, k, shift) {
   if (os === 'mac') return (shift ? '⇧' : '') + '⌘' + k;
@@ -173,18 +170,20 @@ function key(os, k, shift) {
 
 function menuEl(os, items, hover) {
   const m = el('div', 'menu', { background: T.menu.bg, color: T.menu.ink, borderRadius: T.menu.radius + 'px', boxShadow: T.menu.shadow,
-    font: `500 ${T.menu.size}px/1.2 ${T.uiFont}` });
+    font: `${T.menu.weight || 500} ${T.menu.size}px/1.2 ${T.menu.font || T.uiFont}` });
   items.forEach((it, i) => {
     if (it === '-') return m.append(el('div', 'sep', { background: T.menu.ink + '18' }));
     if (it.label) return m.append(el('div', 'lbl', null, it.label));
     if (it.colors != null) {
       const row = el('div', 'sws');
+      const ringC = T.menu.swatchRing;
       T.picker.forEach((p, ci) => row.append(el('div', 'sw', { width: T.menu.swatch + 'px', height: T.menu.swatch + 'px', background: p,
-        boxShadow: ci === it.colors ? `0 0 0 2px ${T.menu.bg}, 0 0 0 3.5px ${p}` : 'none' })));
+        borderRadius: (T.menu.swatchRadius ?? T.menu.swatch / 2) + 'px',
+        boxShadow: [ringC ? `inset 0 0 0 2px ${ringC}` : '', ci === it.colors ? `0 0 0 2px ${T.menu.bg}, 0 0 0 ${ringC ? 4.5 : 3.5}px ${ringC || p}` : ''].filter(Boolean).join(', ') || 'none' })));
       return m.append(row);
     }
     const [t, k, cls] = it;
-    const row = el('div', 'it' + (cls ? ' ' + cls : ''), { borderRadius: T.menu.itemRadius + 'px', background: i === hover ? T.menu.hover : '' },
+    const row = el('div', 'it', { borderRadius: T.menu.itemRadius + 'px', background: i === hover ? T.menu.hover : '', color: cls === 'danger' ? T.menu.danger : '' },
       `<span>${t}</span><span class="k${k === '>' ? ' sub' : ''}">${k === '>' ? '' : k || ''}</span>`);
     m.append(row);
   });
@@ -234,8 +233,8 @@ function render(screen) {
   win.append(tb);
 
   const body = el('div', 'body');
-  const vp = el('div', 'viewport', { background: zoom >= T.zoom.fadeEnd ? `${T.canvasTexture}, ${T.canvas}` : T.canvas,
-    backgroundSize: `${T.textureSize * zoom}px ${T.textureSize * zoom}px`, backgroundPosition: `${panX}px ${panY}px` });
+  const vp = el('div', 'viewport', { background: zoom >= T.zoom.fadeEnd && T.canvasTexture !== 'none' ? `${T.canvasTexture}, ${T.canvas}` : T.canvas });
+  if (T.textureSize) Object.assign(vp.style, { backgroundSize: `${T.textureSize * zoom}px ${T.textureSize * zoom}px`, backgroundPosition: `${panX}px ${panY}px` });
   body.append(vp); win.append(body);
   const world = el('div', 'world', { transform: `translate(${panX}px, ${panY + (os === 'win' ? -34 : 0)}px) scale(${zoom})` });
   vp.append(world);
@@ -245,11 +244,14 @@ function render(screen) {
   // zones, parents first
   const zEls = {};
   for (const z of sc.zones) {
-    const pastel = T.pastel[z.c], pick = T.picker[z.c];
-    const d = el('div', 'zone', { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px', borderRadius: T.zone.radius + 'px',
-      background: mix(T.canvas, pastel, z.parent ? T.zone.nestedFillMix : T.zone.fillMix), boxShadow: `inset 0 0 0 1px ${mix(pastel, pick, T.zone.borderMix)}` });
-    const ts = Math.max(T.zone.titleSize, T.zone.titleMinScreen / zoom);
-    d.append(el('div', 'ztitle', { font: `${T.zone.titleWeight} ${ts}px ${T.font}`, color: T.ink, left: 18 / Math.min(zoom, 1) + 'px', top: 13 / Math.min(zoom, 1) + 'px' }, z.title));
+    const Z = T.zone, pastel = T.pastel[z.c], pick = T.picker[z.c];
+    const d = el('div', 'zone', { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px', borderRadius: Z.radius + 'px',
+      background: mix(T.canvas, Z.fillFrom === 'picker' ? pick : pastel, z.parent ? Z.nestedFillMix : Z.fillMix),
+      border: Z.border || 'none', boxShadow: Z.border ? (Z.shadow || 'none') : `inset 0 0 0 1px ${mix(pastel, pick, Z.borderMix)}` });
+    const k = 1 / Math.min(zoom, 1), ts = Math.max(Z.titleSize, Z.titleMinScreen / zoom);
+    const tc = { ...(Z.titleCss || {}) };
+    if (tc.padding) tc.padding = tc.padding.split(' ').map(v => parseFloat(v) * k + 'px').join(' ');
+    d.append(el('div', 'ztitle', { font: `${Z.titleWeight} ${ts}px ${T.font}`, color: T.ink, left: 16 * k + 'px', top: 12 * k + 'px', ...tc }, z.title));
     world.append(d); zEls[z.id] = d;
   }
 
@@ -260,13 +262,8 @@ function render(screen) {
   const els = {};
   for (const s of sc.shapes) {
     const selected = (screen.sel || []).includes(s.id) || screen.edit === s.id;
-    const d = el('div', 'shape', {
-      left: s.x + 'px', top: s.y + 'px', width: (s.w || T.shape.width) + 'px', padding: `${T.shape.padY}px ${T.shape.padX}px`,
-      borderRadius: T.shape.radius + 'px', border: T.shape.border, color: T.ink,
-      font: `${T.weight} ${T.fontSize}px/${T.lineHeight} ${T.font}`,
-      background: mix(T.pastel[s.c], T.picker[s.c], T.zoom.blockMix * (1 - fade)),
-      boxShadow: selected ? sel(s.c) : fade > 0.4 ? T.shape.shadow : 'none',
-    }, `<span style="opacity:${fade}">${s.t}</span>`);
+    const d = el('div', 'shape', { left: s.x + 'px', top: s.y + 'px', width: (s.w || T.shape.width) + 'px',
+      ...shapeStyle(T, s.c, { selected, deepen: 1 - fade, shadowOn: fade > 0.4 }) }, `<span style="opacity:${fade}">${s.t}</span>`);
     if (screen.edit === s.id) d.firstChild.insertAdjacentHTML('beforeend', `<span class="caret" style="width:${T.caret.width}px;background:${T.caret.color}"></span>`);
     world.append(d); els[s.id] = d;
   }
@@ -283,7 +280,7 @@ function render(screen) {
     const hov = screen.hoverLink && screen.hoverLink[0] === a && screen.hoverLink[1] === b;
     const [x1, y1, x2, y2] = ends(a, b);
     const w = Math.max(hov ? T.connector.hoverWidth : T.connector.width, 1 / zoom);
-    svg.insertAdjacentHTML('beforeend', `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${hov ? T.connector.hoverColor : T.connector.color}" stroke-width="${w}" stroke-linecap="round"/>`);
+    svg.insertAdjacentHTML('beforeend', `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${hov ? T.connector.hoverColor : T.connector.color}" stroke-width="${w}" stroke-linecap="${T.connector.cap || 'round'}"/>`);
   }
 
   // overlays
@@ -302,7 +299,7 @@ function render(screen) {
 
   if (screen.marquee) {
     const [x1, y1, x2, y2] = screen.marquee, [a, b] = scr(x1, y1), [c, d] = scr(x2, y2);
-    put(el('div', 'ov', { width: (c - a) + 'px', height: (d - b) + 'px', background: T.marquee.fill, border: `1px solid ${T.marquee.border}`, borderRadius: T.marquee.radius + 'px' }), a, b);
+    put(el('div', 'ov', { width: (c - a) + 'px', height: (d - b) + 'px', background: T.marquee.fill, border: `${T.marquee.borderWidth || 1}px ${T.marquee.borderStyle || 'solid'} ${T.marquee.border}`, borderRadius: T.marquee.radius + 'px' }), a, b);
     cursor(icons.arrow, c - 2, d - 2);
   }
 
@@ -312,8 +309,9 @@ function render(screen) {
     for (const [g, x, y, dx, dy] of sides) {
       const [sx, sy] = scr(x, y), off = 30;
       svg.insertAdjacentHTML('beforeend', `<line x1="${x}" y1="${y}" x2="${x + dx * (off - 12) / zoom}" y2="${y + dy * (off - 12) / zoom}" stroke="${T.picker2.ghost}" stroke-width="2" stroke-dasharray="3 3"/>`);
-      put(el('div', 'key', { background: T.picker2.keycap, color: T.ink, font: `600 14px ${T.uiFont}`,
-        boxShadow: `0 0 0 1px rgba(70,50,20,.10), 0 2px 0 rgba(70,50,20,.12), 0 6px 14px rgba(70,50,20,.14)` }, g), sx + dx * off, sy + dy * off);
+      const K2 = T.picker2;
+      put(el('div', 'key', { background: K2.keycap, color: T.ink, font: `600 14px ${T.uiFont}`, borderRadius: (K2.radius ?? 8) + 'px', border: K2.border || 'none',
+        boxShadow: K2.shadow || `0 0 0 1px rgba(70,50,20,.10), 0 2px 0 rgba(70,50,20,.12), 0 6px 14px rgba(70,50,20,.14)` }, g), sx + dx * off, sy + dy * off);
     }
   }
 
@@ -330,7 +328,7 @@ function render(screen) {
     if (screen.menu === 'multi') { const A = R('j'); at = scr(A.x + A.w - 50, A.y + A.h - 14); items = [['Cut', K('X')], ['Copy', K('C')], ['Duplicate', K('D')], ['Delete', os === 'mac' ? '⌫' : 'Del'], '-', ['Create zone', '']]; hover = 5; }
     if (screen.menu === 'connector') { const [x1, y1, x2, y2] = ends('b', 'c'); at = scr(x1 + 16, (y1 + y2) / 2 + 4); items = [['Remove link', '']]; hover = 0; }
     if (screen.menu === 'empty') { at = scr(740, 470); items = [['New shape', K('N', true)]]; hover = 0; }
-    if (screen.menu === 'zone') { at = scr(300, 548); items = [['Rename', ''], '-', { label: 'Color' }, { colors: C.butter }, '-', ['Dissolve', ''], ['Delete', '', 'danger']]; hover = 0; }
+    if (screen.menu === 'zone') { at = scr(330, 590); items = [['Rename', ''], '-', { label: 'Color' }, { colors: C.butter }, '-', ['Dissolve', ''], ['Delete', '', 'danger']]; hover = 0; }
     const m = put(menuEl(os, items, hover), at[0], at[1]);
     m.style.left = Math.min(at[0], vp.clientWidth - m.offsetWidth - 12) + 'px';
     if (screen.menu === 'empty' || screen.menu === 'connector') cursor(icons.arrow, at[0] - 2, at[1] - 4);
@@ -401,7 +399,7 @@ function codePanel() {
     ...[['a', '470,70'], ['b', '470,195'], ['c', '470,320'], ['d', '470,445'], ['e', '470,570'], ['f', '150,95'], ['g', '790,150'], ['h', '790,255'], ['i', '150,265'], ['j', '150,370']]
       .map(([i, p]) => lay('@layout') + ' ' + i + ' ' + p + ' w210'),
   ];
-  const p = el('div', 'code', { paddingTop: '46px', background: c.bg, borderLeft: `1px solid ${c.border}`, font: `400 ${c.size}px/${c.lineHeight} ${T.codeFont}`, color: T.ink });
+  const p = el('div', 'code', { paddingTop: '46px', background: c.bg, borderLeft: `${c.borderWidth || 1}px solid ${c.border}`, font: `400 ${c.size}px/${c.lineHeight} ${T.codeFont}`, color: T.ink });
   lines.forEach((l, n) => {
     const bad = typeof l === 'object';
     const row = el('div', 'ln', bad ? { background: 'rgba(217,119,108,.06)' } : null,
@@ -416,7 +414,8 @@ let cur = SCREENS.find(s => s.id === P.get('screen')) || SCREENS[0];
 function nav() {
   const n = document.getElementById('nav');
   const link = (id, extra) => '?' + new URLSearchParams({ screen: id, theme: P.get('theme') || 'paper', ...(P.get('os') ? { os: P.get('os') } : {}), ...extra });
-  n.innerHTML = `<h1>Willow · ${T.name}</h1><div class="os"><a href="${link(cur.id, { os: 'mac' })}">macOS</a><a href="${link(cur.id, { os: 'win' })}">Windows</a></div>`
+  const tl = Object.keys(THEMES).map(k => `<a class="${THEMES[k] === T ? 'on' : ''}" href="?${new URLSearchParams({ screen: cur.id, theme: k })}">${THEMES[k].name}</a>`).join('');
+  n.innerHTML = `<h1>Willow mockups</h1><div class="os">${tl}</div><div class="os"><a href="${link(cur.id, { os: 'mac' })}">macOS</a><a href="${link(cur.id, { os: 'win' })}">Windows</a></div>`
     + SCREENS.map(s => `<a class="${s === cur ? 'on' : ''}" href="${link(s.id)}">${s.title}</a>`).join('');
 }
 function show() {

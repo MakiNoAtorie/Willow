@@ -2,14 +2,14 @@
 
 The reference every phase builds against. **Paper** is the default theme and the one Phases 2–7 build; **Desk** and **Poster** arrive in Phase 8 (see the spec's Themes section).
 
-Status: Paper drafted, awaiting owner approval. Desk and Poster values still to fill in (their round-2 look is in `prototype-visual-language/candidates/`).
+Status: all three themes drafted, awaiting owner approval. Desk and Poster below list only what differs from Paper; anything not mentioned works as in Paper.
 
 ## Where things are
 
 - `mockups/themes.js` holds the exact token values. This document explains them; when the two disagree, `themes.js` wins.
 - `mockups/mockups.html`: every static state. `?screen=<id>&theme=paper&os=mac|win`. Open it directly in a browser; it needs a network connection for the Google Fonts.
-- `mockups/motion.html`: every animation, looping.
-- `mockups/png/<theme>/<screen>.png`: a 1280×820 image of each state, for comparison without opening the HTML. Regenerate them with `mockups/render.sh [theme] [os]` (needs Google Chrome).
+- `mockups/motion.html`: every animation, looping. `?theme=` as above.
+- `mockups/png/<theme>/<screen>.png`: a 1280×820 image of each state in each theme (`paper`, `desk`, `poster`), for comparison without opening the HTML. Regenerate them with `mockups/render.sh [theme] [os]` (needs Google Chrome).
 - Mockups are reference only. Nothing in `design/` ships.
 
 | Screen | Shows |
@@ -76,7 +76,7 @@ Names are what the file format writes and never change. Pastel goes on shapes an
 ### Zones
 
 - Corner radius 22. Fill: the zone's pastel mixed 45% into the canvas (nested zones 70%, so they read as deeper). Edge: 1 px inset, pastel mixed 35% toward its picker color.
-- Title at the top-left, 18 px in and 13 px down, in Literata 13/600.
+- Title at the top-left, 16 px in and 12 px down (constant on screen), in Literata 13/600.
 
 ### Selection, marquee and picker
 
@@ -134,8 +134,65 @@ Every animation ends its redraw loop when it finishes.
 
 ## Desk
 
-To fill: same headings as Paper.
+Typewritten index cards on a linen desk.
+
+| | Value |
+|---|---|
+| Shape text | Courier Prime (OFL), bundled, 14 px / 1.5. Also used for menus, zone titles and the code panel |
+| Canvas | `#e6dfd1` with a fine linen weave, drawn at a fixed screen size |
+| Ink / accent | `#2b2621` / `#2b2621` |
+| Shapes | Radius 4, padding 12 top (under the tab), 13 bottom, 15 sides. The card body is the pastel, and a 6 px tab along the top edge is the picker color. Shadow: `0 1px 1px rgba(70,50,20,.18), 0 4px 10px rgba(70,50,20,.14)` |
+| Selected | The card lifts 4 px, with a 1.5 px ink outline and a deep shadow (`0 16px 30px rgba(70,50,20,.28)`) |
+| Midpoints | 10 px brass `#c79a3e` with a cream stroke |
+| Connectors | 1.5 px `#9b8c74`; hovered 2.5 px ink |
+| Zones | Radius 6. Fill: the picker color mixed 16% into the canvas (nested 30%). No border, a soft inset shadow. Title in uppercase, bold, letter-spaced |
+| Marquee | 1 px dashed ink at 60% |
+| Picker keycaps | Radius 3, paper-card shadow |
+| Menus | `#fffdf7`, radius 4, hover `#f3ead6`. Color swatches are rounded squares (radius 3) |
+| Zoom | Text gone at 52% (14 px × 0.52 = 7.3 px). Blocks deepen 60% toward the picker color, because the near-white cards vanish into the linen otherwise |
+| Motion | As Paper, except select is 160 ms `cubic-bezier(.2,.8,.2,1)` so the lift reads |
+
+| Name | Pastel (card) | Picker (tab, swatch) |
+|---|---|---|
+| neutral | `#fbfaf6` | `#b9b1a3` |
+| rose | `#fff3f1` | `#d8574c` |
+| peach | `#fff6ec` | `#e8873a` |
+| butter | `#fffbea` | `#e2b52c` |
+| sage | `#f5fbf1` | `#5c9d4d` |
+| sky | `#f2f7fc` | `#4a84c4` |
+| lilac | `#f8f4fc` | `#8a66c0` |
+
+Known issue: a monospaced font plus justified text leaves wide gaps between words in narrow cards (see `png/desk/canvas.png`). Options: accept it, pick a proportional typewriter-style font, or let Desk left-align. The owner decides.
 
 ## Poster
 
-To fill: same headings as Paper.
+Neo-brutalist: thick outlines, hard offset shadows, punchy pastels.
+
+| | Value |
+|---|---|
+| Shape text | Space Grotesk (OFL), bundled, 14.5 px / 1.45, weight 500 (bold 700). Also used for menus and zone titles. The code panel keeps JetBrains Mono |
+| Canvas | `#fbf6ea`, no texture |
+| Ink / accent | `#111111`; a hovered connector turns `#ff4d1a` |
+| Shapes | Radius 10, padding 12 / 14, a 2.5 px ink border, hard shadow `4px 4px 0 #111` |
+| Selected | Moves up-left 3 px and the hard shadow grows to `8px 8px 0 #111` |
+| Midpoints | 11 px white with a 2.5 px ink stroke |
+| Connectors | 2.5 px ink, square caps; hovered 4.5 px `#ff4d1a` |
+| Caret / text selection | 2 px ink / `#ffe066` |
+| Zones | Radius 16, 2.5 px ink border, the pastel mixed 50% into the canvas (nested 85%). The title is a black pill with white uppercase text |
+| Marquee | 2 px dashed ink, yellow fill `rgba(255,224,102,.25)` |
+| Picker keycaps | White, radius 6, 2.5 px ink border, `3px 3px 0` hard shadow |
+| Menus | White, radius 8, ink outline with a hard `5px 5px 0` shadow, hover `#ffe57a`. Swatches are 22 px rounded squares with an ink ring |
+| Code panel | `#fffaf0`, a 2.5 px ink rule on its left |
+| Zoom pill | Ink background, `#ffe57a` text |
+| Zoom | Text gone at 50% (14.5 px × 0.5 = 7.25 px). Borders stay at low zoom, so blocks read as outlined tiles |
+| Motion | Create and select overshoot slightly (`cubic-bezier(.3,1.4,.5,1)`, `cubic-bezier(.3,1.6,.5,1)`, 100 ms for select). Color change snaps in two steps (`steps(2, end)`, 160 ms). The zoom pill fades over 300 ms |
+
+| Name | Pastel | Picker |
+|---|---|---|
+| neutral | `#e9e7e1` | `#8f8b82` |
+| rose | `#ffb8b0` | `#ff4f3f` |
+| peach | `#ffc994` | `#ff8a1f` |
+| butter | `#ffe57a` | `#ffc800` |
+| sage | `#b6eda9` | `#2fbf4a` |
+| sky | `#a9d6ff` | `#1f8bff` |
+| lilac | `#d2bbff` | `#8b4dff` |

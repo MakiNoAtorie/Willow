@@ -7,7 +7,7 @@
 <head>
 <meta charset="utf-8">
 <title>Willow motion</title>
-<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,700;1,7..72,400&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="themes.js"></script>
 <style>
   body { margin: 0; padding: 24px; background: #1f2023; font: 13px -apple-system, system-ui, sans-serif; color: #ccc; }
@@ -23,14 +23,15 @@
 </style>
 </head>
 <body>
-<h1>Willow motion · <span id="tn"></span> · each tile loops</h1>
+<h1>Willow motion · <span id="tn"></span> · each tile loops · <a style="color:#9cf" href="?theme=paper">Paper</a> <a style="color:#9cf" href="?theme=desk">Desk</a> <a style="color:#9cf" href="?theme=poster">Poster</a></h1>
 <div id="grid"></div>
 <script>
 const T = THEMES[new URLSearchParams(location.search).get('theme')] || THEMES.paper;
 document.getElementById('tn').textContent = T.name;
 const M = T.motion;
-const ring = `0 0 0 ${T.selection.gap}px ${T.canvas}, 0 0 0 ${T.selection.gap + T.selection.ring}px ${T.selection.color}, ${T.selection.shadow}`;
-const noRing = `0 0 0 0 ${T.canvas}, 0 0 0 0 ${T.selection.color}, ${T.shape.shadow}`;
+// Selected / resting look for chain color c: just the parts that animate.
+const on = c => { const s = shapeStyle(T, c, { selected: true }); return { boxShadow: s.boxShadow, transform: s.transform }; };
+const off = c => { const s = shapeStyle(T, c); return { boxShadow: s.boxShadow, transform: s.transform }; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function tile(title, timing, run) {
@@ -39,7 +40,7 @@ function tile(title, timing, run) {
   t.innerHTML = `<header><b>${title}</b><span>${timing}</span></header>`;
   const st = document.createElement('div');
   st.className = 'stage';
-  st.style.background = `${T.canvasTexture} 0 0/${T.textureSize}px ${T.textureSize}px, ${T.canvas}`;
+  st.style.background = T.canvasTexture === 'none' ? T.canvas : T.textureSize ? `${T.canvasTexture} 0 0/${T.textureSize}px ${T.textureSize}px, ${T.canvas}` : `${T.canvasTexture}, ${T.canvas}`;
   t.append(st);
   document.getElementById('grid').append(t);
   (async () => { for (;;) { st.innerHTML = ''; await run(st); await sleep(1100); } })();
@@ -47,8 +48,7 @@ function tile(title, timing, run) {
 function shape(st, x, y, c, text, extra = {}) {
   const d = document.createElement('div');
   d.className = 'shape';
-  Object.assign(d.style, { left: x + 'px', top: y + 'px', padding: `${T.shape.padY * .8}px ${T.shape.padX * .8}px`, borderRadius: T.shape.radius + 'px',
-    background: T.pastel[c], color: T.ink, font: `${T.weight} ${T.fontSize * .85}px/${T.lineHeight} ${T.font}`, boxShadow: noRing }, extra);
+  Object.assign(d.style, { left: x + 'px', top: y + 'px', ...shapeStyle(T, c) }, { fontSize: T.fontSize * .85 + 'px' }, extra);
   d.textContent = text;
   st.append(d);
   return d;
@@ -56,7 +56,7 @@ function shape(st, x, y, c, text, extra = {}) {
 function link(st, x, y, h) {
   const l = document.createElement('div');
   l.className = 'link';
-  Object.assign(l.style, { left: x - 1 + 'px', top: y + 'px', height: h + 'px', background: T.connector.color });
+  Object.assign(l.style, { left: x - T.connector.width / 2 + 'px', width: T.connector.width + 'px', top: y + 'px', height: h + 'px', background: T.connector.color });
   st.insertBefore(l, st.firstChild);
   return l;
 }
@@ -75,8 +75,9 @@ tile('Create linked shape', 'create ' + M.create, async st => {
   const l = link(st, 200, a.offsetTop + a.offsetHeight, 36);
   l.style.transform = 'scaleY(0)'; l.style.transition = `transform ${M.create}`;
   const b = shape(st, 115, a.offsetTop + a.offsetHeight + 36, 5, '', { opacity: 0, transform: 'translateY(-8px) scale(.96)', transition: `opacity ${M.create}, transform ${M.create}, box-shadow ${M.select}`, minHeight: '42px' });
+  const lifted = on(5);
   await frame();
-  l.style.transform = 'scaleY(1)'; b.style.opacity = 1; b.style.transform = 'none'; b.style.boxShadow = ring;
+  l.style.transform = 'scaleY(1)'; b.style.opacity = 1; Object.assign(b.style, lifted);
   b.innerHTML = `<span style="display:inline-block;width:${T.caret.width}px;height:1.2em;vertical-align:-.2em;background:${T.caret.color}"></span>`;
   await sleep(1400);
 });
@@ -93,9 +94,9 @@ tile('Insert and push', 'push ' + M.push, async st => {
   await sleep(800);
   b.style.top = 18 + 2 * step + 'px'; c.style.top = 18 + 3 * step + 'px'; l2.style.top = 18 + 2 * step + b.offsetHeight + 'px';
   const ln = link(st, 200, 18 + step + a.offsetHeight - 6, step - a.offsetHeight + 6); ln.style.top = 18 + step + 40 + 'px'; ln.style.height = step - 40 + 'px';
-  const n = shape(st, 115, 18 + step, 5, '', { opacity: 0, transform: 'scale(.96)', transition: `opacity ${M.create} 60ms, transform ${M.create} 60ms`, minHeight: '42px', boxShadow: ring });
+  const n = shape(st, 115, 18 + step, 5, '', { opacity: 0, transform: 'scale(.96)', transition: `opacity ${M.create} 60ms, transform ${M.create} 60ms`, minHeight: '42px', boxShadow: on(5).boxShadow });
   await frame();
-  n.style.opacity = 1; n.style.transform = 'none';
+  n.style.opacity = 1; n.style.transform = on(5).transform;
   n.innerHTML = `<span style="display:inline-block;width:${T.caret.width}px;height:1.2em;vertical-align:-.2em;background:${T.caret.color}"></span>`;
   await sleep(1400);
 });
@@ -103,18 +104,18 @@ tile('Insert and push', 'push ' + M.push, async st => {
 // 3. Color change: the whole chain repaints, rippling outward from the shape that was changed.
 tile('Color change', 'color ' + M.color + ', 40ms ripple', async st => {
   const ys = [22, 100, 178], sh = ys.map((y, i) => shape(st, 115, y, 0, ['A letter arrives.', 'Mara reads it twice.', 'She burns it.'][i]));
-  sh.forEach((s, i) => { if (i) link(st, 200, ys[i - 1] + sh[i - 1].offsetHeight, ys[i] - ys[i - 1] - sh[i - 1].offsetHeight); s.style.transition = `background-color ${M.color}`; });
-  sh[1].style.boxShadow = ring;
+  sh.forEach((s, i) => { if (i) link(st, 200, ys[i - 1] + sh[i - 1].offsetHeight, ys[i] - ys[i - 1] - sh[i - 1].offsetHeight); s.style.transition = `background-color ${M.color}, border-top-color ${M.color}`; });
+  Object.assign(sh[1].style, on(0));
   await sleep(800);
-  for (const [i, s] of sh.entries()) s.style.transitionDelay = Math.abs(i - 1) * 40 + 'ms', s.style.backgroundColor = T.pastel[4];
+  for (const [i, s] of sh.entries()) s.style.transitionDelay = Math.abs(i - 1) * 40 + 'ms', s.style.backgroundColor = T.pastel[4], s.style.borderTopColor = T.picker[4];
   await sleep(1300);
 });
 
 // 4. Selection: the ring settles in quickly; deselect fades out.
 tile('Select / deselect', 'select ' + M.select, async st => {
-  const a = shape(st, 115, 100, 1, 'Ferryman: hides the crates below deck.', { transition: `box-shadow ${M.select}` });
-  await sleep(600); a.style.boxShadow = ring;
-  await sleep(1200); a.style.boxShadow = noRing;
+  const a = shape(st, 115, 100, 1, 'Ferryman: hides the crates below deck.', { transition: `box-shadow ${M.select}, transform ${M.select}` });
+  await sleep(600); Object.assign(a.style, on(1));
+  await sleep(1200); Object.assign(a.style, off(1));
   await sleep(400);
 });
 
@@ -154,7 +155,7 @@ tile('Zoom out: text fades', `text gone at ${T.zoom.fadeEnd * 100}%`, async st =
       const fade = Math.max(0, Math.min(1, (z - T.zoom.fadeEnd) / (T.zoom.fadeStart - T.zoom.fadeEnd)));
       w.style.transform = `scale(${z})`;
       sh.forEach((s, i) => { s.style.color = `color-mix(in srgb, ${T.ink} ${fade * 100}%, transparent)`;
-        s.style.background = `color-mix(in srgb, ${T.picker[items[i][2]]} ${(1 - fade) * T.zoom.blockMix * 100}%, ${T.pastel[items[i][2]]})`; });
+        s.style.backgroundColor = mix(T.pastel[items[i][2]], T.picker[items[i][2]], (1 - fade) * T.zoom.blockMix); });
       k < 1 ? requestAnimationFrame(tick) : done();
     };
     requestAnimationFrame(tick);
