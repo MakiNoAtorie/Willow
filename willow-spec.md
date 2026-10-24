@@ -24,7 +24,7 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Three themes, all light: **Paper** (the default), **Desk** and **Poster**, fixed in Phase 1. Paper is the one every phase builds and is reviewed against; Desk and Poster are added in Phase 8.
 - A theme sets the look only: font and typography, the pastel and picker value of each of the seven colors, canvas background, shape fill, borders, corner radii, padding, shadows, connector stroke, selection, hover and midpoint styles, and menus. It never changes the model or the file. Color names are shared, so a chain saved as sage is sage in every theme.
 - View > Theme switches it. The choice is an app preference, the same in every open window and remembered across launches; documents don't store it.
-- Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink and may overlap a neighbor, as text growth already can. Nothing is pushed, the document stays saved, and the switch is not undoable.
+- Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink, and neighbors make room through the spacing pass (Phase 8; before it, shapes may overlap). Spacing never changes the saved positions, so the document stays saved, and the switch is not undoable.
 - New shapes use one default width in every theme (Paper's), so the model never depends on the theme.
 
 ## Text alignment
@@ -172,8 +172,8 @@ The chain, link and zone decisions in the core model are settled before this pha
 Goal: build and reshape chains with the mouse.
 
 - Hovering a shape's border shows small circles at the edge midpoints. Clicking one creates a new linked shape in that direction and enters editing in it.
-- If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves: an unrelated shape may end up overlapped, and zone membership is unchanged. If several shapes link on that side, only the one nearest the midpoint counts as the next shape, and only its subtree is pushed.
-- If the spot is taken by an unrelated shape (another chain, or a shape not linked on that side), the new shape is created at the normal spot and overlaps it; nothing is pushed.
+- If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves here; from Phase 8 the spacing pass keeps unrelated shapes clear (before it they may end up overlapped). Zone membership is unchanged by the insert itself. If several shapes link on that side, only the one nearest the midpoint counts as the next shape, and only its subtree is pushed.
+- If the spot is taken by an unrelated shape (another chain, or a shape not linked on that side), the new shape is created at the normal spot. Before Phase 8 it overlaps; from Phase 8 the spacing pass pushes the other chain clear.
 - Link two existing shapes by dragging from a midpoint onto another shape. A link that would close a cycle is refused. When this joins two chains, the chain the drag started from keeps its color and the other chain adopts it.
 - Remove a link by right-clicking the connector (Remove link). Connectors have a generous hit tolerance and highlight on hover.
 - Delete key removes the selected shape(s). Deleting a shape in the middle of a chain reconnects its neighbors on opposite sides: the one above with the one below, the one left with the one right. With several neighbors on a side, the nearest one on one side becomes the hub and every neighbor on the opposite side links to it; the other neighbors on the hub's side lose their link and become their own chains. Links on sides with no opposite neighbor are dropped. This can never close a cycle. Cut behaves the same way.
@@ -203,7 +203,7 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 Goal: group sections of the canvas (arcs, episodes) into containers.
 
 - Create a zone by selecting shapes, right-clicking the selection and choosing **Create zone**. The zone wraps the selection. The item is available only when all selected shapes have the same parent: none (a top-level zone) or the same zone (a nested zone). A selection spanning two zones, or inside an already nested zone, can't become a zone.
-- Shapes join a zone by being dropped inside it (the shape's center decides), and leave by being dropped outside. Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The one exception is new copies: paste and duplicate place copies in a zone as described in Phase 4.
+- Shapes join a zone by being dropped inside it (the shape's center decides), and leave by being dropped outside. Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The one exception is new copies: paste and duplicate place copies in a zone as described in Phase 4. From Phase 8, a shape moved by the spacing pass is also judged as if dropped where it ends up.
 - Dropping a zone inside another nests it; dropping a nested zone outside un-nests it.
 - Moving a zone moves everything inside it. Zones are resizable, including smaller than their contents; members stay members.
 - Each zone has an editable title and its own color from the same palette (default: the neutral light gray). It never inherits color from its contents.
@@ -221,7 +221,7 @@ Goal: edit the diagram as text, live, alongside the canvas.
 - The parser is forgiving: an unclosed quote runs to the end of its line, and unknown lines are ignored.
 - When the text is invalid (e.g. a reference to an ID that doesn't exist yet, a duplicate ID, an unclosed zone), the canvas quietly holds its last valid state and the offending line gets a subtle underline. No popups.
 - The file is the text. Saving with invalid text writes the text as typed, never the last valid model, so nothing the writer typed is lost. Loading an invalid file shows whatever parses, opens the panel and underlines the rest. Invalid lines survive only until the next canvas edit, which regenerates canonical text without them; that edit is undoable, so Ctrl/Cmd+Z brings the lines back.
-- Shapes added in text without a position are auto-placed next to the shape they link to. An unlinked shape without a position is placed below the lowest shape on the canvas. If the auto-placed spot is taken, the shape overlaps it; nothing is pushed.
+- Shapes added in text without a position are auto-placed next to the shape they link to. An unlinked shape without a position is placed below the lowest shape on the canvas. If the auto-placed spot is taken, the shape overlaps it until Phase 8, where the spacing pass pushes the neighbors clear.
 - IDs stay stable across edits so links never scramble. Changing an ID token in the text is not a rename: it is a new shape, and the old references become invalid lines.
 
 ## Phase 8 — Polish pass
@@ -232,6 +232,12 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 - Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
 - Add View > Text Alignment (Left and Centered next to the default Justified).
 - Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
+- Shapes never overlap: every shape keeps at least a minimum gap (a theme size, set in this phase) from every other shape. This replaces the earlier "may overlap; nothing is pushed" rules for text growth, theme switching, shape creation in Phase 4/5 and auto-placement in Phase 7.
+  - Spacing is its own process, separate from editing. Each shape keeps the position the writer gave it (by moving, creating or placing it). Where it is drawn is worked out from those positions by the spacing pass, which runs after every change.
+  - When a shape grows, by typing or resizing, any shape it would come closer to than the gap is pushed away in whatever direction gets it clear soonest, sideways included. Pushes cascade: a pushed shape pushes what it then crowds.
+  - A shape in another chain (a branch, say) is never pushed alone: its whole chain moves with it as one block, keeping its own layout. Within the growing shape's own chain, the linked subtree beyond the crowded shape moves, as in Phase 4's insert-and-push.
+  - Pushes are never undo steps. Undo reverts only the change the writer made (the text, the resize), and the spacing pass then lets pushed shapes settle back toward their own positions.
+  - Zones: a pushed shape joins or leaves a zone by the same rule as a mouse drop (its center decides).
 
 ---
 
