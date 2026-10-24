@@ -1,0 +1,16 @@
+willow 1
+
+zone p "Outer" {
+  zone q "Inner" {
+    zone r "Deep" color sage {
+      a: "Deep shape"
+    }
+    b: "Inner shape"
+  }
+}
+
+@layout a 0,0 w210
+@layout b 0,100 w210
+@layout p -80,-80 500x400
+@layout q -40,-40 300x300
+@layout r -20,-20 250x100

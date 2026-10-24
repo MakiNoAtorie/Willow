@@ -15,7 +15,7 @@ mod zoom;
 
 pub use chain::{Link, Side, side};
 pub use draw::{Connector, Frame, Visible, VisibleZone};
-pub use format::{LoadError, Loaded, load, save};
+pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};

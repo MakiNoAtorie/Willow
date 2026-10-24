@@ -13,20 +13,26 @@ const RECOVERY_QUIET: Duration = Duration::from_secs(5);
 const RECOVERY_MAX: Duration = Duration::from_secs(30);
 
 impl Session {
-    /// A session over a loaded file's document; `bytes` are what was read. A load that
-    /// needed repairs starts unsaved.
+    /// A session over a loaded file's document, with what had no layout placed; `bytes` are
+    /// what was read. A load that needed repairs starts unsaved.
     pub fn open(
-        loaded: Loaded,
+        mut loaded: Loaded,
         bytes: Vec<u8>,
         theme: &'static Theme,
         measure: Box<dyn Measure>,
     ) -> Self {
-        let mut s = Session::new(loaded.document, theme, measure);
-        if loaded.repaired {
-            s.saved = None;
-        }
+        let mut s = Session::new(Document::default(), theme, measure);
+        s.place(&mut loaded);
+        s.saved = (!loaded.repaired).then(|| loaded.document.clone());
+        s.doc = loaded.document;
         s.bytes = bytes;
         s
+    }
+
+    /// Places what `loaded` had no layout for, measuring with this session.
+    fn place(&self, loaded: &mut Loaded) {
+        let height = |shape: &_| self.shape_height(shape);
+        format::place(&mut loaded.document, &loaded.unplaced, self.theme, height);
     }
 
     /// The document matches what was last read or written (undoing back to it counts).
@@ -67,7 +73,8 @@ impl Session {
         }
         self.bytes = bytes.to_vec();
         match load(bytes) {
-            Ok(loaded) if self.is_saved() => {
+            Ok(mut loaded) if self.is_saved() => {
+                self.place(&mut loaded);
                 self.stop_editing();
                 self.saved = (!loaded.repaired).then(|| loaded.document.clone());
                 self.history.replace(&mut self.doc, loaded.document);

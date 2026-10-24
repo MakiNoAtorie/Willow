@@ -1,0 +1,10 @@
+willow 1
+
+a: "Top"
+}
+zone z "Open" {
+  b: "Inside"
+
+@layout a 0,0 w210
+@layout b 0,140 w210
+@layout z -40,100 300x200

@@ -64,6 +64,8 @@ pub struct ZoneStyle {
     pub title_min_screen: f32,
     pub title_x: f32,
     pub title_y: f32,
+    /// Room around the members of a zone the loader wraps (clears the title).
+    pub padding: f32,
 }
 
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing curve.
@@ -241,6 +243,9 @@ pub struct Theme {
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
     pub shape: ShapeStyle,
+    /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
+    /// linked to it.
+    pub creation_gap: f32,
     pub connector: ConnectorStyle,
     pub zone: ZoneStyle,
     pub selection: SelectionStyle,
@@ -300,6 +305,7 @@ pub const PAPER: Theme = Theme {
             },
         ],
     },
+    creation_gap: 48.0,
     connector: ConnectorStyle {
         color: hex(0xcbbfae),
         width: 2.0,
@@ -316,6 +322,7 @@ pub const PAPER: Theme = Theme {
         title_min_screen: 12.0,
         title_x: 16.0,
         title_y: 12.0,
+        padding: 40.0,
     },
     selection: SelectionStyle {
         gap: 2.0,

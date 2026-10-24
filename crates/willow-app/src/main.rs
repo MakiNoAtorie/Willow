@@ -135,6 +135,7 @@ impl Content {
         let loaded = Loaded {
             document,
             repaired: false,
+            unplaced: Default::default(),
         };
         Content {
             loaded,

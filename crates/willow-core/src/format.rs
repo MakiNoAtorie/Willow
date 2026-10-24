@@ -1,10 +1,13 @@
 //! The `.willow` text format: `save` writes canonical text, `load` reads it back.
 
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Write};
 
 use crate::edit::build;
-use crate::{Color, Document, Link, Point, RichText, Shape, ShapeId, Side, Zone, side};
+use crate::{
+    Color, DEFAULT_WIDTH, Document, Link, Point, RichText, Shape, ShapeId, Side, Theme, Zone, side,
+};
 
 /// A loaded file: its document, and whether loading had to repair anything (which leaves
 /// the document unsaved).
@@ -12,6 +15,17 @@ use crate::{Color, Document, Link, Point, RichText, Shape, ShapeId, Side, Zone, 
 pub struct Loaded {
     pub document: Document,
     pub repaired: bool,
+    /// What the file gave no layout; `Session::open` places it, since that needs heights.
+    pub unplaced: Unplaced,
+}
+
+/// Shapes and zones (indices into the loaded document) still to be placed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Unplaced {
+    /// Each shape, and the shape it goes beside and on which side of it; `None` goes below
+    /// the lowest shape.
+    shapes: Vec<(usize, Option<(usize, Side)>)>,
+    zones: Vec<usize>,
 }
 
 /// Why a file can't open. `Display` is the reason an alert names.
@@ -36,9 +50,10 @@ impl std::error::Error for LoadError {}
 
 /// Reads a file's bytes. CRLF line endings are accepted as they are, not as a repair.
 /// Shapes stack in the order their lines appear. Links resolve after the whole file, so they
-/// may point forward. Lines it can't read are dropped; links to missing shapes or closing a
+/// may point forward. Lines it can't read are dropped; a line reusing a taken ID is dropped;
+/// a zone inside a nested zone is flattened into it; links to missing shapes or closing a
 /// cycle are dropped; a chain stating two colors keeps the first; shapes and zones without
-/// layout keep the defaults. All of these count as repairs.
+/// layout are listed in `unplaced`. All of these count as repairs.
 pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| LoadError::NotUtf8)?;
     let mut lines = text.lines();
@@ -52,21 +67,38 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     }
     let mut doc = Document::default();
     let (mut layout, mut repaired) = (HashMap::new(), false);
-    // Open zone blocks (indices into `doc.zones`), and each shape's stated link and color.
-    let (mut open, mut stated): (Vec<usize>, _) = (Vec::new(), Vec::new());
+    // Open zone blocks (indices into `doc.zones`; `None` for a dropped zone line), each
+    // shape's stated link and color, and every ID taken so far.
+    let (mut open, mut stated): (Vec<Option<usize>>, _) = (Vec::new(), Vec::new());
+    let mut seen = HashSet::new();
     for line in lines.map(str::trim).filter(|l| !l.is_empty()) {
+        // Members join the innermost zone still standing.
+        let inner = open.iter().rev().find_map(|z| *z);
         if let Some(rest) = line.strip_prefix("@layout ") {
             match parse_layout(rest) {
-                Some((id, l)) => _ = layout.insert(id, l),
+                Some((id, l, whole)) => {
+                    repaired |= !whole;
+                    match layout.entry(id) {
+                        Entry::Vacant(e) => _ = e.insert(l),
+                        Entry::Occupied(_) => repaired = true,
+                    }
+                }
                 None => repaired = true,
             }
         } else if line == "}" {
             repaired |= open.pop().is_none();
         } else if let Some((id, title, color)) = line.strip_prefix("zone ").and_then(parse_zone) {
-            if let Some(&p) = open.last() {
+            // A zone inside a nested zone is flattened: its members join its parent.
+            let deep = open.iter().flatten().count() >= 2;
+            if deep || !seen.insert(id) {
+                repaired = true;
+                open.push(None);
+                continue;
+            }
+            if let Some(p) = inner {
                 doc.zones[p].members.push(ShapeId(id.into()));
             }
-            open.push(doc.zones.len());
+            open.push(Some(doc.zones.len()));
             doc.zones.push(Zone {
                 id: ShapeId(id.into()),
                 title,
@@ -78,9 +110,13 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
                 members: Vec::new(),
             });
         } else if let Some((id, text, rest)) = parse_shape(line) {
+            if !seen.insert(id) {
+                repaired = true;
+                continue;
+            }
             let mut s = Shape::new(ShapeId(id.into()), 0, 0);
             s.text = text;
-            if let Some(&z) = open.last() {
+            if let Some(z) = inner {
                 doc.zones[z].members.push(s.id.clone());
             }
             doc.shapes.push(s);
@@ -92,29 +128,162 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
         }
     }
     repaired |= !open.is_empty();
-    for s in &mut doc.shapes {
+    let mut missing = vec![false; doc.shapes.len()];
+    for (i, s) in doc.shapes.iter_mut().enumerate() {
         match layout.remove(s.id.0.as_str()) {
             Some(Place::Shape(x, y, w, h)) => (s.x, s.y, s.width, s.extra_height) = (x, y, w, h),
-            _ => repaired = true,
+            _ => missing[i] = true,
         }
     }
-    for z in &mut doc.zones {
+    let mut unplaced = Unplaced::default();
+    for (i, z) in doc.zones.iter_mut().enumerate() {
         match layout.remove(z.id.0.as_str()) {
             Some(Place::Zone(x, y, w, h)) => (z.x, z.y, z.width, z.height) = (x, y, w, h),
-            _ => repaired = true,
+            _ => unplaced.zones.push(i),
         }
     }
     repaired |= !layout.is_empty();
-    repaired |= resolve(&mut doc, &stated);
+    let (dropped, anchor) = resolve(&mut doc, &stated);
+    // A shape goes beside the shape it names, or else beside a placed one naming it.
+    let mut named_by = vec![None; doc.shapes.len()];
+    for (k, a) in anchor.iter().enumerate() {
+        if let Some((j, side)) = *a
+            && missing[j]
+            && !missing[k]
+        {
+            named_by[j].get_or_insert((k, opposite(side)));
+        }
+    }
+    unplaced.shapes = (0..doc.shapes.len())
+        .filter(|&i| missing[i])
+        .map(|i| (i, anchor[i].or(named_by[i])))
+        .collect();
+    repaired |= dropped || unplaced != Unplaced::default();
     Ok(Loaded {
         document: doc,
         repaired,
+        unplaced,
     })
 }
 
+fn opposite(s: Side) -> Side {
+    match s {
+        Side::Top => Side::Bottom,
+        Side::Bottom => Side::Top,
+        Side::Left => Side::Right,
+        Side::Right => Side::Left,
+    }
+}
+
+/// Places what `unplaced` lists. A shape goes one creation gap from its anchor on its side,
+/// or below the lowest shape (the one whose top is lowest) when it has none; a zone wraps its
+/// members with padding. `height` measures a shape; only anchors and the lowest are measured.
+pub(crate) fn place(
+    doc: &mut Document,
+    unplaced: &Unplaced,
+    theme: &Theme,
+    height: impl Fn(&Shape) -> f32,
+) {
+    let (gap, pad) = (theme.creation_gap, theme.zone.padding);
+    let shapes = &mut doc.shapes;
+    let mut anchor = vec![None; shapes.len()];
+    let mut placed = vec![true; shapes.len()];
+    for &(i, a) in &unplaced.shapes {
+        (placed[i], anchor[i]) = (false, a);
+    }
+    let low = |s: &Shape| (s.y, s.x);
+    let mut lowest = (0..shapes.len())
+        .filter(|&i| placed[i])
+        .max_by_key(|&i| low(&shapes[i]));
+    // Below the lowest shape: its x, one gap under its bottom.
+    let below = |shapes: &[Shape], lowest: Option<usize>| match lowest {
+        Some(l) => {
+            let l = &shapes[l];
+            (l.x, (l.y as f32 + height(l) + gap).round() as i32)
+        }
+        None => (0, 0),
+    };
+    for &(start, _) in &unplaced.shapes {
+        // Walk anchors up to a placed shape, then place back down.
+        let (mut path, mut i) = (Vec::new(), start);
+        while !placed[i] {
+            path.push(i);
+            match anchor[i] {
+                Some((j, _)) => i = j,
+                None => break,
+            }
+        }
+        for &i in path.iter().rev() {
+            let (x, y) = match anchor[i] {
+                Some((j, side)) => {
+                    let (a, s) = (&shapes[j], &shapes[i]);
+                    match side {
+                        Side::Bottom => (a.x, (a.y as f32 + height(a) + gap).round() as i32),
+                        Side::Top => (a.x, (a.y as f32 - height(s) - gap).round() as i32),
+                        Side::Right => (a.x + a.width as i32 + gap as i32, a.y),
+                        Side::Left => (a.x - s.width as i32 - gap as i32, a.y),
+                    }
+                }
+                None => below(shapes, lowest),
+            };
+            (shapes[i].x, shapes[i].y, placed[i]) = (x, y, true);
+            if lowest.is_none_or(|l| low(&shapes[i]) > low(&shapes[l])) {
+                lowest = Some(i);
+            }
+        }
+    }
+    if unplaced.zones.is_empty() {
+        return;
+    }
+    let index: HashMap<&ShapeId, usize> =
+        shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
+    let zindex: HashMap<ShapeId, usize> = (doc.zones.iter().enumerate())
+        .map(|(i, z)| (z.id.clone(), i))
+        .collect();
+    // Nested zones come after their parents, so going backwards wraps them first.
+    for &z in unplaced.zones.iter().rev() {
+        let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for m in &doc.zones[z].members {
+            let (x, y, w, h) = if let Some(&i) = index.get(m) {
+                let s = &shapes[i];
+                (s.x as f32, s.y as f32, s.width as f32, height(s))
+            } else if let Some(&c) = zindex.get(m) {
+                let c = &doc.zones[c];
+                (c.x as f32, c.y as f32, c.width as f32, c.height as f32)
+            } else {
+                continue;
+            };
+            (lo, hi) = (
+                (lo.0.min(x), lo.1.min(y)),
+                (hi.0.max(x + w), hi.1.max(y + h)),
+            );
+        }
+        let zone = &mut doc.zones[z];
+        if lo.0 > hi.0 {
+            // ponytail: an empty zone gets a small box below the lowest shape; a later
+            // spacing pass may move it.
+            ((zone.x, zone.y), zone.width, zone.height) = (
+                below(shapes, lowest),
+                DEFAULT_WIDTH + 2 * pad as u32,
+                2 * pad as u32,
+            );
+            continue;
+        }
+        let (x, y) = ((lo.0 - pad).floor(), (lo.1 - pad).floor());
+        (zone.x, zone.y) = (x as i32, y as i32);
+        zone.width = ((hi.0 + pad).ceil() - x) as u32;
+        zone.height = ((hi.1 + pad).ceil() - y) as u32;
+    }
+}
+
 /// Links each shape to the one it names and paints every chain the first color one of its
-/// shapes states. True if anything had to be dropped.
-fn resolve(doc: &mut Document, stated: &[(Option<&str>, Option<Color>)]) -> bool {
+/// shapes states. Whether anything had to be dropped, and for each shape the shape its kept
+/// link names and the side of it the shape sits on.
+#[allow(clippy::type_complexity)]
+fn resolve(
+    doc: &mut Document,
+    stated: &[(Option<(&str, Side)>, Option<Color>)],
+) -> (bool, Vec<Option<(usize, Side)>>) {
     let index: HashMap<&str, usize> = (doc.shapes.iter().enumerate())
         .map(|(i, s)| (s.id.0.as_str(), i))
         .collect();
@@ -126,9 +295,9 @@ fn resolve(doc: &mut Document, stated: &[(Option<&str>, Option<Color>)]) -> bool
         }
         i
     }
-    let mut repaired = false;
+    let (mut repaired, mut anchor) = (false, vec![None; stated.len()]);
     for (i, (to, _)) in stated.iter().enumerate() {
-        let Some(to) = to else { continue };
+        let Some((to, side)) = to else { continue };
         let Some(&j) = index.get(to) else {
             repaired = true;
             continue;
@@ -139,6 +308,7 @@ fn resolve(doc: &mut Document, stated: &[(Option<&str>, Option<Color>)]) -> bool
             continue;
         }
         root[a] = b;
+        anchor[i] = Some((j, *side));
         let link = Link(doc.shapes[j].id.clone(), doc.shapes[i].id.clone());
         doc.links.push(link);
     }
@@ -155,7 +325,7 @@ fn resolve(doc: &mut Document, stated: &[(Option<&str>, Option<Color>)]) -> bool
         let r = find(&mut root, i);
         doc.shapes[i].color = color[r].unwrap_or_default();
     }
-    repaired
+    (repaired, anchor)
 }
 
 fn is_id(id: &str) -> bool {
@@ -168,13 +338,16 @@ enum Place {
     Zone(i32, i32, u32, u32),
 }
 
-/// `id x,y wW [hH]` for a shape, `id x,y WxH` for a zone.
-fn parse_layout(rest: &str) -> Option<(&str, Place)> {
+/// `id x,y wW [hH]` for a shape, `id x,y WxH` for a zone. A bare `id x,y` is a shape of the
+/// default width, and not whole (a repair).
+fn parse_layout(rest: &str) -> Option<(&str, Place, bool)> {
     let mut t = rest.split(' ');
     let id = t.next().filter(|id| is_id(id))?;
     let (x, y) = t.next()?.split_once(',')?;
     let (x, y) = (x.parse().ok()?, y.parse().ok()?);
-    let size = t.next()?;
+    let Some(size) = t.next() else {
+        return Some((id, Place::Shape(x, y, DEFAULT_WIDTH, 0), false));
+    };
     let place = match size.strip_prefix('w') {
         Some(w) => {
             let h = match t.next() {
@@ -188,18 +361,22 @@ fn parse_layout(rest: &str) -> Option<(&str, Place)> {
             Place::Zone(x, y, w.parse().ok()?, h.parse().ok()?)
         }
     };
-    t.next().is_none().then_some((id, place))
+    t.next().is_none().then_some((id, place, true))
 }
 
 /// After a shape's text: `[below|above a | right of a|left of a] [color name]`. The ID linked
-/// to and the stated color.
-fn parse_tail(rest: &str) -> Option<(Option<&str>, Option<Color>)> {
+/// to with the side of it this shape sits on, and the stated color.
+#[allow(clippy::type_complexity)]
+fn parse_tail(rest: &str) -> Option<(Option<(&str, Side)>, Option<Color>)> {
     let t: Vec<&str> = rest.split_whitespace().collect();
     let (to, t) = match t.as_slice() {
-        ["below" | "above", to, t @ ..] | ["right" | "left", "of", to, t @ ..] => (Some(*to), t),
+        ["below", to, t @ ..] => (Some((*to, Side::Bottom)), t),
+        ["above", to, t @ ..] => (Some((*to, Side::Top)), t),
+        ["right", "of", to, t @ ..] => (Some((*to, Side::Right)), t),
+        ["left", "of", to, t @ ..] => (Some((*to, Side::Left)), t),
         t => (None, t),
     };
-    if to.is_some_and(|to| !is_id(to)) {
+    if to.is_some_and(|(to, _)| !is_id(to)) {
         return None;
     }
     Some((to, parse_color(t)?))

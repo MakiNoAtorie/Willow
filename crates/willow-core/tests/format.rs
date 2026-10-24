@@ -306,3 +306,107 @@ fn an_empty_zone_is_its_two_lines() {
     };
     assert_golden(&doc, "empty-zones.willow");
 }
+
+/// Golden file `name` loads as `doc` (order-free), flagged as repaired.
+fn assert_repaired(name: &str, doc: &Document) {
+    let loaded = load(&golden(name)).unwrap();
+    assert!(loaded.repaired, "{name}");
+    assert_eq!(unordered(&loaded.document), unordered(doc), "{name}");
+}
+
+#[test]
+fn unreadable_lines_are_dropped() {
+    let doc = Document {
+        shapes: vec![shape("a", 0, 0, "Kept")],
+        ..Document::default()
+    };
+    assert_repaired("repair-unknown.willow", &doc);
+}
+
+#[test]
+fn a_duplicate_id_drops_the_later_line_be_it_shape_zone_or_layout() {
+    let doc = Document {
+        shapes: vec![
+            shape("a", 0, 0, "First"),
+            shape("b", 0, 140, "Bee"),
+            shape("c", 0, 280, "Inside"),
+        ],
+        links: vec![link("a", "b")],
+        ..Document::default()
+    };
+    assert_repaired("repair-duplicate.willow", &doc);
+}
+
+#[test]
+fn a_link_closing_a_cycle_is_dropped() {
+    let doc = Document {
+        shapes: vec![
+            shape("a", 0, 0, "A"),
+            shape("b", 0, 140, "B"),
+            shape("c", 0, 280, "C"),
+        ],
+        links: vec![link("a", "c"), link("a", "b")],
+        ..Document::default()
+    };
+    assert_repaired("repair-cycle.willow", &doc);
+}
+
+#[test]
+fn a_link_to_a_missing_id_is_dropped_and_the_shape_kept() {
+    let doc = Document {
+        shapes: vec![colored("b", 0, 0, "B", Color::Sky)],
+        ..Document::default()
+    };
+    assert_repaired("repair-missing.willow", &doc);
+}
+
+#[test]
+fn a_zone_nested_deeper_than_one_level_is_flattened_into_its_parent() {
+    let doc = Document {
+        shapes: vec![
+            shape("a", 0, 0, "Deep shape"),
+            shape("b", 0, 100, "Inner shape"),
+        ],
+        zones: vec![
+            zone("p", "Outer", Color::Neutral, (-80, -80, 500, 400), &["q"]),
+            zone(
+                "q",
+                "Inner",
+                Color::Neutral,
+                (-40, -40, 300, 300),
+                &["a", "b"],
+            ),
+        ],
+        ..Document::default()
+    };
+    assert_repaired("repair-deep.willow", &doc);
+}
+
+#[test]
+fn conflicting_colors_in_a_chain_keep_the_first() {
+    let doc = Document {
+        shapes: vec![
+            colored("a", 0, 0, "A", Color::Rose),
+            colored("b", 0, 140, "B", Color::Rose),
+        ],
+        links: vec![link("a", "b")],
+        ..Document::default()
+    };
+    assert_repaired("repair-colors.willow", &doc);
+}
+
+#[test]
+fn a_stray_brace_is_dropped_and_an_unclosed_zone_closes_at_the_end() {
+    let doc = Document {
+        shapes: vec![shape("a", 0, 0, "Top"), shape("b", 0, 140, "Inside")],
+        zones: vec![zone(
+            "z",
+            "Open",
+            Color::Neutral,
+            (-40, 100, 300, 200),
+            &["b"],
+        )],
+        ..Document::default()
+    };
+    assert_repaired("repair-braces.willow", &doc);
+}
