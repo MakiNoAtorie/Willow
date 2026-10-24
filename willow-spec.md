@@ -235,7 +235,7 @@ Until Phase 8's spacing pass, a few changes push shapes out of the way. Pushes a
 - **What pushes**: a shape growing (typing, dragging its bottom edge, or a width change that reflows its text taller), a shape getting wider (dragging a side edge), midpoint creation and insert-and-push, and blocks that were themselves pushed, so pushes cascade. The writer's own drags, moves and pastes never push: a shape dropped onto another overlaps it.
 - **Own chain**: the subtrees linked on the growing side (below for height; left and right for width) keep at least one **creation gap** from the grown shape and move as blocks.
 - **Other chains**: a shape of another chain that the change brings closer than the **minimum gap** (a theme size, edge to edge; Paper's is 24 units) is pushed with its whole chain as one block, out to the minimum gap.
-- A push only happens when a change brings a shape closer than it was. Shapes the writer left closer than the gap stay where they are until something grows into them.
+- A push only happens when a change brings a shape closer than it was. Shapes the writer left closer than the gap stay where they are until something grows into them. In a cascade, a block that was itself pushed keeps shapes it was already closer than the gap to at that same distance; only the change itself (the grown shape, its subtree, a new shape) pushes out to the full gap. This is what makes cascades end.
 - Pushes go in the direction of the growth: down for height, outward from the center for width (left-side shapes left, right-side shapes right). Shrinking never pulls anything back.
 - Every push folds into the undo step that caused it (the typing session, the resize, the creation). Pushes never change zone membership.
 
