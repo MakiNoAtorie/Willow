@@ -1,6 +1,6 @@
 # Bench
 
-`cargo run --release -p willow-app -- --bench --machine NAME` appends rows to `results.csv` (columns `machine,gpui_rev,scenario,metric,value,unit`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`.
+`cargo run --release -p willow-app -- --bench --machine NAME` appends rows to `results.csv` (columns `machine,git_rev,scenario,metric,value,unit`; `git_rev` is `git rev-parse --short HEAD` of the Willow checkout, or `unknown`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`.
 
 ## MacBook Air M4 (`mba-m4`, #16)
 

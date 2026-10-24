@@ -16,8 +16,6 @@ use willow_core::{Button, Input, Modifiers, Point, Viewport};
 
 use crate::Willow;
 
-/// The pinned GPUI revision (docs/CONVENTIONS.md); bump with the pin.
-const GPUI_REV: &str = "79fe6a645f68";
 const CSV: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../bench/results.csv");
 /// Screen pixels per scripted pan frame.
 const PAN_PX: f32 = 12.0;
@@ -57,10 +55,11 @@ impl Bench {
             .open(CSV)
             .expect("bench/results.csv");
         if new {
-            writeln!(f, "machine,gpui_rev,scenario,metric,value,unit").unwrap();
+            writeln!(f, "machine,git_rev,scenario,metric,value,unit").unwrap();
         }
+        let rev = git_rev();
         for (s, m, v, u) in &self.rows {
-            writeln!(f, "{},{GPUI_REV},{s},{m},{v:.3},{u}", self.machine).unwrap();
+            writeln!(f, "{},{rev},{s},{m},{v:.3},{u}", self.machine).unwrap();
         }
         println!("appended {} rows to {CSV}", self.rows.len());
     }
@@ -75,6 +74,18 @@ pub(crate) fn step(w: &mut Willow, window: &mut Window) {
         w.session.handle(input, w.start.elapsed());
         window.request_animation_frame();
     }
+}
+
+/// Willow's short git revision, or "unknown" outside a checkout.
+fn git_rev() -> String {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output();
+    let rev = out.ok().filter(|o| o.status.success());
+    let rev = rev.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    rev.filter(|r| !r.is_empty())
+        .unwrap_or_else(|| "unknown".into())
 }
 
 fn ms(ns: u64) -> f64 {

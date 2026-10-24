@@ -147,6 +147,25 @@ pub struct MenuStyle {
     pub gap: f32,
 }
 
+/// The window's title bar, in screen pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChromeStyle {
+    /// Window title text.
+    pub title: Rgba,
+    /// Windows title-bar button hover fill.
+    pub button_hover: Rgba,
+    /// macOS: the transparent bar over the canvas, and its title size.
+    pub mac_height: f32,
+    pub mac_title_size: f32,
+    /// Windows: the custom bar, its title size, the min/max/close buttons and their icon
+    /// glyph size, and the menu button.
+    pub win_height: f32,
+    pub win_title_size: f32,
+    pub win_button_width: f32,
+    pub win_glyph_size: f32,
+    pub win_menu_button_width: f32,
+}
+
 /// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
 /// in place of the resting one. Fades in and out over `fade`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -196,10 +215,7 @@ pub struct Theme {
     pub pastel: [Rgba; 7],
     /// Saturated swatch per color, indexed in `Color::ALL` order.
     pub picker: [Rgba; 7],
-    /// Window title text.
-    pub chrome_title: Rgba,
-    /// Windows title-bar button hover fill.
-    pub chrome_button_hover: Rgba,
+    pub chrome: ChromeStyle,
     pub zoom: ZoomStyle,
     /// One wheel zoom step easing to its new level.
     pub zoom_step: Transition,
@@ -302,8 +318,17 @@ pub const PAPER: Theme = Theme {
         hex(0x5d8fbf),
         hex(0x9479b8),
     ],
-    chrome_title: rgba(59, 52, 44, 0.55),
-    chrome_button_hover: rgba(70, 50, 20, 0.07),
+    chrome: ChromeStyle {
+        title: rgba(59, 52, 44, 0.55),
+        button_hover: rgba(70, 50, 20, 0.07),
+        mac_height: 38.0,
+        mac_title_size: 13.0,
+        win_height: 34.0,
+        win_title_size: 12.5,
+        win_button_width: 46.0,
+        win_glyph_size: 10.0,
+        win_menu_button_width: 44.0,
+    },
     zoom: ZoomStyle {
         min: 0.1,
         max: 4.0,

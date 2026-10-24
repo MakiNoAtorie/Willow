@@ -17,8 +17,8 @@ pub use session::{
     Viewport,
 };
 pub use theme::{
-    CaretStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme,
-    Transition, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow,
+    ShapeStyle, Theme, Transition, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

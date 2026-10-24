@@ -1,4 +1,4 @@
-//! Windows: 34 px custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
+//! Windows: custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
 //! The menu button opens the app menu in the theme's menu style, with the Edit menu cascaded.
 
 use crate::{Copy, Cut, Paste, Quit, Redo, Undo, color, shadows};
@@ -7,9 +7,6 @@ use gpui::{
     div, point, prelude::*, px, relative,
 };
 use willow_core::{MenuStyle, Session};
-
-/// Title bar height.
-const HEIGHT: f32 = 34.0;
 
 #[derive(Default)]
 struct MenuState {
@@ -20,22 +17,23 @@ struct MenuState {
 
 pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let t = session.theme();
+    let c = t.chrome;
     let state = window.use_keyed_state("app-menu", cx, |_, _| MenuState::default());
     let (open, edit) = {
         let s = state.read(cx);
         (s.open, s.edit)
     };
-    let hover = color(t.chrome_button_hover);
+    let hover = color(t.chrome.button_hover);
     let button = move |id: &'static str, glyph: &'static str, area| {
         div()
             .id(id)
-            .w(px(46.))
+            .w(px(c.win_button_width))
             .h_full()
             .flex()
             .items_center()
             .justify_center()
             .font_family("Segoe Fluent Icons")
-            .text_size(px(10.))
+            .text_size(px(c.win_glyph_size))
             .hover(move |s| s.bg(hover))
             .window_control_area(area)
             .child(glyph)
@@ -43,7 +41,7 @@ pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl I
     let menus = open.then(|| app_menu(&t.menu, &state, edit, session));
     let toggle = state.clone();
     div()
-        .h(px(HEIGHT))
+        .h(px(c.win_height))
         .w_full()
         .flex()
         .items_center()
@@ -51,7 +49,7 @@ pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl I
         .child(
             div()
                 .id("menu")
-                .w(px(44.))
+                .w(px(c.win_menu_button_width))
                 .h_full()
                 .flex()
                 .items_center()
@@ -75,9 +73,9 @@ pub fn title_bar(session: &Session, window: &mut Window, cx: &mut App) -> impl I
                 .h_full()
                 .flex()
                 .items_center()
-                .text_size(px(12.5))
+                .text_size(px(c.win_title_size))
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(color(t.chrome_title))
+                .text_color(color(c.title))
                 .window_control_area(WindowControlArea::Drag)
                 .child("Untitled"),
         )
@@ -159,7 +157,10 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
     });
     deferred(
         anchored()
-            .position(point(px(m.left), px(HEIGHT + m.gap)))
+            .position(point(
+                px(m.left),
+                px(session.theme().chrome.win_height + m.gap),
+            ))
             .child(
                 div()
                     .flex()

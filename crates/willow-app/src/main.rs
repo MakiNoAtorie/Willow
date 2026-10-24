@@ -15,6 +15,10 @@ use willow_core::{
 };
 mod bench;
 mod text;
+#[cfg(not(target_os = "windows"))]
+mod titlebar_macos;
+#[cfg(not(target_os = "windows"))]
+use titlebar_macos::title_bar;
 #[cfg(target_os = "windows")]
 mod titlebar_windows;
 #[cfg(target_os = "windows")]
@@ -480,25 +484,6 @@ pub(crate) fn shadows(
             }
         })
         .collect()
-}
-
-/// macOS: transparent title bar over the canvas; the traffic lights are native.
-#[cfg(not(target_os = "windows"))]
-fn title_bar(session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
-    let t = session.theme();
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .h(px(38.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(13.))
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(color(t.chrome_title))
-        .child("Untitled")
 }
 
 /// The native menu bar: app menu and Edit. Items enable while their action has a handler.
