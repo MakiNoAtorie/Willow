@@ -37,6 +37,35 @@ pub struct ShapeStyle {
     pub shadow: [Shadow; 2],
 }
 
+/// The straight line drawn for a link, under shapes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConnectorStyle {
+    pub color: Rgba,
+    /// Canvas units, but never thinner than `min_screen` screen pixels.
+    pub width: f32,
+    pub min_screen: f32,
+}
+
+/// A zone: a rounded rectangle of its pastel mixed into the canvas, with an inset edge and a
+/// title at the top-left. Sizes are canvas units unless named screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoneStyle {
+    pub radius: f32,
+    /// How far the fill moves from the canvas toward the pastel; deeper for nested zones.
+    pub fill_mix: f32,
+    pub nested_fill_mix: f32,
+    /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
+    pub edge_mix: f32,
+    pub edge_width: f32,
+    /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
+    /// never faded. Its top-left sits `title_x`, `title_y` in, constant on screen when zoomed out.
+    pub title_size: f32,
+    pub title_weight: f32,
+    pub title_min_screen: f32,
+    pub title_x: f32,
+    pub title_y: f32,
+}
+
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing curve.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CubicBezier(pub f32, pub f32, pub f32, pub f32);
@@ -212,6 +241,8 @@ pub struct Theme {
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
     pub shape: ShapeStyle,
+    pub connector: ConnectorStyle,
+    pub zone: ZoneStyle,
     pub selection: SelectionStyle,
     pub caret: CaretStyle,
     /// Shape fill per color, indexed in `Color::ALL` order.
@@ -268,6 +299,23 @@ pub const PAPER: Theme = Theme {
                 color: rgba(70, 50, 20, 0.08),
             },
         ],
+    },
+    connector: ConnectorStyle {
+        color: hex(0xcbbfae),
+        width: 2.0,
+        min_screen: 1.0,
+    },
+    zone: ZoneStyle {
+        radius: 22.0,
+        fill_mix: 0.45,
+        nested_fill_mix: 0.7,
+        edge_mix: 0.35,
+        edge_width: 1.0,
+        title_size: 13.0,
+        title_weight: 600.0,
+        title_min_screen: 12.0,
+        title_x: 16.0,
+        title_y: 12.0,
     },
     selection: SelectionStyle {
         gap: 2.0,

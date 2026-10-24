@@ -2,14 +2,21 @@
 //! theme's low-zoom thresholds.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::{CaretView, Color, Layout, Point, Rgba, Session, Shape};
+use crate::{CaretView, Color, Layout, Point, Rgba, Session, Shape, ShapeId, Side, Zone, side};
 
-/// One frame's worth of drawing.
+/// One frame's worth of drawing: zones, then connectors, then shapes.
 pub struct Frame<'a> {
+    /// Zones intersecting the rectangle, parents before the zones nested in them.
+    pub zones: Vec<VisibleZone<'a>>,
+    /// Connectors of links that may cross the rectangle, in canvas units.
+    pub connectors: Vec<Connector>,
+    /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
+    pub connector_width: f32,
     /// Shapes intersecting the rectangle, in draw order (later on top).
     pub shapes: Vec<Visible<'a>>,
     /// Shape text opacity: 1 at `fade_start` and above, 0 at `fade_end` and below.
@@ -19,6 +26,27 @@ pub struct Frame<'a> {
     /// Shape shadows and the dot grid are drawn (dropped below `fade_end`).
     pub shadows: bool,
     pub grid: bool,
+}
+
+/// A link's straight line, between the midpoints of the sides its shapes face each other with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Connector {
+    pub from: Point,
+    pub from_side: Side,
+    pub to: Point,
+    pub to_side: Side,
+}
+
+pub struct VisibleZone<'a> {
+    pub zone: &'a Zone,
+    /// Inside another zone: a deeper fill.
+    pub nested: bool,
+    pub fill: Rgba,
+    /// The inset edge's color.
+    pub edge: Rgba,
+    /// Title text's top-left and size in canvas units: never under the theme's minimum on screen.
+    pub title_at: Point,
+    pub title_size: f32,
 }
 
 pub struct Visible<'a> {
@@ -44,7 +72,7 @@ pub struct Visible<'a> {
 
 impl Session {
     /// What to draw at `now` in the screen rectangle `from`..`to` (canvas-relative screen pixels).
-    pub fn draw(&self, from: Point, to: Point, now: Duration) -> Frame<'_> {
+    pub fn draw<'a>(&'a self, from: Point, to: Point, now: Duration) -> Frame<'a> {
         let (t, vp) = (self.theme(), self.viewport());
         let z = &t.zoom;
         let fade = ((vp.zoom - z.fade_end) / (z.fade_start - z.fade_end)).clamp(0.0, 1.0);
@@ -54,16 +82,82 @@ impl Session {
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let rings = self.selection_rings(now);
         let edited = self.editing().filter(|_| fade > 0.0);
-        let shapes = (self.document().shapes.iter())
+        let doc = self.document();
+        // A shape as the gesture in progress previews it: its shape and top-left.
+        let placed = |s: &'a Shape| {
+            let s = match &resized {
+                Some(r) if r.id == s.id => Cow::Owned(r.clone()),
+                _ => Cow::Borrowed(s),
+            };
+            let (x, y) = match preview {
+                Some(p) if *p.id == s.id => (p.x, p.y),
+                _ => (s.x, s.y),
+            };
+            (s, x, y)
+        };
+        let mut connectors = Vec::new();
+        for &(p, q) in self.link_ends().iter() {
+            let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
+                continue;
+            };
+            let ((p, px, py), (q, qx, qy)) = (placed(p), placed(q));
+            // Cull on what's known without layout first.
+            let (left, right) = (px.min(qx), (px + p.width as i32).max(qx + q.width as i32));
+            if left as f32 > b.x || (right as f32) < a.x || py.min(qy) as f32 > b.y {
+                continue;
+            }
+            let (ph, qh) = (self.shape_height(&p), self.shape_height(&q));
+            if (py as f32 + ph).max(qy as f32 + qh) < a.y {
+                continue;
+            }
+            let center = |x: i32, y: i32, w: u32, h: f32| Point {
+                x: x as f32 + w as f32 / 2.0,
+                y: y as f32 + h / 2.0,
+            };
+            let (pc, qc) = (center(px, py, p.width, ph), center(qx, qy, q.width, qh));
+            let (from_side, to_side) = (side(pc, qc), side(qc, pc));
+            connectors.push(Connector {
+                from: midpoint(pc, p.width, ph, from_side),
+                from_side,
+                to: midpoint(qc, q.width, qh, to_side),
+                to_side,
+            });
+        }
+        let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
+        let nested: HashSet<&ShapeId> = (doc.zones.iter())
+            .flat_map(|z| &z.members)
+            .filter(|m| zone_ids.contains(m))
+            .collect();
+        let zt = &t.zone;
+        let k = 1.0 / vp.zoom.min(1.0);
+        let zones = (doc.zones.iter())
+            .filter(|z| {
+                let (x, y) = (z.x as f32, z.y as f32);
+                x <= b.x && x + z.width as f32 >= a.x && y <= b.y && y + z.height as f32 >= a.y
+            })
+            .map(|zone| {
+                let (pastel, nested) = (t.pastel(zone.color), nested.contains(&zone.id));
+                let fill = if nested {
+                    zt.nested_fill_mix
+                } else {
+                    zt.fill_mix
+                };
+                VisibleZone {
+                    zone,
+                    nested,
+                    fill: mix(t.canvas, pastel, fill),
+                    edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
+                    title_at: Point {
+                        x: zone.x as f32 + zt.title_x * k,
+                        y: zone.y as f32 + zt.title_y * k,
+                    },
+                    title_size: zt.title_size.max(zt.title_min_screen / vp.zoom),
+                }
+            })
+            .collect();
+        let shapes = (doc.shapes.iter())
             .filter_map(|s| {
-                let s = match &resized {
-                    Some(r) if r.id == s.id => Cow::Owned(r.clone()),
-                    _ => Cow::Borrowed(s),
-                };
-                let (x, y) = match preview {
-                    Some(p) if *p.id == s.id => (p.x, p.y),
-                    _ => (s.x, s.y),
-                };
+                let (s, x, y) = placed(s);
                 let (fx, fy) = (x as f32, y as f32);
                 // Cull on what's known without layout first: layout is the costly part.
                 if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {
@@ -91,12 +185,29 @@ impl Session {
             .collect();
         let full = vp.zoom >= z.fade_end;
         Frame {
+            zones,
+            connectors,
+            connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
             shapes,
             text_opacity: fade,
             deepen,
             shadows: full,
             grid: full,
         }
+    }
+}
+
+/// The midpoint of `side` of a `w` x `h` shape centered at `c`.
+fn midpoint(c: Point, w: u32, h: f32, side: Side) -> Point {
+    let (dx, dy) = match side {
+        Side::Top => (0.0, -h / 2.0),
+        Side::Bottom => (0.0, h / 2.0),
+        Side::Left => (-(w as f32) / 2.0, 0.0),
+        Side::Right => (w as f32 / 2.0, 0.0),
+    };
+    Point {
+        x: c.x + dx,
+        y: c.y + dy,
     }
 }
 

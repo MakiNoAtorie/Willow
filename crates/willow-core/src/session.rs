@@ -13,7 +13,7 @@ use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Layout, Measure, layout};
 use crate::zoom::{Zoom, ZoomPill};
-use crate::{Document, RichText, Shape, ShapeId, Theme, Transition};
+use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
 
@@ -141,6 +141,8 @@ pub struct Session {
     theme: &'static Theme,
     measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
+    /// Each link's shape indices, for drawing; see `link_ends`.
+    link_ends: RefCell<Vec<(usize, usize)>>,
     viewport: Viewport,
     gesture: Option<Gesture>,
     space_held: bool,
@@ -174,6 +176,7 @@ impl Session {
             theme,
             measure,
             layouts: RefCell::default(),
+            link_ends: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
                 zoom: 1.0,
@@ -226,6 +229,28 @@ impl Session {
             },
         );
         l
+    }
+
+    /// Each link's two shape indices, in link order. Cached, and checked against the document
+    /// on every call (cheap ID compares), so any change to shapes or links rebuilds it.
+    // ponytail: a link to a missing shape (`usize::MAX`) fails the check and rebuilds every
+    // call; commands never make one.
+    pub(crate) fn link_ends(&self) -> std::cell::Ref<'_, Vec<(usize, usize)>> {
+        let (shapes, links) = (&self.doc.shapes, &self.doc.links);
+        let is = |i: usize, id: &ShapeId| shapes.get(i).is_some_and(|s| &s.id == id);
+        let valid = |ends: &Vec<(usize, usize)>| {
+            ends.len() == links.len()
+                && (ends.iter().zip(links)).all(|(&(i, j), Link(a, b))| is(i, a) && is(j, b))
+        };
+        if !valid(&self.link_ends.borrow()) {
+            let at: HashMap<&ShapeId, usize> =
+                shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
+            let index = |id| at.get(id).copied().unwrap_or(usize::MAX);
+            *self.link_ends.borrow_mut() = (links.iter())
+                .map(|Link(a, b)| (index(a), index(b)))
+                .collect();
+        }
+        self.link_ends.borrow()
     }
 
     /// Drawn height in canvas units: text, padding and extra height.

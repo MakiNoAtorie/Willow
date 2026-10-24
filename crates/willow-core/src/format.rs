@@ -69,7 +69,10 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
             None => repaired = true,
         }
     }
-    let document = Document { shapes };
+    let document = Document {
+        shapes,
+        ..Document::default()
+    };
     Ok(Loaded {
         document,
         repaired: repaired || !layout.is_empty(),

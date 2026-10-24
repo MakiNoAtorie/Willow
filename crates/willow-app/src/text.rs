@@ -125,6 +125,52 @@ pub(crate) fn paint_text(
     }
 }
 
+/// Paints one line of plain `text` in the theme font at `weight` and `size` (screen px), its
+/// top-left at `origin`, in ink.
+pub(crate) fn paint_line(
+    window: &mut Window,
+    origin: gpui::Point<Pixels>,
+    text: &str,
+    t: &Theme,
+    weight: f32,
+    size: f32,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let mut font = gpui::font(t.font);
+    // Only Regular and Bold are bundled, and CSS matching takes Bold for 600; asking for 600
+    // itself benched about 1 ms slower per frame.
+    font.weight = if weight >= 600.0 {
+        FontWeight::BOLD
+    } else {
+        FontWeight::NORMAL
+    };
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: color(t.ink),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    // Quantised to half pixels, as shape text is.
+    let size = px((size * 2.0).round() / 2.0);
+    let l = window.text_system().layout_line(text, size, &[run], None);
+    let ink = color(t.ink);
+    for run in &l.runs {
+        for g in &run.glyphs {
+            let o = origin + point(g.position.x, l.ascent);
+            // A missing glyph only loses that glyph; nothing to recover.
+            let _ = if g.is_emoji {
+                window.paint_emoji(o, run.font_id, g.id, size)
+            } else {
+                window.paint_glyph(o, run.font_id, g.id, size, ink)
+            };
+        }
+    }
+}
+
 /// Underlines byte range `marked` (IME composition) of text laid out as `layout`, with the
 /// text's top-left at `origin` (screen), scaled by zoom `z`: one stroke per line it spans.
 pub(crate) fn paint_marked(

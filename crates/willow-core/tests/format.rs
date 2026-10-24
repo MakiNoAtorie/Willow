@@ -19,6 +19,7 @@ fn saves_shapes_and_their_layout() {
     (b.width, b.extra_height) = (180, 60);
     let doc = Document {
         shapes: vec![b, shape("a", 0, 0, "The city closes its gates")],
+        ..Document::default()
     };
     assert_eq!(save(&doc).as_bytes(), golden("shapes.willow"));
 }

@@ -437,7 +437,7 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
         )
 }
 
-/// Canvas, dot grid, shapes with their text, and the caret.
+/// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
 fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
     let (vp, t) = (session.viewport(), session.theme());
     let (w, h) = (bounds.size.width.into(), bounds.size.height.into());
@@ -477,6 +477,60 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             x += s;
         }
         y += s;
+    }
+
+    // Zones and their titles, then connectors, under the shapes.
+    let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
+    for v in &frame.zones {
+        let zone = v.zone;
+        let b = Bounds::new(
+            at(willow_core::Point {
+                x: zone.x as f32,
+                y: zone.y as f32,
+            }),
+            size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
+        );
+        let zt = &t.zone;
+        window.paint_quad(quad(
+            b,
+            px(zt.radius * z),
+            color(v.fill),
+            px(zt.edge_width * z),
+            color(v.edge),
+            Default::default(),
+        ));
+        let size = v.title_size * z;
+        text::paint_line(
+            window,
+            at(v.title_at),
+            &zone.title,
+            t,
+            zt.title_weight,
+            size,
+        );
+    }
+    let width = frame.connector_width * z;
+    let ink = color(t.connector.color);
+    for c in &frame.connectors {
+        let (p, q) = (at(c.from), at(c.to));
+        let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
+        if dx.max(dy) < 1.0 {
+            // Under a pixel long: nothing to see.
+            continue;
+        }
+        if dx < 1.0 || dy < 1.0 {
+            // Within a pixel of straight across or down: a quad is far cheaper than a path.
+            let half = point(px(width / 2.0), px(width / 2.0));
+            let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
+            window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
+            continue;
+        }
+        let mut path = gpui::PathBuilder::stroke(px(width));
+        path.move_to(p);
+        path.line_to(q);
+        if let Ok(path) = path.build() {
+            window.paint_path(path, ink);
+        }
     }
 
     let radius = px(t.shape.radius * z);
