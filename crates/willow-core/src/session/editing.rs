@@ -442,10 +442,15 @@ impl Session {
             }
             return;
         }
+        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             let on = !s.text.all_styled(sel.clone(), style);
             s.text.set_style(sel, style, on);
         });
+        // Bold is wider: the text may rewrap taller.
+        if let Some(old) = old {
+            self.make_room(&id, old);
+        }
     }
 
     /// Selects `range` of the edited text, caret at its end.

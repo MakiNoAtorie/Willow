@@ -205,3 +205,55 @@ fn widening_pushes_left_and_right_subtrees_outward_in_one_undo_step() {
     assert_eq!(*s.document(), before);
     assert!(!s.can_undo());
 }
+
+#[test]
+fn a_cascade_through_shapes_already_close_leaves_nothing_newly_crowded() {
+    // Chain p (p1 above, p2 below) wraps q and r; r sits only 5.5 below q, left that close.
+    // Every other neighbour is 24.5 apart.
+    let mut s = session(
+        &[
+            ("a", 0, 0),
+            ("p1", 0, 73),
+            ("q", 0, 146),
+            ("r", 0, 200),
+            ("p2", 0, 273),
+        ],
+        &[("p1", "p2")],
+    );
+    // Five words wrap to a second line: a's bottom goes 48.5 -> 71.
+    type_into(&mut s, "a", "word word word word word");
+    assert_eq!(bottom(&s, "a"), 71.0);
+    // p goes 24 below a (22 down, rounded up), q 24 below p1, and r keeps its 5.5 from q, so
+    // p2 stays clear of r: the push ends with nothing closer than it was or the gap.
+    assert_eq!(at(&s, "p1"), (0, 95));
+    assert_eq!(at(&s, "q"), (0, 168));
+    assert_eq!(at(&s, "r"), (0, 222));
+    assert_eq!(at(&s, "p2"), (0, 295));
+    assert!(at(&s, "p2").1 as f32 - bottom(&s, "r") >= 24.0);
+}
+
+#[test]
+fn interleaved_chains_left_close_move_together_and_the_cascade_ends() {
+    // p1 and p2 (one chain) sandwich q, 5.5 from each: neither may push the other forever.
+    let mut s = session(
+        &[("a", 0, 0), ("p1", 0, 73), ("q", 0, 127), ("p2", 0, 181)],
+        &[("p1", "p2")],
+    );
+    type_into(&mut s, "a", "word word word word word");
+    assert_eq!(at(&s, "p1"), (0, 95));
+    assert_eq!(at(&s, "q"), (0, 149));
+    assert_eq!(at(&s, "p2"), (0, 203));
+}
+
+#[test]
+fn bold_that_rewraps_taller_pushes_like_typing() {
+    let mut s = session(&[("a", 0, 0), ("b", 0, 97)], &[("a", "b")]);
+    // Four words fit one line (172 of 178); bold (11 a letter) needs 188, so two lines.
+    type_into(&mut s, "a", "word word word word");
+    assert_eq!(at(&s, "b"), (0, 97));
+    s.handle(Input::SelectAll, T);
+    s.handle(Input::ToggleBold, T);
+    assert_eq!(bottom(&s, "a"), 71.0);
+    // One creation gap (48) below a's new bottom.
+    assert_eq!(at(&s, "b"), (0, 119));
+}

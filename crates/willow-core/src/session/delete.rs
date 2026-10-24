@@ -22,16 +22,7 @@ impl Session {
             return;
         }
         let center: HashMap<ShapeId, Point> = (shapes.iter().zip(&heights))
-            .map(|(s, h)| {
-                let x = s.x as f32 + s.width as f32 / 2.0;
-                (
-                    s.id.clone(),
-                    Point {
-                        x,
-                        y: s.y as f32 + h / 2.0,
-                    },
-                )
-            })
+            .map(|(s, &h)| (s.id.clone(), s.center(h)))
             .collect();
         self.history.step(&mut self.doc, |h, doc| {
             for id in &order {

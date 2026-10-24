@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
     FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent, TitlebarOptions,
-    Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent,
+    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*,
+    px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
@@ -330,6 +331,12 @@ impl Render for Willow {
                             let (pos, mods) = (w.local(ev.position), mods(&ev.modifiers));
                             w.input(Input::PointerMove { pos, mods }, cx)
                         });
+                    }
+                });
+                let e = entity.clone();
+                window.on_mouse_event(move |_: &MouseExitEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble {
+                        e.update(cx, |w, cx| w.input(Input::PointerLeft, cx));
                     }
                 });
                 let e = entity.clone();

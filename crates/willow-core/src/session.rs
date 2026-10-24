@@ -443,6 +443,8 @@ impl Session {
 
     /// Sets a shape's x, width and extra height, pushing what it grows into: one undo step.
     pub fn resize_shape(&mut self, id: &ShapeId, r: ResizeTo) {
+        // One step written out by hand, not `history.step`: `make_room` needs `&mut self`,
+        // which the step's closure can't have. Inside an open group it just joins it.
         let (opened, old) = (!self.history.is_open(), self.rect_of(id));
         self.history.begin();
         self.history.change(&mut self.doc, id, |s| {
@@ -553,7 +555,7 @@ impl Session {
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom => {}
+            Input::ResetZoom | Input::PointerLeft => {}
             _ => self.unmark(),
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
@@ -797,6 +799,10 @@ impl Session {
             Input::KeyUp(Key::Space) => {
                 self.space_held = false;
                 self.respond(true)
+            }
+            Input::PointerLeft => {
+                self.pointer = None;
+                self.respond(false)
             }
             Input::FocusLost => {
                 self.space_held = false;

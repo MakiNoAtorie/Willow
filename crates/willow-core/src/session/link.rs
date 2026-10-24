@@ -97,11 +97,7 @@ impl Session {
                 return false;
             };
             let (ah, bh) = (self.shape_height(a), self.shape_height(b));
-            let center = |s: &crate::Shape, h: f32| Point {
-                x: s.x as f32 + s.width as f32 / 2.0,
-                y: s.y as f32 + h / 2.0,
-            };
-            let (ac, bc) = (center(a, ah), center(b, bh));
+            let (ac, bc) = (a.center(ah), b.center(bh));
             let from = vp.to_screen(edge_midpoint(a, ah, side(ac, bc)));
             let to = vp.to_screen(edge_midpoint(b, bh, side(bc, ac)));
             distance(p, from, to) <= hit
@@ -130,7 +126,7 @@ impl Session {
     /// Opens the connector menu at screen point `at` for `link`, leaving any editing.
     pub(super) fn open_connector_menu(&mut self, at: Point, link: Link) {
         self.stop_editing();
-        self.links.hover = Some(link);
+        self.links.hover = Some(link.clone());
         let remove = MenuItem {
             action: MenuAction::RemoveLink,
             label: "Remove link",
@@ -138,19 +134,11 @@ impl Session {
             enabled: true,
             destructive: false,
         };
+        let entries = vec![MenuEntry::Item(remove)];
         self.menu = Some(Menu {
-            kind: MenuKind::Connector,
-            at,
-            canvas: self.viewport.to_canvas(at),
-            entries: vec![MenuEntry::Item(remove)],
+            link: Some(link),
+            ..self.menu_at(MenuKind::Connector, at, entries)
         });
-    }
-
-    /// Removes the link whose connector is at canvas point `c` as one undo step.
-    pub(super) fn remove_link_at(&mut self, c: Point) {
-        if let Some(Link(a, b)) = self.connector_at(self.viewport.to_screen(c)) {
-            self.unlink(&a, &b);
-        }
     }
 }
 

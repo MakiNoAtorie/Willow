@@ -74,6 +74,8 @@ pub enum Input {
         button: Button,
         mods: Modifiers,
     },
+    /// The pointer left the window: Paste goes to the view center until it is back.
+    PointerLeft,
     /// Wheel or trackpad scroll at `pos`: how far the content should move, in screen pixels.
     Wheel {
         pos: Point,

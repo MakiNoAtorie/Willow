@@ -69,20 +69,52 @@ fn toward(side: Side, d: i32) -> (i32, i32) {
 /// it needn't. `o` must lie within `gap` of `m`'s side lane, and have been wholly beyond `m`
 /// toward `side` before the change (`om`, `oo`: their rectangles then; `om` is `None` for a
 /// new shape, which crowds whatever is within `gap`), so shapes already overlapping stay.
-fn crowding(m: Rect, om: Option<Rect>, o: Rect, oo: Rect, side: Side, gap: f32) -> i32 {
+/// A `carried` mover (a pushed block, not the change itself) keeps shapes it was already
+/// closer to than `gap` at their old distance: pushed to the full gap, two interleaved chains
+/// left that close would push each other forever.
+fn crowding(
+    m: Rect,
+    om: Option<Rect>,
+    o: Rect,
+    oo: Rect,
+    side: Side,
+    gap: f32,
+    carried: bool,
+) -> i32 {
     let vertical = matches!(side, Side::Bottom | Side::Top);
     let lane = if vertical {
         o.l < m.r + gap && o.r > m.l - gap
     } else {
         o.t < m.b + gap && o.b > m.t - gap
     };
-    let (beyond, need) = match side {
-        Side::Bottom => (om.map_or(o.b > m.t - gap, |p| oo.t >= p.b), m.b + gap - o.t),
-        Side::Top => (om.map_or(o.t < m.b + gap, |p| oo.b <= p.t), o.b + gap - m.t),
-        Side::Right => (om.map_or(o.r > m.l - gap, |p| oo.l >= p.r), m.r + gap - o.l),
-        Side::Left => (om.map_or(o.l < m.r + gap, |p| oo.r <= p.l), o.r + gap - m.l),
+    // How far beyond `m` the shape was before the change; `None` if it wasn't.
+    let was = om.map(|p| match side {
+        Side::Bottom => oo.t - p.b,
+        Side::Top => p.t - oo.b,
+        Side::Right => oo.l - p.r,
+        Side::Left => p.l - oo.r,
+    });
+    let beyond = match (om, was) {
+        (Some(_), Some(d)) => d >= 0.0,
+        _ => match side {
+            Side::Bottom => o.b > m.t - gap,
+            Side::Top => o.t < m.b + gap,
+            Side::Right => o.r > m.l - gap,
+            Side::Left => o.l < m.r + gap,
+        },
     };
-    if lane && beyond && need > 0.0 {
+    let gap = match was {
+        Some(d) if carried => gap.min(d),
+        _ => gap,
+    };
+    let need = match side {
+        Side::Bottom => m.b + gap - o.t,
+        Side::Top => o.b + gap - m.t,
+        Side::Right => m.r + gap - o.l,
+        Side::Left => o.r + gap - m.l,
+    };
+    // A hair of slack: float noise must not round up to a whole-unit push.
+    if lane && beyond && need > 1e-3 {
         need.ceil() as i32
     } else {
         0
@@ -156,7 +188,7 @@ impl Session {
 
     /// Pushes other chains clear of `movers` toward `side` to the minimum gap, then whatever
     /// those crowd in turn. `movers` are shape indices with their rectangles before they moved
-    /// (`None`: just created); the first one's chain never moves, nor any chain twice.
+    /// (`None`: just created); the first one's chain never moves.
     pub(super) fn clear_others(&mut self, side: Side, start: Vec<(usize, Option<Rect>)>) {
         let Some(&(first, _)) = start.first() else {
             return;
@@ -176,19 +208,10 @@ impl Session {
             orig[m] = old;
         }
         let mut movers: Vec<usize> = start.into_iter().map(|(m, _)| m).collect();
-        // Which chain last pushed each pushed chain. A chain never pushes one it was pushed by,
-        // directly or not, so cascades end (interleaved chains would push each other forever).
-        let mut by: HashMap<usize, usize> = HashMap::new();
-        let above = |by: &HashMap<usize, usize>, mut c: usize| {
-            let mut up = vec![c];
-            while let Some(&p) = by.get(&c) {
-                up.push(p);
-                c = p;
-            }
-            up
-        };
-        // Each round is one step of the cascade; the cap only guards against a bug.
-        for _ in 0..members.len() {
+        // Every block moves only toward `side`, and a carried block keeps what it was already
+        // close to at that distance, so no chain of pushes comes back around for more and the
+        // cascade ends once nothing is crowded. The cap only guards against a bug.
+        for _ in 0..=members.len() {
             if movers.is_empty() {
                 break;
             }
@@ -198,23 +221,20 @@ impl Session {
                 .reduce(Rect::union)
                 .expect("movers")
                 .grown(gap);
-            let mut need: BTreeMap<usize, (i32, usize)> = BTreeMap::new();
+            let mut need: BTreeMap<usize, i32> = BTreeMap::new();
             for o in (0..n).filter(|&o| chain[o] != chain[first] && reach.overlaps(rects[o])) {
                 let oo = orig[o].unwrap_or(rects[o]);
                 for &m in movers.iter().filter(|&&m| chain[m] != chain[o]) {
-                    let d = crowding(rects[m], orig[m], rects[o], oo, side, gap);
+                    let carried = chain[m] != chain[first];
+                    let d = crowding(rects[m], orig[m], rects[o], oo, side, gap, carried);
                     if d > 0 {
                         let e = need.entry(chain[o]).or_default();
-                        *e = (*e).max((d, chain[m]));
+                        *e = (*e).max(d);
                     }
                 }
             }
             movers.clear();
-            for (c, (d, pusher)) in need {
-                if above(&by, pusher).contains(&c) {
-                    continue;
-                }
-                by.insert(c, pusher);
+            for (c, d) in need {
                 let (dx, dy) = toward(side, d);
                 let block = &members[&c];
                 for &k in block {
@@ -266,10 +286,7 @@ impl Session {
     /// go in generation order.
     pub(super) fn linked_on(&self, id: &ShapeId, side: Side) -> Vec<ShapeId> {
         let find = |id: &ShapeId| self.doc.shapes.iter().find(|s| &s.id == id);
-        let center = |s: &Shape| Point {
-            x: s.x as f32 + s.width as f32 / 2.0,
-            y: s.y as f32 + self.shape_height(s) / 2.0,
-        };
+        let center = |s: &Shape| s.center(self.shape_height(s));
         let Some(c) = find(id).map(center) else {
             return Vec::new();
         };

@@ -28,8 +28,8 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
         .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
         .text_color(color(m.ink))
         .text_size(px(m.font_size))
-        .line_height(relative(1.2))
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .line_height(relative(m.line_height))
+        .font_weight(gpui::FontWeight(m.font_weight))
         // Keep presses off the backdrop beneath.
         .occlude()
         .children(menu.entries.iter().enumerate().map(|(i, e)| {
@@ -39,7 +39,20 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
                 MenuEntry::Separator => div()
                     .py(px(m.separator_pad_y))
                     .px(px(m.padding))
-                    .child(div().h(px(1.0)).w_full().bg(color(m.separator)))
+                    .child(
+                        div()
+                            .h(px(m.separator_width))
+                            .w_full()
+                            .bg(color(m.separator)),
+                    )
+                    .into_any_element(),
+                MenuEntry::Heading(label) => div()
+                    .pt(px(m.heading_pad_top))
+                    .pb(px(m.heading_pad_bottom))
+                    .px(px(m.item_pad_x))
+                    .text_size(px(m.heading_size))
+                    .opacity(m.heading_opacity)
+                    .child(*label)
                     .into_any_element(),
             }
         }));
@@ -65,7 +78,7 @@ fn row(
         .id(("menu-item", i))
         .flex()
         .justify_between()
-        .gap(px(2.0 * m.item_pad_x))
+        .gap(px(m.item_gap))
         .px(px(m.item_pad_x))
         .py(px(m.item_pad_y))
         .rounded(px(m.item_radius))
@@ -100,7 +113,7 @@ fn colors(
         .children(Color::ALL.into_iter().map(|c| {
             // The ring is a shadow outside the circle, so every circle takes the same room.
             div()
-                .id(("menu-color", row * 8 + c as usize))
+                .id(("menu-color", row * Color::ALL.len() + c as usize))
                 .size(px(m.swatch))
                 .flex_none()
                 .rounded_full()
@@ -150,11 +163,14 @@ fn shortcut(s: Shortcut) -> String {
 
 /// Width and height the panel will take, for keeping it inside the canvas.
 fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
-    let row = m.font_size * 1.2 + 2.0 * m.item_pad_y;
+    let row = m.font_size * m.line_height + 2.0 * m.item_pad_y;
     let h = (menu.entries.iter())
         .map(|e| match e {
             MenuEntry::Item(_) => row,
-            MenuEntry::Separator => 2.0 * m.separator_pad_y + 1.0,
+            MenuEntry::Separator => 2.0 * m.separator_pad_y + m.separator_width,
+            MenuEntry::Heading(_) => {
+                m.heading_size * m.line_height + m.heading_pad_top + m.heading_pad_bottom
+            }
             MenuEntry::Colors { .. } => m.swatch + 2.0 * m.item_pad_y,
         })
         .sum::<f32>();

@@ -228,6 +228,21 @@ fn paste_centers_on_the_pointer_or_else_the_view_center() {
     assert!(first.iter().all(|i| !second.contains(i)));
 }
 
+#[test]
+fn paste_after_the_pointer_left_the_window_goes_to_the_view_center() {
+    let mut s = chain();
+    s.select([id("d")]);
+    let copied = s.clipboard_text().unwrap();
+    // Last seen well inside the canvas; then it leaves the window, with no move outside.
+    let inside = s.viewport().to_canvas(Point { x: 700.0, y: 300.0 });
+    pointer(&mut s, inside);
+    s.handle(Input::PointerLeft, T);
+    s.handle(Input::Paste(copied), T);
+    let pasted = s.selection().to_vec();
+    let center = s.viewport().to_canvas(Point { x: 500.0, y: 400.0 });
+    assert!(near(center_of(&s, &pasted), center));
+}
+
 fn zone(name: &str, x: i32, y: i32, w: u32, h: u32, members: &[&str]) -> Zone {
     Zone {
         id: id(name),

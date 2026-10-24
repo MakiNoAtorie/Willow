@@ -5,7 +5,6 @@
 use std::collections::{HashMap, HashSet};
 
 use super::Session;
-use super::menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 use crate::input::Point;
 use crate::{Color, Document, Link, Shape, ShapeId, format};
 
@@ -51,7 +50,7 @@ impl Session {
             Ok(l) => {
                 let mut d = l.document;
                 // Fresh IDs before measuring: the layout cache is keyed by ID.
-                let fresh = self.fresh_ids(d.shapes.len());
+                let fresh = self.doc.next_ids(d.shapes.len());
                 remap(&mut d.shapes, &mut d.links, fresh);
                 format::place(&mut d, &l.unplaced, self.theme, |s| self.shape_height(s));
                 (d.shapes, d.links)
@@ -61,7 +60,7 @@ impl Session {
                 if text.is_empty() {
                     return;
                 }
-                let mut s = Shape::new(self.fresh_ids(1).remove(0), 0, 0);
+                let mut s = Shape::new(self.doc.next_id(), 0, 0);
                 s.text.replace(0..0, &text);
                 s.color = Color::Neutral;
                 (vec![s], Vec::new())
@@ -108,7 +107,7 @@ impl Session {
             .max()
             .unwrap_or(0);
         let dx = hi - lo + self.theme.creation_gap.round() as i32;
-        let fresh = self.fresh_ids(shapes.len());
+        let fresh = self.doc.next_ids(shapes.len());
         remap(&mut shapes, &mut links, fresh);
         for s in &mut shapes {
             s.x += dx;
@@ -149,19 +148,6 @@ impl Session {
         });
         self.viewport.to_canvas(screen)
     }
-
-    /// `n` IDs no shape or zone uses, in generation order.
-    fn fresh_ids(&self, n: usize) -> Vec<ShapeId> {
-        let used: HashSet<&str> = (self.doc.shapes.iter().map(|s| s.id.0.as_str()))
-            .chain(self.doc.zones.iter().map(|z| z.id.0.as_str()))
-            .collect();
-        (0..)
-            .map(crate::id_for)
-            .filter(|id| !used.contains(id.as_str()))
-            .take(n)
-            .map(ShapeId)
-            .collect()
-    }
 }
 
 /// What pasting `text` into a shape being edited inserts: for Willow text, its shapes' texts
@@ -191,57 +177,4 @@ fn clean(text: &str) -> String {
     (text.replace("\r\n", "\n").replace('\r', "\n").chars())
         .filter(|&c| c == '\n' || !c.is_control())
         .collect()
-}
-
-fn item(action: MenuAction, label: &'static str, key: &'static str) -> MenuEntry {
-    let shortcut = match key {
-        "" => Shortcut::DELETE,
-        _ => Shortcut { shift: false, key },
-    };
-    MenuEntry::Item(MenuItem {
-        action,
-        label,
-        shortcut: Some(shortcut),
-        enabled: true,
-        destructive: false,
-    })
-}
-
-/// The shape menu: clipboard items, a separator, then the colors with `current` ringed.
-pub(super) fn shape_items(current: Color) -> Vec<MenuEntry> {
-    vec![
-        item(MenuAction::Cut, "Cut", "X"),
-        item(MenuAction::Copy, "Copy", "C"),
-        item(MenuAction::Paste, "Paste", "V"),
-        item(MenuAction::Duplicate, "Duplicate", "D"),
-        MenuEntry::Separator,
-        MenuEntry::Colors {
-            current: Some(current),
-        },
-    ]
-}
-
-impl Session {
-    /// Opens the multi-selection menu at screen point `at`; the selection stays.
-    pub(super) fn open_multi_menu(&mut self, at: Point) {
-        self.menu = Some(Menu {
-            kind: MenuKind::Multi,
-            at,
-            canvas: self.viewport.to_canvas(at),
-            entries: vec![
-                item(MenuAction::Cut, "Cut", "X"),
-                item(MenuAction::Copy, "Copy", "C"),
-                item(MenuAction::Duplicate, "Duplicate", "D"),
-                item(MenuAction::Delete, "Delete", ""),
-            ],
-        });
-    }
-}
-
-impl Shortcut {
-    /// The Delete key alone: the app shows it without Cmd/Ctrl.
-    pub const DELETE: Shortcut = Shortcut {
-        shift: false,
-        key: "\u{232b}",
-    };
 }

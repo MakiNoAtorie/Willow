@@ -149,12 +149,12 @@ impl Session {
             if (py as f32 + ph).max(qy as f32 + qh) < a.y {
                 continue;
             }
-            // A sliding shape's connector end slides with it.
+            // A sliding shape's connector end slides with it, a previewed one with the preview.
             let center = |s: &Shape, x: i32, y: i32, h: f32| {
-                let o = self.sliding(&s.id, now);
+                let (c, o) = (s.center(h), self.sliding(&s.id, now));
                 Point {
-                    x: x as f32 + s.width as f32 / 2.0 + o.x,
-                    y: y as f32 + h / 2.0 + o.y,
+                    x: c.x + (x - s.x) as f32 + o.x,
+                    y: c.y + (y - s.y) as f32 + o.y,
                 }
             };
             let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));

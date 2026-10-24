@@ -2,9 +2,8 @@
 //! app draws; `Input::MenuChoose` runs an item against the point it was opened at.
 
 use super::Session;
-use super::clipboard::shape_items;
 use crate::input::Point;
-use crate::{Color, Shape, ShapeId};
+use crate::{Color, Link, Shape, ShapeId};
 use std::time::Duration;
 
 /// A shape's color fading in from `from`, begun at `start`.
@@ -45,6 +44,19 @@ pub struct Shortcut {
     pub key: &'static str,
 }
 
+impl Shortcut {
+    /// The Delete key alone: the app shows it without Cmd/Ctrl.
+    pub const DELETE: Shortcut = Shortcut {
+        shift: false,
+        key: "\u{232b}",
+    };
+
+    /// Cmd/Ctrl + `key`.
+    const fn cmd(key: &'static str) -> Shortcut {
+        Shortcut { shift: false, key }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MenuItem {
     pub action: MenuAction,
@@ -59,6 +71,8 @@ pub struct MenuItem {
 pub enum MenuEntry {
     Item(MenuItem),
     Separator,
+    /// A small label over the entries after it.
+    Heading(&'static str),
     /// The seven picker colors in a row; `current` is ringed.
     Colors {
         current: Option<Color>,
@@ -74,6 +88,10 @@ pub struct Menu {
     /// The same point in canvas units, for items that act there.
     pub canvas: Point,
     pub entries: Vec<MenuEntry>,
+    /// The shape a shape menu was opened on; its colors go to that shape's chain.
+    pub shape: Option<ShapeId>,
+    /// The link a connector menu was opened on; Remove link removes it.
+    pub link: Option<Link>,
 }
 
 impl Session {
@@ -95,35 +113,52 @@ impl Session {
             enabled: true,
             destructive: false,
         };
-        self.menu = Some(Menu {
-            kind: MenuKind::Empty,
-            at,
-            canvas: self.viewport.to_canvas(at),
-            entries: vec![MenuEntry::Item(new_shape)],
-        });
+        let entries = vec![MenuEntry::Item(new_shape)];
+        self.menu = Some(self.menu_at(MenuKind::Empty, at, entries));
     }
 
     /// Opens the shape menu for the shape at screen point `at`, selecting it unless it is
-    /// already selected. Items for the selection as a whole come with the clipboard ticket.
+    /// already selected; inside a multi-selection, the multi-selection menu.
     pub(super) fn open_shape_menu(&mut self, at: Point, index: usize) {
         self.stop_editing();
         let shape = &self.doc.shapes[index];
         let (id, current) = (shape.id.clone(), shape.color);
         if !self.selected.contains(&id) {
-            self.select([id]);
+            self.select([id.clone()]);
         }
         if self.selected.len() > 1 {
             return self.open_multi_menu(at);
         }
         self.menu = Some(Menu {
-            kind: MenuKind::Shape,
-            at,
-            canvas: self.viewport.to_canvas(at),
-            entries: shape_items(current),
+            shape: Some(id),
+            ..self.menu_at(MenuKind::Shape, at, shape_items(current))
         });
     }
 
-    /// Runs `action` at the open menu's point and closes the menu.
+    /// Opens the multi-selection menu at screen point `at`; the selection stays.
+    fn open_multi_menu(&mut self, at: Point) {
+        let entries = vec![
+            item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
+            item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
+            item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+            item(MenuAction::Delete, "Delete", Shortcut::DELETE),
+        ];
+        self.menu = Some(self.menu_at(MenuKind::Multi, at, entries));
+    }
+
+    /// A `kind` menu at screen point `at`, opened on no shape or link.
+    pub(super) fn menu_at(&self, kind: MenuKind, at: Point, entries: Vec<MenuEntry>) -> Menu {
+        Menu {
+            kind,
+            at,
+            canvas: self.viewport.to_canvas(at),
+            entries,
+            shape: None,
+            link: None,
+        }
+    }
+
+    /// Runs `action` on what the open menu was opened on and closes the menu.
     pub(super) fn choose(&mut self, action: MenuAction) {
         let Some(menu) = self.menu.take() else {
             return;
@@ -134,12 +169,15 @@ impl Session {
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
             MenuAction::Recolor(color) => {
-                let i = self.shape_at(self.viewport.to_screen(menu.canvas));
-                if let Some(id) = i.map(|i| self.doc.shapes[i].id.clone()) {
+                if let Some(id) = menu.shape {
                     self.ripple_recolor(&id, color);
                 }
             }
-            MenuAction::RemoveLink => self.remove_link_at(menu.canvas),
+            MenuAction::RemoveLink => {
+                if let Some(Link(a, b)) = menu.link {
+                    self.unlink(&a, &b);
+                }
+            }
         }
     }
 
@@ -212,4 +250,30 @@ impl Session {
             .min_by_key(|z| z.width as u64 * z.height as u64)
             .map(|z| z.id.clone())
     }
+}
+
+fn item(action: MenuAction, label: &'static str, shortcut: Shortcut) -> MenuEntry {
+    MenuEntry::Item(MenuItem {
+        action,
+        label,
+        shortcut: Some(shortcut),
+        enabled: true,
+        destructive: false,
+    })
+}
+
+/// The shape menu: clipboard items, a separator, then the colors under their heading with
+/// `current` ringed.
+fn shape_items(current: Color) -> Vec<MenuEntry> {
+    vec![
+        item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
+        item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
+        item(MenuAction::Paste, "Paste", Shortcut::cmd("V")),
+        item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+        MenuEntry::Separator,
+        MenuEntry::Heading("Color"),
+        MenuEntry::Colors {
+            current: Some(current),
+        },
+    ]
 }

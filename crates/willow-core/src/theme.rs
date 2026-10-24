@@ -163,16 +163,29 @@ pub struct MenuStyle {
     /// A destructive item (zone Delete).
     pub destructive: Rgba,
     pub separator: Rgba,
-    /// Space above and below a separator line.
+    /// Space above and below a separator line, and its thickness.
     pub separator_pad_y: f32,
+    pub separator_width: f32,
     pub radius: f32,
     pub item_radius: f32,
     /// Inside the menu, around the items.
     pub padding: f32,
     pub item_pad_x: f32,
     pub item_pad_y: f32,
+    /// Between an item's label and its shortcut.
+    pub item_gap: f32,
     pub min_width: f32,
     pub font_size: f32,
+    /// A multiple of `font_size`.
+    pub line_height: f32,
+    /// CSS weight (500 is medium).
+    pub font_weight: f32,
+    /// A heading over a group of entries ("Color"): size, opacity and the space above and
+    /// below it.
+    pub heading_size: f32,
+    pub heading_opacity: f32,
+    pub heading_pad_top: f32,
+    pub heading_pad_bottom: f32,
     /// Shortcut text and the submenu arrow.
     pub shortcut_opacity: f32,
     /// A command that can't run now (Undo with nothing to undo).
@@ -498,13 +511,21 @@ pub const PAPER: Theme = Theme {
         // The mockups' ink at 0x18 alpha.
         separator: rgba(59, 52, 44, 0.094),
         separator_pad_y: 5.0,
+        separator_width: 1.0,
         radius: 10.0,
         item_radius: 6.0,
         padding: 6.0,
         item_pad_x: 10.0,
         item_pad_y: 6.0,
+        item_gap: 24.0,
         min_width: 200.0,
         font_size: 13.0,
+        line_height: 1.2,
+        font_weight: 500.0,
+        heading_size: 11.5,
+        heading_opacity: 0.55,
+        heading_pad_top: 6.0,
+        heading_pad_bottom: 3.0,
         shortcut_opacity: 0.45,
         disabled_opacity: 0.4,
         swatch: 18.0,

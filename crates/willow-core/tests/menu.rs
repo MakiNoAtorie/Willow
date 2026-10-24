@@ -205,3 +205,51 @@ fn recolor_ripples_out_from_the_clicked_shape() {
     assert_eq!(fill_of(&s, "c", ms(240)), new);
     assert!(!s.animating(ms(240)));
 }
+
+#[test]
+fn the_shape_menu_ends_with_a_color_heading_over_the_colors() {
+    let mut s = chain_of_three();
+    right_click(&mut s, pt(350.0, 20.0));
+    let entries = &s.menu().expect("menu open").entries;
+    let current = Some(Color::Neutral);
+    assert_eq!(
+        entries[entries.len() - 3..],
+        [
+            MenuEntry::Separator,
+            MenuEntry::Heading("Color"),
+            MenuEntry::Colors { current }
+        ]
+    );
+}
+
+#[test]
+fn esc_closes_an_open_menu() {
+    let mut s = chain_of_three();
+    right_click(&mut s, pt(350.0, 20.0));
+    s.handle(Input::StopEditing, T);
+    assert!(s.menu().is_none());
+    assert_eq!(s.selection(), [ShapeId("b".into())]);
+}
+
+#[test]
+fn colors_go_to_the_shape_the_menu_was_opened_on_even_once_it_moved() {
+    let mut s = chain_of_three();
+    s.move_shape(&ShapeId("c".into()), 600, 300);
+    right_click(&mut s, pt(650.0, 320.0));
+    // Undo while the menu is open takes c back from under the menu's point.
+    s.handle(Input::Undo, T);
+    s.handle(Input::MenuChoose(MenuAction::Recolor(Color::Rose)), T);
+    assert!(s.document().shapes.iter().all(|x| x.color == Color::Rose));
+}
+
+#[test]
+fn remove_link_goes_to_the_link_the_menu_was_opened_on() {
+    let mut s = chain_of_three();
+    s.move_shape(&ShapeId("c".into()), 600, 300);
+    // The b-c connector runs from b's right middle (510, 24.25) to c's left middle (600, 324.25).
+    right_click(&mut s, pt(555.0, 174.25));
+    assert_eq!(s.menu().map(|m| m.kind), Some(MenuKind::Connector));
+    s.handle(Input::Undo, T);
+    s.handle(Input::MenuChoose(MenuAction::RemoveLink), T);
+    assert_eq!(s.document().links.len(), 1);
+}
