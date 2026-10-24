@@ -349,8 +349,16 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     })
     .ok();
     wait(cx, step).await;
-    let sel = this.update(cx, |s, _| s.sel.clone()).unwrap();
-    check(&format!("mouse selection across a justified line break selects {text:?} (got {sel:?})"), sel == (from..to));
+    let (sel, two_lines) = this
+        .update(cx, |s, _| {
+            let l = s.shapes[0].layout.clone().expect("laid out");
+            (s.sel.clone(), l.stop_for(from).line != l.stop_for(to).line)
+        })
+        .unwrap();
+    check(
+        &format!("mouse selection across a justified line break selects {text:?} (got {sel:?})"),
+        sel == (from..to) && two_lines,
+    );
     this.update_in(cx, |_, w, _| shot(w, "2-selection")).ok();
 
     // Bold the selection.
@@ -378,10 +386,16 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     this.update_in(cx, |_, w, _| shot(w, "4-grown")).ok();
 
     // IME composition the way NSTextInputClient drives it: marked text, then commit.
-    this.update_in(cx, |s, w, cx| s.replace_and_mark_text_in_range(None, " にほんご", Some(5..5), w, cx)).ok();
+    let n = this
+        .update_in(cx, |s, w, cx| {
+            let n = s.shapes[0].text.len();
+            s.replace_and_mark_text_in_range(None, " にほんご", Some(5..5), w, cx);
+            n
+        })
+        .unwrap();
     wait(cx, step).await;
     let marked = this.update(cx, |s, _| s.marked.clone()).unwrap();
-    check(&format!("IME marked range is set ({marked:?})"), marked.is_some());
+    check(&format!("IME marked range is set ({marked:?})"), marked == Some(n..n + " にほんご".len()));
     this.update_in(cx, |_, w, _| shot(w, "5-ime-marked")).ok();
     this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, " 日本語", w, cx)).ok();
     // Dead key: ´ is marked, then e commits é.
@@ -435,6 +449,66 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
     check("right-click opens the context menu", open);
     this.update_in(cx, |_, w, _| shot(w, "9-context-menu")).ok();
 
+    // Plain letters reach the text while editing, even ones bound to canvas actions.
+    this.update_in(cx, |s, w, cx| {
+        s.menu = None;
+        let n = s.shapes[0].text.len();
+        s.start_editing(0, n, w, cx);
+    })
+    .ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx)).ok();
+    wait(cx, step).await;
+    let ok = this.update(cx, |s, _| s.shapes[0].text.ends_with('l')).unwrap();
+    check("typing l while editing inserts it", ok);
+
+    // A trailing space at the end of a paragraph moves the caret.
+    let caret = |s: &mut Spike| {
+        let st = s.shapes[0].layout.clone().expect("laid out").stop_for(s.cursor());
+        (st.line, st.x)
+    };
+    let before = this.update(cx, |s, _| caret(s)).unwrap();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("space").unwrap(), cx)).ok();
+    wait(cx, step).await;
+    let after = this.update(cx, |s, _| caret(s)).unwrap();
+    check(&format!("a trailing space moves the caret ({before:?} -> {after:?})"), after > before);
+
+    // Caret stops sit only on grapheme boundaries (e + combining acute is one).
+    this.update_in(cx, |s, w, cx| s.replace_text_in_range(None, "e\u{301}x", w, cx)).ok();
+    wait(cx, step).await;
+    let ok = this
+        .update(cx, |s, _| {
+            use unicode_segmentation::UnicodeSegmentation;
+            let sh = &s.shapes[0];
+            let bounds: Vec<usize> =
+                sh.text.grapheme_indices(true).map(|(i, _)| i).chain([sh.text.len()]).collect();
+            sh.layout.as_ref().expect("laid out").stops.iter().all(|st| bounds.contains(&st.index))
+        })
+        .unwrap();
+    check("caret stops only on grapheme boundaries", ok);
+
+    // Clicking another shape mid-composition drops the composition.
+    this.update_in(cx, |s, w, cx| s.replace_and_mark_text_in_range(None, "か", Some(1..1), w, cx)).ok();
+    let p = this
+        .update(cx, |s, _| {
+            let sh = &s.shapes[3];
+            s.canvas_origin + s.to_screen(point(sh.x + 40.0, sh.y + 20.0))
+        })
+        .unwrap();
+    cx.update(|w, cx| {
+        let m = Modifiers::default();
+        w.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: p, modifiers: m, click_count: 1, first_mouse: false }), cx);
+        w.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: p, modifiers: m, click_count: 1 }), cx);
+    })
+    .ok();
+    wait(cx, step).await;
+    let ok = this.update(cx, |s, _| s.editing == Some(3) && s.marked.is_none()).unwrap();
+    check("switching shapes mid-composition clears the marked range", ok);
+    this.update(cx, |s, cx| s.stop_editing(cx)).ok();
+    cx.update(|w, cx| w.dispatch_keystroke(Keystroke::parse("l").unwrap(), cx)).ok();
+    wait(cx, step).await;
+    let n = this.update(cx, |s, _| s.shapes.len()).unwrap();
+    check(&format!("L loads the 10k document when not editing ({n} shapes)"), n == 10_000);
+
     // The generated 10k document at three zoom levels.
     for (zoom, name) in [(0.6, "10-large-zoom60"), (0.25, "11-large-zoom25"), (0.03, "12-large-zoom3")] {
         this.update(cx, |s, cx| {
@@ -448,5 +522,9 @@ pub async fn selftest(this: WeakEntity<Spike>, cx: &mut AsyncWindowContext) {
         wait(cx, Duration::from_millis(1600)).await; // let the zoom badge fade
         this.update_in(cx, |_, w, _| shot(w, name)).ok();
     }
+    // Loaded and only seen far out, below the text cutoff: shapes still have
+    // their real heights, not the minimum.
+    let ok = this.update(cx, |s, _| s.shapes.iter().all(|sh| sh.layout.is_some())).unwrap();
+    check("a document first seen below the text cutoff has every shape's height", ok);
     this.update(cx, |_, cx| cx.quit()).ok();
 }

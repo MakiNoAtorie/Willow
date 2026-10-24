@@ -156,7 +156,7 @@ impl Spike {
         let before = self.to_canvas(at);
         self.zoom = (self.zoom * factor).clamp(0.02, 4.0);
         let after = self.to_canvas(at);
-        self.offset = self.offset + (before - after);
+        self.offset += before - after;
         self.zoom_badge = Some(Instant::now());
     }
 
@@ -260,6 +260,7 @@ impl Spike {
 
     fn start_editing(&mut self, idx: usize, at: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = Some(idx);
+        self.marked = None;
         self.picker = false;
         window.focus(&self.focus, cx);
         self.move_to(at, cx);
@@ -615,16 +616,11 @@ impl Spike {
         let ts = window.text_system().clone();
         let mut f = Frame { shapes: vec![], lines: vec![], overlay: vec![], zoom: self.zoom };
 
-        for s in self.shapes.iter_mut() {
-            // Lay out lazily, and only shapes on screen at a readable zoom.
-            if s.layout.is_none() && draw_text && visible(s) {
-                s.layout = Some(Rc::new(text::layout(&s.text, &s.styles, s.w - 2.0 * PAD, &ts)));
-            }
-        }
-        if let Some(i) = self.editing
-            && self.shapes[i].layout.is_none()
-        {
-            let s = &mut self.shapes[i];
+        // Every shape's height comes from its layout, so lay out all shapes that
+        // lack one (a new document, or an edited shape), whatever is on screen.
+        // ponytail: a 10k document blocks the first frame for ~590 ms; store
+        // heights in the file or lay out off the main thread if that matters.
+        for s in self.shapes.iter_mut().filter(|s| s.layout.is_none()) {
             s.layout = Some(Rc::new(text::layout(&s.text, &s.styles, s.w - 2.0 * PAD, &ts)));
         }
 
@@ -782,7 +778,7 @@ impl Render for Spike {
             .size_full()
             .flex()
             .flex_col()
-            .key_context("Spike")
+            .key_context(if editing { "Spike editing" } else { "Spike" })
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
@@ -1115,7 +1111,7 @@ fn main() {
             KeyBinding::new("enter", Enter, None),
             KeyBinding::new("escape", Escape, None),
             KeyBinding::new("tab", Picker, None),
-            KeyBinding::new("l", LoadLarge, None),
+            KeyBinding::new("l", LoadLarge, Some("Spike && !editing")),
             KeyBinding::new(k("a"), SelectAll, None),
             KeyBinding::new(k("b"), Bold, None),
             KeyBinding::new(k("i"), Italic, None),

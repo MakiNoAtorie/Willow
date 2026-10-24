@@ -11,6 +11,7 @@ use gpui::{
     Font, FontId, FontStyle, FontWeight, GlyphId, Hsla, Pixels, Point, TextRun, Window, WindowTextSystem,
     point, px,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub const FONT_FAMILY: &str = "IBM Plex Sans";
 pub const FONT_SIZE: f32 = 14.0;
@@ -182,7 +183,7 @@ fn layout_paragraph(
         spaces_before[i + 1] = spaces_before[i] + (b == b' ') as usize;
     }
 
-    // Greedy breaking at spaces; a word longer than the line breaks at a char.
+    // Greedy breaking at spaces; a word longer than the line breaks at a grapheme.
     let bytes = para.as_bytes();
     let mut lines: Vec<(usize, usize)> = Vec::new(); // [start, end) incl. trailing space
     let mut start = 0;
@@ -190,9 +191,9 @@ fn layout_paragraph(
         let x0 = x_at(start);
         let mut end = para.len();
         let mut last_space = None;
-        for (i, c) in para[start..].char_indices().map(|(i, c)| (i + start, c)) {
-            let next = i + c.len_utf8();
-            if x_at(next) - x0 > width && c != ' ' {
+        for (i, g) in para[start..].grapheme_indices(true).map(|(i, g)| (i + start, g)) {
+            let next = i + g.len();
+            if x_at(next) - x0 > width && g != " " {
                 end = match last_space {
                     Some(s) => s + 1,
                     None if i > start => i,
@@ -200,7 +201,7 @@ fn layout_paragraph(
                 };
                 break;
             }
-            if c == ' ' {
+            if g == " " {
                 last_space = Some(i);
             }
         }
@@ -233,12 +234,13 @@ fn layout_paragraph(
                 emoji: g.4,
             });
         }
-        for (i, _) in para[s..e].char_indices().map(|(i, c)| (i + s, c)) {
+        // One stop per grapheme, so the caret never lands inside a cluster.
+        for (i, _) in para[s..e].grapheme_indices(true).map(|(i, g)| (i + s, g)) {
             out.stops.push(Stop { index: base + i, x: shifted(i), line });
         }
-        // End-of-line stop: after the last char (before a trailing space's
-        // successor). The next line's first stop has the same index.
-        let end_x = if justify { width } else { natural };
+        // End-of-line stop: after the last char, past any trailing space.
+        // The next line's first stop has the same index.
+        let end_x = if justify { width } else { x_at(e) - x0 };
         out.stops.push(Stop { index: base + e, x: end_x, line });
         out.lines.push(Line { top, start: base + s, end: base + e });
     }

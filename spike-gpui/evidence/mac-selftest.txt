@@ -5,3 +5,9 @@ PASS IME marked range is set (Some(221..234))
 PASS IME commit and dead-key sequence produce " 日本語é"
 PASS Tab then Right adds a linked shape
 PASS right-click opens the context menu
+PASS typing l while editing inserts it
+PASS a trailing space moves the caret ((7, 107.12805) -> (7, 110.43201))
+PASS caret stops only on grapheme boundaries
+PASS switching shapes mid-composition clears the marked range
+PASS L loads the 10k document when not editing (10000 shapes)
+PASS a document first seen below the text cutoff has every shape's height
