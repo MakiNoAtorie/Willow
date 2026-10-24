@@ -2,9 +2,11 @@
 //! theme's low-zoom thresholds.
 
 use std::borrow::Cow;
+use std::ops::Range;
 use std::rc::Rc;
+use std::time::Duration;
 
-use crate::{Color, Layout, Point, Rgba, Session, Shape};
+use crate::{CaretView, Color, Layout, Point, Rgba, Session, Shape};
 
 /// One frame's worth of drawing.
 pub struct Frame<'a> {
@@ -30,11 +32,19 @@ pub struct Visible<'a> {
     /// Fill color, deepened.
     pub fill: Rgba,
     pub layout: Rc<Layout>,
+    /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out.
+    pub ring: f32,
+    /// While text shows, on the edited shape only: the text selection highlight in canvas
+    /// units, one (top-left, bottom-right) per line; the IME marked text; and the caret,
+    /// unless in its blink's hidden half. Paint them with the shape, in its draw order.
+    pub selection: Vec<(Point, Point)>,
+    pub marked: Option<Range<usize>>,
+    pub caret: Option<CaretView>,
 }
 
 impl Session {
-    /// What to draw in the screen rectangle `from`..`to` (canvas-relative screen pixels).
-    pub fn draw(&self, from: Point, to: Point) -> Frame<'_> {
+    /// What to draw at `now` in the screen rectangle `from`..`to` (canvas-relative screen pixels).
+    pub fn draw(&self, from: Point, to: Point, now: Duration) -> Frame<'_> {
         let (t, vp) = (self.theme(), self.viewport());
         let z = &t.zoom;
         let fade = ((vp.zoom - z.fade_end) / (z.fade_start - z.fade_end)).clamp(0.0, 1.0);
@@ -42,6 +52,8 @@ impl Session {
         let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker[c as usize], deepen));
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
+        let rings = self.selection_rings(now);
+        let edited = self.editing().filter(|_| fade > 0.0);
         let shapes = (self.document().shapes.iter())
             .filter_map(|s| {
                 let s = match &resized {
@@ -58,13 +70,22 @@ impl Session {
                     return None;
                 }
                 let height = self.shape_height(&s);
-                (fy + height >= a.y).then(|| Visible {
+                if fy + height < a.y {
+                    return None;
+                }
+                let ring = (rings.iter()).find(|r| *r.0 == s.id).map_or(0.0, |r| r.1);
+                let e = edited.filter(|e| e.id == s.id);
+                Some(Visible {
                     fill: fills[s.color as usize],
                     layout: self.layout(&s),
                     shape: s,
                     x,
                     y,
                     height,
+                    ring,
+                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
+                    marked: e.and_then(|e| e.marked.clone()),
+                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
                 })
             })
             .collect();

@@ -361,11 +361,11 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
 /// Canvas, dot grid, shapes with their text, and the caret.
 fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
     let (vp, t) = (session.viewport(), session.theme());
-    let rings = session.selection_rings(now);
     let (w, h) = (bounds.size.width.into(), bounds.size.height.into());
     let frame = session.draw(
         willow_core::Point::default(),
         willow_core::Point { x: w, y: h },
+        now,
     );
     window.paint_quad(gpui::fill(bounds, color(t.canvas)));
     // Screen position of canvas (0, 0), on whole pixels.
@@ -408,10 +408,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             origin + point(px(v.x as f32 * z), px(v.y as f32 * z)),
             size(px(shape.width as f32 * z), px(v.height * z)),
         );
-        let ring = rings
-            .iter()
-            .find(|(id, _)| **id == shape.id)
-            .map_or(0.0, |r| r.1);
+        let ring = v.ring;
         if frame.shadows {
             let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
             window.paint_drop_shadows(b, Corners::all(radius), &shadows);
@@ -437,32 +434,25 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             gpui::transparent_black(),
             Default::default(),
         ));
+        // The text selection, under the edited shape's text.
+        for (a, c) in &v.selection {
+            let tl = origin + point(px(a.x * z), px(a.y * z));
+            let br = origin + point(px(c.x * z), px(c.y * z));
+            window.paint_quad(gpui::fill(Bounds::from_corners(tl, br), color(sel.text)));
+        }
         if frame.text_opacity > 0.0 {
-            // The text selection, under the edited shape's text.
-            if session.editing().is_some_and(|e| e.id == shape.id) {
-                for (a, c) in session.selection_rects() {
-                    let tl = origin + point(px(a.x * z), px(a.y * z));
-                    let br = origin + point(px(c.x * z), px(c.y * z));
-                    window.paint_quad(gpui::fill(Bounds::from_corners(tl, br), color(sel.text)));
-                }
-            }
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
             text::paint_text(window, o, &shape.text, &v.layout, t, z, frame.text_opacity);
-            if let Some(m) = (session.editing())
-                .filter(|e| e.id == shape.id)
-                .and_then(|e| e.marked.clone())
-            {
+            if let Some(m) = v.marked.clone() {
                 text::paint_marked(window, o, &v.layout, m, t, z);
             }
         }
-    }
-    if let Some(c) = session.caret(now)
-        && c.visible
-    {
-        // The caret's width is screen pixels at any zoom.
-        let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
-        let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-        window.paint_quad(gpui::fill(b, color(t.caret.color)));
+        if let Some(c) = v.caret {
+            // The caret's width is screen pixels at any zoom.
+            let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
+            let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
+            window.paint_quad(gpui::fill(b, color(t.caret.color)));
+        }
     }
 }
 

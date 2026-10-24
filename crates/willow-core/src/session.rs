@@ -11,7 +11,7 @@ use crate::edit::{next_cluster, prev_cluster, word_left, word_right};
 use crate::history::History;
 use crate::layout::{Caret, Layout, Measure, layout};
 use crate::zoom::{Zoom, ZoomPill};
-use crate::{Document, RichText, Shape, ShapeId, Theme};
+use crate::{Document, RichText, Shape, ShapeId, Theme, Transition};
 
 /// A point in screen pixels (relative to the canvas's top-left) or in canvas units.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -271,15 +271,13 @@ struct Ring {
 }
 
 impl Ring {
-    fn progress(&self, now: Duration, fade: Duration) -> f32 {
-        (now.saturating_sub(self.since).as_secs_f32() / fade.as_secs_f32()).min(1.0)
+    fn done(&self, now: Duration, fade: &Transition) -> bool {
+        now.saturating_sub(self.since) >= fade.duration
     }
 
-    fn value(&self, now: Duration, fade: Duration) -> f32 {
-        let p = self.progress(now, fade);
-        // ponytail: quadratic ease-out stands in for CSS `ease-out`; use the theme's cubic-bezier
-        // once the core has one (#7's zoom easing).
-        self.from + (self.to - self.from) * (1.0 - (1.0 - p) * (1.0 - p))
+    fn value(&self, now: Duration, fade: &Transition) -> f32 {
+        let p = fade.progress(now.saturating_sub(self.since));
+        self.from + (self.to - self.from) * p
     }
 }
 
@@ -378,10 +376,10 @@ impl Session {
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
     /// still fading out after a deselect.
     pub fn selection_rings(&self, now: Duration) -> Vec<(&ShapeId, f32)> {
-        let fade = self.theme.selection.fade;
+        let fade = &self.theme.selection.fade;
         self.rings
             .iter()
-            .filter(|r| r.to > 0.0 || r.progress(now, fade) < 1.0)
+            .filter(|r| r.to > 0.0 || !r.done(now, fade))
             .map(|r| (&r.id, r.value(now, fade)))
             .collect()
     }
@@ -389,8 +387,8 @@ impl Session {
     /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
     /// The caret blink isn't: see `next_wake`.
     pub fn animating(&self, now: Duration) -> bool {
-        let fade = self.theme.selection.fade;
-        self.rings.iter().any(|r| r.progress(now, fade) < 1.0) || self.zoom.running(self.theme, now)
+        let fade = &self.theme.selection.fade;
+        self.rings.iter().any(|r| !r.done(now, fade)) || self.zoom.running(self.theme, now)
     }
 
     /// How long after `now` the caret next changes (a blink edge, or turning solid); `None`
@@ -446,7 +444,7 @@ impl Session {
         if id == self.selected {
             return;
         }
-        let (now, fade) = (self.now, self.theme.selection.fade);
+        let (now, fade) = (self.now, &self.theme.selection.fade);
         let old = std::mem::replace(&mut self.selected, id.clone());
         for (id, to) in [(old, 0.0), (id, 1.0)] {
             let Some(id) = id else { continue };
@@ -462,8 +460,7 @@ impl Session {
             });
         }
         // Drop rings that have finished fading out.
-        self.rings
-            .retain(|r| r.to > 0.0 || r.progress(now, fade) < 1.0);
+        self.rings.retain(|r| r.to > 0.0 || !r.done(now, fade));
     }
 
     /// The shape being dragged and its previewed top-left; the document still holds the old one.

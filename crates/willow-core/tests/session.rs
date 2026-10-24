@@ -291,8 +291,9 @@ fn the_selection_ring_fades_in_and_out_over_120_ms_and_then_stops() {
 
     assert!(click(&mut s, ON_SHAPE, ms(1000)).animating);
     assert_eq!(s.selection_rings(ms(1000)), vec![(&a, 0.0)]);
+    // Paper's `120ms ease-out`: CSS ease-out is 0.685 halfway.
     let mid = s.selection_rings(ms(1060))[0].1;
-    assert!(0.0 < mid && mid < 1.0, "{mid}");
+    assert!((mid - 0.685).abs() < 0.005, "{mid}");
     assert!(s.animating(ms(1060)));
     assert_eq!(s.selection_rings(ms(1120)), vec![(&a, 1.0)]);
     assert!(!s.animating(ms(1120)));

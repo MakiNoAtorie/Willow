@@ -44,10 +44,15 @@ pub struct CubicBezier(pub f32, pub f32, pub f32, pub f32);
 impl CubicBezier {
     /// CSS `ease-in`.
     pub const EASE_IN: CubicBezier = CubicBezier(0.42, 0.0, 1.0, 1.0);
+    /// CSS `ease-out`.
+    pub const EASE_OUT: CubicBezier = CubicBezier(0.0, 0.0, 0.58, 1.0);
 
     /// Eased progress for linear progress `x` (clamped to 0..=1).
     pub fn at(&self, x: f32) -> f32 {
-        let x = x.clamp(0.0, 1.0);
+        // Exact at the ends, where bisection would leave a speck.
+        if x <= 0.0 || x >= 1.0 {
+            return x.clamp(0.0, 1.0);
+        }
         let b = |p1: f32, p2: f32, t: f32| {
             let u = 1.0 - t;
             3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
@@ -151,7 +156,7 @@ pub struct SelectionStyle {
     pub color: Rgba,
     /// Same layer count as `ShapeStyle::shadow`, so one can ease into the other.
     pub shadow: [Shadow; 2],
-    pub fade: Duration,
+    pub fade: Transition,
     /// Highlight behind selected text while editing.
     pub text: Rgba,
 }
@@ -266,7 +271,10 @@ pub const PAPER: Theme = Theme {
                 color: rgba(70, 50, 20, 0.12),
             },
         ],
-        fade: Duration::from_millis(120),
+        fade: Transition {
+            duration: Duration::from_millis(120),
+            easing: CubicBezier::EASE_OUT,
+        },
     },
     caret: CaretStyle {
         color: hex(0x3b342c),
