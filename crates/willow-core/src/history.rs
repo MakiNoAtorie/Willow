@@ -22,6 +22,8 @@ enum Op {
     Link(usize, Link),
     /// Take out the link at this index.
     Unlink(usize),
+    /// Swap the member list of the zone with this ID.
+    Members(ShapeId, Vec<ShapeId>),
 }
 
 impl Op {
@@ -53,6 +55,12 @@ impl Op {
                 Op::Unlink(i)
             }
             Op::Unlink(i) => Op::Link(i, doc.links.remove(i)),
+            Op::Members(id, mut m) => {
+                if let Some(z) = doc.zones.iter_mut().find(|z| z.id == id) {
+                    std::mem::swap(&mut z.members, &mut m);
+                }
+                Op::Members(id, m)
+            }
         }
     }
 
@@ -133,10 +141,18 @@ impl History {
     }
 
     /// Adds `shape` on top of every other (last in draw order). Its ID must be new.
-    #[cfg_attr(not(test), allow(dead_code))] // create linked, new shape, paste (#33 on)
     pub fn add(&mut self, doc: &mut Document, shape: Shape) {
         doc.shapes.push(shape);
         self.record(Some(Op::Remove(doc.shapes.len() - 1)));
+    }
+
+    /// Makes `shape` a member of zone `zone`, recorded.
+    pub fn join_zone(&mut self, doc: &mut Document, zone: &ShapeId, shape: &ShapeId) {
+        if let Some(z) = doc.zones.iter_mut().find(|z| &z.id == zone) {
+            let old = z.members.clone();
+            z.members.push(shape.clone());
+            self.record(Some(Op::Members(zone.clone(), old)));
+        }
     }
 
     /// Removes shape `id` and its links, as one step. Nothing else changes: no reconnecting.

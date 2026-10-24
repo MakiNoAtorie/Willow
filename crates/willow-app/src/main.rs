@@ -16,6 +16,7 @@ use willow_core::{
 };
 mod bench;
 mod file;
+mod menu;
 mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
@@ -431,7 +432,8 @@ impl Render for Willow {
             .on_pinch(cx.listener(Self::pinch))
             .relative()
             .child(canvas)
-            .children(pill);
+            .children(pill)
+            .children(menu::menu(&self.session, cx));
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         let name = self.name();
         if cfg!(target_os = "windows") {

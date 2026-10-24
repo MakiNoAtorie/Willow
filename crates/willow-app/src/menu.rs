@@ -1,0 +1,104 @@
+//! The context menu widget: draws the core's open `Menu` in the theme's menu style, on both
+//! platforms. Choosing an item or clicking outside goes back to the core as input.
+
+use gpui::{AnyElement, Context, MouseButton, div, prelude::*, px, relative};
+use willow_core::{Menu, MenuEntry, MenuItem, Session, Shortcut};
+
+use crate::{Input, Willow, color, shadows};
+
+/// The menu with a click-catching backdrop over the canvas, or nothing while closed.
+pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
+    let menu = session.menu()?;
+    let m = session.theme().menu;
+    let (w, h) = estimate(&m, menu);
+    let size = session.viewport().size;
+    // ponytail: size is estimated from the style, not measured; measure if rows ever wrap.
+    let left = menu.at.x.min(size.x - w).max(0.0);
+    let top = menu.at.y.min(size.y - h).max(0.0);
+    let panel = div()
+        .absolute()
+        .left(px(left))
+        .top(px(top))
+        .flex()
+        .flex_col()
+        .min_w(px(m.min_width))
+        .p(px(m.padding))
+        .rounded(px(m.radius))
+        .bg(color(m.bg))
+        .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
+        .text_color(color(m.ink))
+        .text_size(px(m.font_size))
+        .line_height(relative(1.2))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        // Keep presses off the backdrop beneath.
+        .occlude()
+        .children(menu.entries.iter().enumerate().map(|(i, e)| {
+            match e {
+                MenuEntry::Item(item) => row(&m, i, item, cx).into_any_element(),
+                MenuEntry::Separator => div()
+                    .py(px(m.separator_pad_y))
+                    .px(px(m.padding))
+                    .child(div().h(px(1.0)).w_full().bg(color(m.separator)))
+                    .into_any_element(),
+            }
+        }));
+    let backdrop = div()
+        .absolute()
+        .size_full()
+        .on_mouse_down(MouseButton::Left, cx.listener(Willow::mouse_down))
+        .on_mouse_down(MouseButton::Middle, cx.listener(Willow::mouse_down))
+        .on_mouse_down(MouseButton::Right, cx.listener(Willow::mouse_down))
+        .child(panel);
+    Some(backdrop.into_any_element())
+}
+
+fn row(
+    m: &willow_core::MenuStyle,
+    i: usize,
+    item: &MenuItem,
+    cx: &mut Context<Willow>,
+) -> gpui::Stateful<gpui::Div> {
+    let hover = color(m.hover);
+    let action = item.action;
+    div()
+        .id(("menu-item", i))
+        .flex()
+        .justify_between()
+        .gap(px(2.0 * m.item_pad_x))
+        .px(px(m.item_pad_x))
+        .py(px(m.item_pad_y))
+        .rounded(px(m.item_radius))
+        .when(item.destructive, |d| d.text_color(color(m.destructive)))
+        .when(item.enabled, |d| {
+            d.hover(move |s| s.bg(hover))
+                .on_click(cx.listener(move |w, _, _, cx| w.input(Input::MenuChoose(action), cx)))
+        })
+        .when(!item.enabled, |d| d.opacity(m.disabled_opacity))
+        .child(item.label)
+        .child(
+            div()
+                .opacity(m.shortcut_opacity)
+                .children(item.shortcut.map(shortcut)),
+        )
+}
+
+fn shortcut(s: Shortcut) -> String {
+    match (cfg!(target_os = "macos"), s.shift) {
+        (true, true) => format!("\u{21e7}\u{2318}{}", s.key),
+        (true, false) => format!("\u{2318}{}", s.key),
+        (false, true) => format!("Ctrl+Shift+{}", s.key),
+        (false, false) => format!("Ctrl+{}", s.key),
+    }
+}
+
+/// Width and height the panel will take, for keeping it inside the canvas.
+fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
+    let row = m.font_size * 1.2 + 2.0 * m.item_pad_y;
+    let h = (menu.entries.iter())
+        .map(|e| match e {
+            MenuEntry::Item(_) => row,
+            MenuEntry::Separator => 2.0 * m.separator_pad_y + 1.0,
+        })
+        .sum::<f32>();
+    (m.min_width, h + 2.0 * m.padding)
+}

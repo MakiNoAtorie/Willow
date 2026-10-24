@@ -20,7 +20,10 @@ pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
-pub use session::{CaretView, DragPreview, Editing, ResizeTo, Session, Viewport};
+pub use session::{
+    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, ResizeTo,
+    Session, Shortcut, Viewport,
+};
 pub use theme::{
     CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle,
     Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,

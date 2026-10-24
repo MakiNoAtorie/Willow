@@ -3,6 +3,8 @@
 
 mod editing;
 mod file;
+mod menu;
+pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -151,6 +153,8 @@ pub struct Session {
     /// In the order selected. The edited shape (`editing`) stays selected while edited.
     selected: Vec<ShapeId>,
     editing: Option<Editing>,
+    /// The open context menu.
+    menu: Option<Menu>,
     /// The pointer is over the text being edited.
     over_text: bool,
     /// The pointer is over a shape's edge.
@@ -193,6 +197,7 @@ impl Session {
             zoom: Zoom::default(),
             selected: Vec::new(),
             editing: None,
+            menu: None,
             over_text: false,
             over_edge: None,
             rings: HashMap::new(),
@@ -503,7 +508,17 @@ impl Session {
         }
         match input {
             Input::PointerDown { pos, button, mods } => {
+                // A press outside the menu closes it; a right press goes on to open another.
+                if self.menu.take().is_some() && button != Button::Right {
+                    return self.respond(true);
+                }
                 let hit = self.shape_at(pos);
+                if button == Button::Right && self.gesture.is_none() {
+                    if hit.is_none() {
+                        self.open_empty_menu(pos);
+                    }
+                    return self.respond(true);
+                }
                 if self.gesture.is_none() && button == Button::Left && !self.space_held {
                     if let Some(i) = hit.filter(|_| mods.alt && self.editing.is_none()) {
                         let id = self.doc.shapes[i].id.clone();
@@ -645,6 +660,18 @@ impl Session {
                     }
                     _ => {}
                 }
+                self.respond(true)
+            }
+            Input::StopEditing if self.menu.is_some() => {
+                self.menu = None;
+                self.respond(true)
+            }
+            Input::MenuChoose(action) => {
+                self.choose(action);
+                self.respond(true)
+            }
+            Input::CloseMenu => {
+                self.menu = None;
                 self.respond(true)
             }
             Input::KeyDown(Key::Space) if self.editing.is_some() => self.respond(false),

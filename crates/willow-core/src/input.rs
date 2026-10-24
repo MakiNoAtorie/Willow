@@ -132,6 +132,10 @@ pub enum Input {
     /// The window lost focus: Space no longer counts as held and a pan ends, since their
     /// key-up or release may never arrive.
     FocusLost,
+    /// Runs an item of the open context menu and closes it.
+    MenuChoose(crate::MenuAction),
+    /// Esc or a click outside: closes the context menu.
+    CloseMenu,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

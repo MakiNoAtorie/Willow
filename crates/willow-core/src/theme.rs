@@ -155,6 +155,8 @@ pub struct MenuStyle {
     pub bg: Rgba,
     pub ink: Rgba,
     pub hover: Rgba,
+    /// A destructive item (zone Delete).
+    pub destructive: Rgba,
     pub separator: Rgba,
     /// Space above and below a separator line.
     pub separator_pad_y: f32,
@@ -425,6 +427,7 @@ pub const PAPER: Theme = Theme {
         bg: hex(0xfffdf8),
         ink: hex(0x3b342c),
         hover: hex(0xf1ebe0),
+        destructive: hex(0xb5463b),
         // The mockups' ink at 0x18 alpha.
         separator: rgba(59, 52, 44, 0.094),
         separator_pad_y: 5.0,
