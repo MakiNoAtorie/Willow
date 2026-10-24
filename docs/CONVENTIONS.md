@@ -23,6 +23,9 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Style toggles (`Input::ToggleBold/ToggleItalic`) act on `Editing.anchor..caret.offset`; with an empty selection they set `Editing.pending`, which `set_caret` clears and `Session::replace` applies inside the same `history.change`. A toggle turns the style on unless the whole selection already has it.
 - One public way to set a text selection: `Session::set_text_selection`. Clipboard text enters the core via `Input::Paste` (keeps paragraph breaks), never `Input::Text`. The app writes `selected_text()` to the clipboard before sending `Input::Cut`; the core never touches the clipboard.
 - In core tests, compute screen points with `s.viewport().to_screen(canvas point)`, not fixed screen constants.
+- IME marked text (`Editing.marked`) lives in the edited shape's text but outside `History`; `Session::handle` commits it before any input except Mark/Text, Space key up/down, pointer move, wheel, pinch and reset zoom (the Japanese IME converts on Space). New inputs commit by default.
+- The core takes IME selections as byte ranges; only the app converts UTF-16 (`from16`/`to16` in `text.rs`).
+- Justification gaps are spaces plus UAX #14 break opportunities next to a CJK cluster; add new gap kinds in the `stretch` closure in `layout.rs`.
 - Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`.
 - Editing keys are GPUI actions in the `editing` key context; F2, Enter and Esc are bound everywhere. The input handler is registered whenever a shape is selected.
 
