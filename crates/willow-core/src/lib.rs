@@ -2,6 +2,7 @@
 
 mod draw;
 mod edit;
+mod format;
 mod generate;
 mod history;
 mod input;
@@ -11,6 +12,7 @@ mod theme;
 mod zoom;
 
 pub use draw::{Frame, Visible};
+pub use format::{LoadError, Loaded, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};

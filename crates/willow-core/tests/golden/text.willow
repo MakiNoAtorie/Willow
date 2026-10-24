@@ -1,0 +1,14 @@
+willow 1
+
+a: "Plain **bold** *italic* ***both*** \"quoted\" 2\*3 back\\slash"
+
+b: "**Bold across**\n**two lines** then\n\nplain"
+
+c: "**bold *both* bold** and *it***bold**"
+
+d: "城門が閉じる、*夜*。"
+
+@layout a 0,0 w210
+@layout b 0,100 w210
+@layout c 0,200 w210
+@layout d -40,300 w240 h12

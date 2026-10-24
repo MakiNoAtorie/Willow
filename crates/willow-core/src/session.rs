@@ -2,6 +2,7 @@
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
 mod editing;
+mod file;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -153,12 +154,18 @@ pub struct Session {
     rings: Vec<Ring>,
     /// Time of the last event.
     now: Duration,
+    /// The document as last read or written; `None` after a load that needed repairs.
+    saved: Option<Document>,
+    /// The bytes last read or written.
+    bytes: Vec<u8>,
 }
 
 impl Session {
     /// `measure` is the app's text-measuring function.
     pub fn new(doc: Document, theme: &'static Theme, measure: Box<dyn Measure>) -> Self {
         Session {
+            saved: Some(doc.clone()),
+            bytes: Vec::new(),
             doc,
             history: History::default(),
             theme,

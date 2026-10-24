@@ -164,6 +164,9 @@ pub struct ChromeStyle {
     pub win_button_width: f32,
     pub win_glyph_size: f32,
     pub win_menu_button_width: f32,
+    /// Windows: the unsaved dot after the document name (title color), and its gap.
+    pub win_unsaved_dot: f32,
+    pub win_unsaved_gap: f32,
 }
 
 /// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
@@ -328,6 +331,8 @@ pub const PAPER: Theme = Theme {
         win_button_width: 46.0,
         win_glyph_size: 10.0,
         win_menu_button_width: 44.0,
+        win_unsaved_dot: 6.0,
+        win_unsaved_gap: 7.0,
     },
     zoom: ZoomStyle {
         min: 0.1,
