@@ -7,6 +7,7 @@ mod file;
 mod menu;
 use menu::Ripple;
 mod midpoints;
+mod select;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -104,6 +105,8 @@ enum Gesture {
         from: Point,
         dragged: bool,
     },
+    /// Shift+drag from empty canvas: the marquee's press and current corner, canvas units.
+    Marquee { from: Point, to: Point },
 }
 
 /// What a resize sets: a shape's x, width and extra height, in canvas units.
@@ -175,6 +178,8 @@ pub struct Session {
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
     mid: midpoints::Midpoints,
+    /// The selection when the marquee started.
+    marquee_base: Vec<ShapeId>,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -218,6 +223,7 @@ impl Session {
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
+            marquee_base: Vec::new(),
             now: Duration::ZERO,
         }
     }
@@ -570,6 +576,11 @@ impl Session {
                         });
                         return self.respond(true);
                     }
+                    if hit.is_none() && mods.shift {
+                        self.stop_editing();
+                        self.start_marquee(pos);
+                        return self.respond(true);
+                    }
                 }
                 if self.gesture.is_none()
                     && let Some(e) = &self.editing
@@ -620,6 +631,12 @@ impl Session {
                 self.resize_to(pos);
                 self.respond(true)
             }
+            Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::Marquee { .. })) =>
+            {
+                self.marquee_to(pos);
+                self.respond(true)
+            }
             Input::PointerMove { pos, .. } => match &mut self.gesture {
                 Some(Gesture::Pan { last, click, .. }) => {
                     if click.is_some_and(|c| (pos.x - c.x).hypot(pos.y - c.y) >= DRAG_START) {
@@ -653,6 +670,7 @@ impl Session {
                     *dragged |= d.x.hypot(d.y) >= DRAG_START;
                     self.respond(false)
                 }
+                Some(Gesture::Marquee { .. }) => self.respond(false),
                 None => {
                     let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
                     let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
@@ -667,7 +685,7 @@ impl Session {
                     self.respond(changed || edge_changed)
                 }
             },
-            Input::PointerUp { button, .. } => {
+            Input::PointerUp { button, mods, .. } => {
                 match self.gesture {
                     Some(Gesture::Pan {
                         button: b, click, ..
@@ -677,11 +695,19 @@ impl Session {
                             self.select([]);
                         }
                     }
+                    Some(Gesture::Press { .. })
+                        if button == Button::Left
+                            && let Some((dx, dy)) = self.group_drag() =>
+                    {
+                        self.gesture = None;
+                        self.move_selection(dx, dy);
+                    }
                     Some(Gesture::Press { index, to, from }) if button == Button::Left => {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
                             Some((x, y)) => self.move_shape(&id, x, y),
+                            None if mods.shift => self.toggle_selected(id),
                             // A click on the selected shape edits it, caret where clicked.
                             None if self.selected == [id.clone()] => {
                                 self.start_editing(id);
@@ -704,6 +730,7 @@ impl Session {
                             self.create_linked(&id, side);
                         }
                     }
+                    Some(Gesture::Marquee { .. }) if button == Button::Left => self.gesture = None,
                     Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
                         self.gesture = None;
                         if let Some(r) = to {

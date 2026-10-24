@@ -668,6 +668,21 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             Default::default(),
         ));
     }
+    // The marquee, on top; its border and radius are screen pixels at any zoom.
+    if let Some((a, c)) = frame.marquee {
+        let snap = |p: willow_core::Point| {
+            let p = at(p);
+            point(px(f32::from(p.x).round()), px(f32::from(p.y).round()))
+        };
+        window.paint_quad(quad(
+            Bounds::from_corners(snap(a), snap(c)),
+            px(sel.marquee_radius),
+            color(sel.marquee_fill),
+            px(sel.marquee_width),
+            color(sel.marquee),
+            Default::default(),
+        ));
+    }
 }
 
 /// The resting shadow eased toward the selected one by `k` (0 to 1), scaled by zoom `z`.

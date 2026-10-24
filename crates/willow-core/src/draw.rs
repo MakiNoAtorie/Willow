@@ -29,6 +29,8 @@ pub struct Frame<'a> {
     /// The hovered shape's edge midpoints, canvas units; paint them over every shape at the
     /// theme's `midpoint` size, constant on screen.
     pub midpoints: Vec<Point>,
+    /// The marquee being drawn: top-left and bottom-right in canvas units.
+    pub marquee: Option<(Point, Point)>,
 }
 
 /// A shape fading in after its creation: paint it at `opacity`, `dy` canvas units off its
@@ -95,6 +97,8 @@ impl Session {
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let edited = self.editing().filter(|_| fade > 0.0);
+        let group = self.group_drag();
+        let moved: HashSet<&ShapeId> = group.iter().flat_map(|_| self.selection()).collect();
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and top-left.
         let placed = |s: &'a Shape| {
@@ -105,6 +109,10 @@ impl Session {
             let (x, y) = match preview {
                 Some(p) if *p.id == s.id => (p.x, p.y),
                 _ => (s.x, s.y),
+            };
+            let (x, y) = match group {
+                Some((dx, dy)) if moved.contains(&s.id) => (s.x + dx, s.y + dy),
+                _ => (x, y),
             };
             (s, x, y)
         };
@@ -227,6 +235,7 @@ impl Session {
             shadows: full,
             grid: full,
             midpoints: self.midpoints(),
+            marquee: self.marquee(),
         }
     }
 }

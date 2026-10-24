@@ -233,6 +233,11 @@ pub struct SelectionStyle {
     pub fade: Transition,
     /// Highlight behind selected text while editing.
     pub text: Rgba,
+    /// The Shift+drag marquee: border, fill, and border width and corner radius in screen px.
+    pub marquee: Rgba,
+    pub marquee_fill: Rgba,
+    pub marquee_width: f32,
+    pub marquee_radius: f32,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -374,6 +379,10 @@ pub const PAPER: Theme = Theme {
         ring: 2.0,
         color: hex(0x8b7760),
         text: rgba(139, 119, 96, 0.22),
+        marquee: rgba(139, 119, 96, 0.65),
+        marquee_fill: rgba(139, 119, 96, 0.08),
+        marquee_width: 1.0,
+        marquee_radius: 3.0,
         shadow: [
             Shadow {
                 x: 0.0,
