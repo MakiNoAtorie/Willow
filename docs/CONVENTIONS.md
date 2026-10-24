@@ -12,6 +12,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Visual values live as `Theme` fields in the core, never as constants in the app. Colors are `Rgba(0xRRGGBBAA)`; the app converts with `gpui::rgba(c.0).into()`.
 - Theme shadows keep the CSS values from `themes.js`; the app passes `blur / 2` as GPUI's `blur_radius` (GPUI blur is the Gaussian sigma).
 - macOS: the title bar floats over the canvas, so add it as the last child or the canvas paints over it.
+- Platform window chrome lives in `<name>_<os>.rs` modules gated by `#[cfg(target_os = ...)]` in `main.rs`, each exposing `title_bar(theme, window)` with the same signature.
 
 ## Local checks (run before pushing)
 - `ci.bat` on Windows, `./ci.sh` on macOS: fmt, build, test, clippy `-D warnings`, and the GPUI-free-core rule (ADR 0001). Optional arg: cargo job count (default 4; 2 when another build runs). Add new checks to both scripts.
