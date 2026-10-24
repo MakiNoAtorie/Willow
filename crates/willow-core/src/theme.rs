@@ -37,6 +37,77 @@ pub struct ShapeStyle {
     pub shadow: [Shadow; 2],
 }
 
+/// A CSS `cubic-bezier(x1, y1, x2, y2)` timing curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicBezier(pub f32, pub f32, pub f32, pub f32);
+
+impl CubicBezier {
+    /// CSS `ease-in`.
+    pub const EASE_IN: CubicBezier = CubicBezier(0.42, 0.0, 1.0, 1.0);
+
+    /// Eased progress for linear progress `x` (clamped to 0..=1).
+    pub fn at(&self, x: f32) -> f32 {
+        let x = x.clamp(0.0, 1.0);
+        let b = |p1: f32, p2: f32, t: f32| {
+            let u = 1.0 - t;
+            3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
+        };
+        // x(t) is monotonic for CSS curves (x1, x2 in 0..=1), so bisection always converges.
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..30 {
+            let mid = (lo + hi) / 2.0;
+            if b(self.0, self.2, mid) < x {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        b(self.1, self.3, (lo + hi) / 2.0)
+    }
+}
+
+/// A duration and its timing curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transition {
+    pub duration: Duration,
+    pub easing: CubicBezier,
+}
+
+impl Transition {
+    /// Eased progress `elapsed` into the transition: 0 at the start, 1 at and after the end.
+    pub fn progress(&self, elapsed: Duration) -> f32 {
+        if elapsed >= self.duration {
+            return 1.0;
+        }
+        self.easing
+            .at(elapsed.as_secs_f32() / self.duration.as_secs_f32())
+    }
+}
+
+/// Zoom limits, in screen pixels per canvas unit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoomStyle {
+    pub min: f32,
+    pub max: f32,
+    /// Below this zoom text is gone and the dot grid is hidden.
+    pub fade_end: f32,
+}
+
+/// The zoom level indicator at the bottom center of the canvas, in screen pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoomPillStyle {
+    pub bg: Rgba,
+    pub ink: Rgba,
+    pub font_size: f32,
+    pub pad_x: f32,
+    pub pad_y: f32,
+    /// Gap between the pill and the canvas's bottom edge.
+    pub bottom: f32,
+    /// Fully shown this long after the last zoom change, then fades.
+    pub hold: Duration,
+    pub fade: Transition,
+}
+
 /// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
 /// in place of the resting one. Fades in and out over `fade`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,6 +143,10 @@ pub struct Theme {
     pub chrome_title: Rgba,
     /// Windows title-bar button hover fill.
     pub chrome_button_hover: Rgba,
+    pub zoom: ZoomStyle,
+    /// One wheel zoom step easing to its new level.
+    pub zoom_step: Transition,
+    pub zoom_pill: ZoomPillStyle,
 }
 
 impl Theme {
@@ -158,4 +233,26 @@ pub const PAPER: Theme = Theme {
     ],
     chrome_title: rgba(59, 52, 44, 0.55),
     chrome_button_hover: rgba(70, 50, 20, 0.07),
+    zoom: ZoomStyle {
+        min: 0.1,
+        max: 4.0,
+        fade_end: 0.5,
+    },
+    zoom_step: Transition {
+        duration: Duration::from_millis(120),
+        easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+    },
+    zoom_pill: ZoomPillStyle {
+        bg: rgba(59, 52, 44, 0.84),
+        ink: hex(0xfffdf8),
+        font_size: 12.0,
+        pad_x: 11.0,
+        pad_y: 5.0,
+        bottom: 22.0,
+        hold: Duration::from_millis(700),
+        fade: Transition {
+            duration: Duration::from_millis(400),
+            easing: CubicBezier::EASE_IN,
+        },
+    },
 };

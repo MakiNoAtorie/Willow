@@ -5,19 +5,19 @@ use std::time::Instant;
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, FocusHandle, Hsla,
     KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, ScrollEvent, TitlebarOptions, Window, WindowBounds, WindowOptions,
-    actions, canvas, div, point, prelude::*, px, quad, size,
+    MouseUpEvent, PinchEvent, Pixels, ScrollEvent, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Modifiers, PAPER, Rgba, Session, Shadow, ShapeId, Theme,
-    Viewport,
+    Viewport, ZoomPill,
 };
 #[cfg(target_os = "windows")]
 mod titlebar_windows;
 #[cfg(target_os = "windows")]
 use titlebar_windows::title_bar;
 
-actions!(willow, [Quit]);
+actions!(willow, [Quit, ResetZoom]);
 
 /// Pixels per line for wheels that report lines (Windows already multiplies by its lines per notch).
 const WHEEL_LINE: f32 = 20.0;
@@ -90,13 +90,29 @@ impl Willow {
             y: d.y.into(),
         };
         let mods = mods(&e.modifiers);
-        self.input(Input::Wheel { delta, mods }, cx);
+        let pos = self.local(e.position);
+        self.input(Input::Wheel { pos, delta, mods }, cx);
+    }
+
+    fn pinch(&mut self, e: &PinchEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let pos = self.local(e.position);
+        self.input(
+            Input::Pinch {
+                pos,
+                delta: e.delta,
+            },
+            cx,
+        );
     }
 }
 
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.session.theme();
+        let now = self.start.elapsed();
+        // Paint requests the next frame while the session is animating.
+        self.session.tick(now);
+        let pill = self.session.zoom_pill(now).map(|p| zoom_pill(theme, p));
         let entity = cx.entity();
         let canvas = canvas(
             |_, _, _| (),
@@ -167,7 +183,8 @@ impl Render for Willow {
                 if let Some(k) = key(&e.keystroke) {
                     w.input(Input::KeyUp(k), cx);
                 }
-            }));
+            }))
+            .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)));
         let body = div()
             .flex_1()
             .overflow_hidden()
@@ -180,7 +197,10 @@ impl Render for Willow {
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll))
-            .child(canvas);
+            .on_pinch(cx.listener(Self::pinch))
+            .relative()
+            .child(canvas)
+            .children(pill);
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         if cfg!(target_os = "windows") {
             root.child(title_bar(theme, window)).child(body)
@@ -190,7 +210,31 @@ impl Render for Willow {
     }
 }
 
-/// Canvas, dot grid and shapes. Zoom is 1 until zoom lands (#7).
+/// The zoom level pill, bottom center of the canvas.
+fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
+    let p = t.zoom_pill;
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom(px(p.bottom))
+        .flex()
+        .justify_center()
+        .opacity(pill.opacity)
+        .child(
+            div()
+                .px(px(p.pad_x))
+                .py(px(p.pad_y))
+                .rounded_full()
+                .bg(color(p.bg))
+                .text_color(color(p.ink))
+                .text_size(px(p.font_size))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(format!("{}%", pill.percent)),
+        )
+}
+
+/// Canvas, dot grid and shapes.
 fn paint(
     bounds: Bounds<Pixels>,
     doc: &Document,
@@ -205,15 +249,21 @@ fn paint(
     let o = vp.to_screen(willow_core::Point::default());
     let origin = bounds.origin + point(px(o.x.round()), px(o.y.round()));
 
+    let z = vp.zoom;
     // One dot at the center of every grid cell, as the mockups' radial-gradient tile draws it.
-    let (s, r) = (t.grid_spacing, t.grid_dot_radius);
+    let (s, r) = (t.grid_spacing * z, t.grid_dot_radius * z);
     let phase = |o: Pixels, b: Pixels| f32::from(o - b + px(s / 2.0)).rem_euclid(s);
     let (x0, y0) = (
         phase(origin.x, bounds.origin.x),
         phase(origin.y, bounds.origin.y),
     );
     let dot = color(t.grid_dot);
-    let mut y = y0;
+    // No grid below fade_end: it would be a haze of thousands of dots.
+    let mut y = if z < t.zoom.fade_end {
+        f32::INFINITY
+    } else {
+        y0
+    };
     while y < f32::from(bounds.size.height) {
         let mut x = x0;
         while x < f32::from(bounds.size.width) {
@@ -232,7 +282,7 @@ fn paint(
         y += s;
     }
 
-    let radius = px(t.shape.radius);
+    let radius = px(t.shape.radius * z);
     let sel = &t.selection;
     for shape in &doc.shapes {
         let (x, y) = match preview {
@@ -240,24 +290,24 @@ fn paint(
             _ => (shape.x, shape.y),
         };
         let b = Bounds::new(
-            origin + point(px(x as f32), px(y as f32)),
-            size(px(shape.width as f32), px(shape.height(t))),
+            origin + point(px(x as f32 * z), px(y as f32 * z)),
+            size(px(shape.width as f32 * z), px(shape.height(t) * z)),
         );
         let ring = rings
             .iter()
             .find(|(id, _)| **id == shape.id)
             .map_or(0.0, |r| r.1);
-        let shadows = shadows(&t.shape.shadow, &sel.shadow, ring);
+        let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
         window.paint_drop_shadows(b, Corners::all(radius), &shadows);
         if ring > 0.0 {
             // As the mockups' box-shadow spreads: a canvas gap, then the accent ring, both growing.
-            let out = (sel.gap + sel.ring) * ring;
+            let out = (sel.gap + sel.ring) * ring * z;
             let ring_bounds = b.dilate(px(out));
             window.paint_quad(quad(
                 ring_bounds,
                 radius + px(out),
                 color(t.canvas),
-                px(sel.ring * ring),
+                px(sel.ring * ring * z),
                 color(sel.color),
                 Default::default(),
             ));
@@ -273,9 +323,10 @@ fn paint(
     }
 }
 
-/// The resting shadow eased toward the selected one by `k` (0 to 1).
-fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32) -> Vec<BoxShadow> {
+/// The resting shadow eased toward the selected one by `k` (0 to 1), scaled by zoom `z`.
+fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32, z: f32) -> Vec<BoxShadow> {
     let mix = |a: f32, b: f32| a + (b - a) * k;
+    let zmix = |a: f32, b: f32| mix(a, b) * z;
     rest.iter()
         .zip(selected)
         .map(|(a, b)| {
@@ -283,10 +334,10 @@ fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32) -> Vec<BoxShadow>
             let c: [u8; 4] = std::array::from_fn(|i| mix(ca[i] as f32, cb[i] as f32).round() as u8);
             BoxShadow {
                 color: color(Rgba(u32::from_be_bytes(c))),
-                offset: point(px(mix(a.x, b.x)), px(mix(a.y, b.y))),
+                offset: point(px(zmix(a.x, b.x)), px(zmix(a.y, b.y))),
                 // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
-                blur_radius: px(mix(a.blur, b.blur) / 2.0),
-                spread_radius: px(mix(a.spread, b.spread)),
+                blur_radius: px(zmix(a.blur, b.blur) / 2.0),
+                spread_radius: px(zmix(a.spread, b.spread)),
                 inset: false,
             }
         })
@@ -318,7 +369,15 @@ fn main() {
         } else {
             "alt-f4"
         };
-        cx.bind_keys([KeyBinding::new(quit, Quit, None)]);
+        let reset_zoom = if cfg!(target_os = "macos") {
+            "cmd-0"
+        } else {
+            "ctrl-0"
+        };
+        cx.bind_keys([
+            KeyBinding::new(quit, Quit, None),
+            KeyBinding::new(reset_zoom, ResetZoom, None),
+        ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_window_closed(|cx, _| cx.quit()).detach();
         let bounds = Bounds::centered(None, size(px(1180.), px(740.)), cx);

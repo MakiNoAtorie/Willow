@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::zoom::{Zoom, ZoomPill};
 use crate::{Document, ShapeId, Theme};
 
 /// A point in screen pixels (relative to the canvas's top-left) or in canvas units.
@@ -51,13 +52,21 @@ pub enum Input {
         button: Button,
         mods: Modifiers,
     },
-    /// Wheel or trackpad scroll: how far the content should move, in screen pixels.
+    /// Wheel or trackpad scroll at `pos`: how far the content should move, in screen pixels.
     Wheel {
+        pos: Point,
         delta: Point,
         mods: Modifiers,
     },
     KeyDown(Key),
     KeyUp(Key),
+    /// Trackpad pinch around `pos`: `delta` 0.1 scales by 1.1.
+    Pinch {
+        pos: Point,
+        delta: f32,
+    },
+    /// Ctrl/Cmd+0: back to 100% around the canvas center.
+    ResetZoom,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -162,6 +171,7 @@ pub struct Session {
     viewport: Viewport,
     gesture: Option<Gesture>,
     space_held: bool,
+    zoom: Zoom,
     selected: Option<ShapeId>,
     rings: Vec<Ring>,
     /// Time of the last event.
@@ -180,6 +190,7 @@ impl Session {
             },
             gesture: None,
             space_held: false,
+            zoom: Zoom::default(),
             selected: None,
             rings: Vec::new(),
             now: Duration::ZERO,
@@ -213,7 +224,7 @@ impl Session {
     /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
     pub fn animating(&self, now: Duration) -> bool {
         let fade = self.theme.selection.fade;
-        self.rings.iter().any(|r| r.progress(now, fade) < 1.0)
+        self.rings.iter().any(|r| r.progress(now, fade) < 1.0) || self.zoom.running(self.theme, now)
     }
 
     fn select(&mut self, id: Option<ShapeId>) {
@@ -371,9 +382,26 @@ impl Session {
                 self.space_held = false;
                 self.respond(true)
             }
-            // Ctrl/Cmd+wheel zooms (#7).
-            Input::Wheel { mods, .. } if mods.ctrl || mods.platform => self.respond(false),
-            Input::Wheel { mut delta, mods } => {
+            Input::ResetZoom => {
+                let size = self.viewport.size;
+                let center = Point {
+                    x: size.x / 2.0,
+                    y: size.y / 2.0,
+                };
+                (self.zoom).ease_to(&mut self.viewport, self.theme, 1.0, center, now);
+                self.respond(true)
+            }
+            Input::Pinch { pos, delta } => {
+                (self.zoom).pinch(&mut self.viewport, self.theme, pos, 1.0 + delta, now);
+                self.respond(true)
+            }
+            Input::Wheel { pos, delta, mods } if mods.ctrl || mods.platform => {
+                (self.zoom).wheel(&mut self.viewport, self.theme, pos, delta.y, now);
+                self.respond(true)
+            }
+            Input::Wheel {
+                mut delta, mods, ..
+            } => {
                 // Shift turns a vertical wheel horizontal; macOS has already done it for a mouse.
                 if mods.shift && delta.x == 0.0 {
                     delta = Point { x: delta.y, y: 0.0 };
@@ -382,6 +410,18 @@ impl Session {
                 self.respond(true)
             }
         }
+    }
+
+    /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
+    pub fn tick(&mut self, now: Duration) -> Response {
+        self.now = now;
+        let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
+        self.respond(redraw)
+    }
+
+    /// The zoom pill to draw at `now`, if visible.
+    pub fn zoom_pill(&self, now: Duration) -> Option<ZoomPill> {
+        self.zoom.pill(self.theme, now)
     }
 
     /// Index of the topmost shape under screen point `p`.

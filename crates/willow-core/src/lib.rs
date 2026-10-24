@@ -2,9 +2,14 @@
 
 mod session;
 mod theme;
+mod zoom;
 
 pub use session::{Button, Cursor, Input, Key, Modifiers, Point, Response, Session, Viewport};
-pub use theme::{PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme};
+pub use theme::{
+    CubicBezier, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme, Transition, ZoomPillStyle,
+    ZoomStyle,
+};
+pub use zoom::ZoomPill;
 
 /// Width of every new shape, in canvas units. Shared by every theme.
 pub const DEFAULT_WIDTH: u32 = 210;

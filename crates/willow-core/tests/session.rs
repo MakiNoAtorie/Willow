@@ -95,6 +95,7 @@ fn space_held_turns_left_drag_over_a_shape_into_a_pan() {
 fn wheel(s: &mut Session, dx: f32, dy: f32, mods: Modifiers) -> willow_core::Response {
     s.handle(
         Input::Wheel {
+            pos: ON_SHAPE,
             delta: pt(dx, dy),
             mods,
         },
