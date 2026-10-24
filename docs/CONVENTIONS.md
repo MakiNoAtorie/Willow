@@ -18,7 +18,8 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 
 ## Model
 - Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
-- Change links only through `Document::link`/`unlink`/`recolor` (one-color trees); bulk loaders do their own union-find. Side rule: `willow_core::side`; centers need `Session::shape_height`.
+- Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor` (undoable, one-color trees); `Document::link`/`unlink`/`recolor` are for loaders and generators. Bulk loaders do their own union-find.
+- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Side rule: `willow_core::side`; centers need `Session::shape_height`.
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
 ## Files
@@ -50,7 +51,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context, since on macOS a context-free binding swallows the letter while editing.
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
 - Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries; the mutation lands once on release through a named `Session` method.
-- Undoable changes go through `History::change` from a named `Session` method; viewport and selection never do. Whole-document swaps (reload) go through `History::replace` (snapshots the whole `Document`); anything that can remove shapes calls `drop_missing_selection` after. An editing session is one `begin()`/`end()` group.
+- Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is `Session::selection() -> &[ShapeId]`, set only via `Session::select(ids)`; single-shape code uses `only_selected()`. Draw reads rings via `Session::ring(id, now)`. Whole-document swaps (reload) go through `History::replace` (snapshots the whole `Document`); anything that can remove shapes calls `drop_missing_selection` after. An editing session is one `begin()`/`end()` group.
 
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
