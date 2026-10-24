@@ -6,3 +6,5 @@ publish.workspace = true
 
 # ADR 0001: no GPUI here, directly or through any dependency (checked by ci.sh / ci.bat).
 [dependencies]
+unicode-linebreak = "0.1.5"
+unicode-segmentation = "1.13"

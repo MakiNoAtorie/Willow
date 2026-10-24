@@ -1,3 +1,5 @@
+mod common;
+
 use std::time::Duration;
 use willow_core::{Button, Cursor, Document, Input, Key, Modifiers, PAPER, Point, Session};
 
@@ -9,7 +11,7 @@ fn pt(x: f32, y: f32) -> Point {
 
 /// A session over a 1000 x 800 canvas with the new document's shape centered.
 fn session() -> Session {
-    let mut s = Session::new(Document::new(), &PAPER);
+    let mut s = Session::new(Document::new(), &PAPER, Box::new(common::Fake));
     s.resize(1000.0, 800.0);
     s
 }
@@ -251,7 +253,7 @@ fn a_click_where_shapes_overlap_hits_the_later_one() {
     let mut doc = Document::new();
     let b = doc.next_id();
     doc.shapes.push(willow_core::Shape::new(b, 100, 20));
-    let mut s = Session::new(doc, &PAPER);
+    let mut s = Session::new(doc, &PAPER, Box::new(common::Fake));
     s.resize(1000.0, 800.0);
 
     // Canvas (150, 30) is inside both a (0..210) and b (100..310).

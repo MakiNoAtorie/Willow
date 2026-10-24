@@ -1,17 +1,19 @@
 //! Willow's window: turns GPUI events into editor-session input and draws what the session holds.
 
-use std::time::Instant;
+use std::borrow::Cow;
+use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, FocusHandle, Hsla,
-    KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PinchEvent, Pixels, ScrollEvent, TitlebarOptions, Window, WindowBounds,
-    WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
+    App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
+    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, ScrollEvent, TitlebarOptions, Window,
+    WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
-    Button, Cursor, Document, Input, Key, Modifiers, PAPER, Rgba, Session, Shadow, ShapeId, Theme,
-    Viewport, ZoomPill,
+    Button, Cursor, Document, Input, Key, Modifiers, Motion, PAPER, Rgba, Session, Shadow, Theme,
+    ZoomPill,
 };
+mod text;
 #[cfg(target_os = "windows")]
 mod titlebar_windows;
 #[cfg(target_os = "windows")]
@@ -20,6 +22,33 @@ use titlebar_windows::title_bar;
 actions!(willow, [Quit, ResetZoom]);
 // Edit menu. Cut, Copy and Paste have no handler yet, so their menu items stay disabled.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
+// Text editing; bound in the `editing` key context except F2, Enter and Esc.
+actions!(
+    willow,
+    [
+        StartEditing,
+        StopEditing,
+        Left,
+        Right,
+        WordLeft,
+        WordRight,
+        Up,
+        Down,
+        LineStart,
+        LineEnd,
+        Backspace,
+        Delete,
+        WordBackspace,
+        WordDelete,
+    ]
+);
+
+/// Registers one handler per editing action on `$d`, each sending its `Input`.
+macro_rules! editing_actions {
+    ($d:expr, $cx:expr, $($action:ident => $input:expr),* $(,)?) => {
+        $d $(.on_action($cx.listener(|w, _: &$action, _, cx| w.input($input, cx))))*
+    };
+}
 
 /// Pixels per line for wheels that report lines (Windows already multiplies by its lines per notch).
 const WHEEL_LINE: f32 = 20.0;
@@ -157,15 +186,12 @@ impl Render for Willow {
                 if session.animating(now) {
                     window.request_animation_frame();
                 }
-                paint(
-                    bounds,
-                    session.document(),
-                    session.viewport(),
-                    theme,
-                    window,
-                    session.drag_preview(),
-                    &session.selection_rings(now),
-                );
+                paint(bounds, session, now, window);
+                // Text input reaches the selected shape too: typing on it starts editing.
+                if session.selection().is_some() {
+                    let handler = ElementInputHandler::new(bounds, entity.clone());
+                    window.handle_input(&w.focus, handler, cx);
+                }
             },
         )
         .size_full();
@@ -175,6 +201,11 @@ impl Render for Willow {
             .flex_col()
             .relative()
             .bg(color(theme.canvas))
+            .key_context(if self.session.editing().is_some() {
+                "Willow editing"
+            } else {
+                "Willow"
+            })
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|w, e: &KeyDownEvent, _, cx| {
                 if let Some(k) = key(&e.keystroke) {
@@ -195,6 +226,22 @@ impl Render for Willow {
             .when(self.session.can_redo(), |d| {
                 d.on_action(cx.listener(|w, _: &Redo, _, cx| w.input(Input::Redo, cx)))
             });
+        let root = editing_actions!(root, cx,
+            StartEditing => Input::StartEditing,
+            StopEditing => Input::StopEditing,
+            Left => Input::Move(Motion::Left),
+            Right => Input::Move(Motion::Right),
+            WordLeft => Input::Move(Motion::WordLeft),
+            WordRight => Input::Move(Motion::WordRight),
+            Up => Input::Move(Motion::Up),
+            Down => Input::Move(Motion::Down),
+            LineStart => Input::Move(Motion::LineStart),
+            LineEnd => Input::Move(Motion::LineEnd),
+            Backspace => Input::Delete(Motion::Left),
+            Delete => Input::Delete(Motion::Right),
+            WordBackspace => Input::Delete(Motion::WordLeft),
+            WordDelete => Input::Delete(Motion::WordRight),
+        );
         let body = div()
             .flex_1()
             .overflow_hidden()
@@ -202,6 +249,7 @@ impl Render for Willow {
                 Cursor::Arrow => CursorStyle::Arrow,
                 Cursor::Grab => CursorStyle::OpenHand,
                 Cursor::Grabbing => CursorStyle::ClosedHand,
+                Cursor::Text => CursorStyle::IBeam,
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
@@ -244,16 +292,10 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
         )
 }
 
-/// Canvas, dot grid and shapes.
-fn paint(
-    bounds: Bounds<Pixels>,
-    doc: &Document,
-    vp: Viewport,
-    t: &Theme,
-    window: &mut Window,
-    preview: Option<(&ShapeId, i32, i32)>,
-    rings: &[(&ShapeId, f32)],
-) {
+/// Canvas, dot grid, shapes with their text, and the caret.
+fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
+    let (doc, vp, t) = (session.document(), session.viewport(), session.theme());
+    let (preview, rings) = (session.drag_preview(), session.selection_rings(now));
     window.paint_quad(gpui::fill(bounds, color(t.canvas)));
     // Screen position of canvas (0, 0), on whole pixels.
     let o = vp.to_screen(willow_core::Point::default());
@@ -301,7 +343,10 @@ fn paint(
         };
         let b = Bounds::new(
             origin + point(px(x as f32 * z), px(y as f32 * z)),
-            size(px(shape.width as f32 * z), px(shape.height(t) * z)),
+            size(
+                px(shape.width as f32 * z),
+                px(session.shape_height(shape) * z),
+            ),
         );
         let ring = rings
             .iter()
@@ -330,6 +375,19 @@ fn paint(
             gpui::transparent_black(),
             Default::default(),
         ));
+        // Text is gone where the grid is: it would be under about 7 px on screen.
+        if z >= t.zoom.fade_end {
+            let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
+            text::paint_text(window, o, &shape.text, &session.layout(shape), t, z);
+        }
+    }
+    if let Some(c) = session.caret(now)
+        && c.visible
+    {
+        // The caret's width is screen pixels at any zoom.
+        let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
+        let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
+        window.paint_quad(gpui::fill(b, color(t.caret.color)));
     }
 }
 
@@ -429,6 +487,46 @@ fn main() {
                 KeyBinding::new("ctrl-v", Paste, None),
             ]);
         }
+        let ed = Some("editing");
+        // Enter and Esc everywhere, so they never reach a selected shape as typed text.
+        cx.bind_keys([
+            KeyBinding::new("f2", StartEditing, None),
+            KeyBinding::new("enter", StopEditing, None),
+            KeyBinding::new("escape", StopEditing, None),
+            KeyBinding::new("left", Left, ed),
+            KeyBinding::new("right", Right, ed),
+            KeyBinding::new("up", Up, ed),
+            KeyBinding::new("down", Down, ed),
+            KeyBinding::new("home", LineStart, ed),
+            KeyBinding::new("end", LineEnd, ed),
+            KeyBinding::new("backspace", Backspace, ed),
+            KeyBinding::new("delete", Delete, ed),
+        ]);
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([
+                KeyBinding::new("alt-left", WordLeft, ed),
+                KeyBinding::new("alt-right", WordRight, ed),
+                KeyBinding::new("cmd-left", LineStart, ed),
+                KeyBinding::new("cmd-right", LineEnd, ed),
+                KeyBinding::new("alt-backspace", WordBackspace, ed),
+                KeyBinding::new("alt-delete", WordDelete, ed),
+            ]);
+        } else {
+            cx.bind_keys([
+                KeyBinding::new("ctrl-left", WordLeft, ed),
+                KeyBinding::new("ctrl-right", WordRight, ed),
+                KeyBinding::new("ctrl-backspace", WordBackspace, ed),
+                KeyBinding::new("ctrl-delete", WordDelete, ed),
+            ]);
+        }
+        cx.text_system()
+            .add_fonts(vec![
+                Cow::Borrowed(include_bytes!("../assets/Literata-Regular.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/Literata-Bold.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/Literata-Italic.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice()),
+            ])
+            .expect("bundled fonts");
         #[cfg(target_os = "macos")]
         set_menus(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
@@ -449,7 +547,11 @@ fn main() {
                     let focus = cx.focus_handle();
                     window.focus(&focus, cx);
                     Willow {
-                        session: Session::new(Document::new(), &PAPER),
+                        session: Session::new(
+                            Document::new(),
+                            &PAPER,
+                            Box::new(text::TextMeasure(window.text_system().clone())),
+                        ),
                         focus,
                         cursor: Cursor::Arrow,
                         canvas_origin: Default::default(),

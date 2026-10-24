@@ -150,9 +150,22 @@ pub struct SelectionStyle {
     pub fade: Duration,
 }
 
+/// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
+/// after the last edit input, then solid so the redraw loop ends.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaretStyle {
+    pub color: Rgba,
+    pub width: f32,
+    /// How long the caret stays shown, then hidden.
+    pub blink: Duration,
+    pub idle: Duration,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub name: &'static str,
+    /// Shape text font family; regular, bold, italic and bold italic are bundled.
+    pub font: &'static str,
     /// Shape text size in canvas units, and line height as a multiple of it.
     pub font_size: f32,
     pub line_height: f32,
@@ -165,6 +178,7 @@ pub struct Theme {
     pub grid_spacing: f32,
     pub shape: ShapeStyle,
     pub selection: SelectionStyle,
+    pub caret: CaretStyle,
     /// Shape fill per color, indexed in `Color::ALL` order.
     pub pastel: [Rgba; 7],
     /// Saturated swatch per color, indexed in `Color::ALL` order.
@@ -193,6 +207,7 @@ impl Theme {
 
 pub const PAPER: Theme = Theme {
     name: "Paper",
+    font: "Literata",
     font_size: 15.0,
     line_height: 1.5,
     canvas: hex(0xf6f3ec),
@@ -243,6 +258,13 @@ pub const PAPER: Theme = Theme {
             },
         ],
         fade: Duration::from_millis(120),
+    },
+    caret: CaretStyle {
+        color: hex(0x3b342c),
+        width: 1.5,
+        blink: Duration::from_millis(530),
+        // ponytail: "a few seconds" after the last edit; tune by feel.
+        idle: Duration::from_secs(5),
     },
     pastel: [
         hex(0xe9e5dd),

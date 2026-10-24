@@ -1,3 +1,5 @@
+mod common;
+
 use std::time::Duration;
 use willow_core::{CubicBezier, Document, Input, Modifiers, PAPER, Point, Session};
 
@@ -18,7 +20,7 @@ fn close_pt(a: Point, b: Point) -> bool {
 }
 
 fn session() -> Session {
-    let mut s = Session::new(Document::new(), &PAPER);
+    let mut s = Session::new(Document::new(), &PAPER, Box::new(common::Fake));
     s.resize(1000.0, 800.0);
     s
 }

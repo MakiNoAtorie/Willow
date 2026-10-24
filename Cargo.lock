@@ -5456,6 +5456,10 @@ dependencies = [
 [[package]]
 name = "willow-core"
 version = "0.1.0"
+dependencies = [
+ "unicode-linebreak",
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "winapi"

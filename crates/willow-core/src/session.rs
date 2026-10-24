@@ -1,11 +1,17 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ops::Range;
+use std::rc::Rc;
 use std::time::Duration;
 
+use crate::edit::{next_cluster, prev_cluster, word_left, word_right};
 use crate::history::History;
+use crate::layout::{Caret, Layout, Measure, layout};
 use crate::zoom::{Zoom, ZoomPill};
-use crate::{Document, ShapeId, Theme};
+use crate::{Document, RichText, Shape, ShapeId, Theme};
 
 /// A point in screen pixels (relative to the canvas's top-left) or in canvas units.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -36,8 +42,23 @@ pub enum Key {
     Space,
 }
 
+/// Where a caret motion goes. The app maps platform keys to these (word jumps are Alt+arrow
+/// on macOS, Ctrl+arrow on Windows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Motion {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    /// One line up or down, keeping the column.
+    Up,
+    Down,
+    LineStart,
+    LineEnd,
+}
+
 /// One input event. Positions are screen pixels relative to the canvas's top-left.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Input {
     PointerDown {
         pos: Point,
@@ -71,6 +92,20 @@ pub enum Input {
     /// Undoes the last document change. Viewport and selection are untouched.
     Undo,
     Redo,
+    /// Typed text, replacing byte range `replace` of the edited text, or else the text
+    /// selection. On a selected shape that isn't being edited, anything but a space starts
+    /// editing and is appended. Control characters are dropped.
+    Text {
+        text: String,
+        replace: Option<Range<usize>>,
+    },
+    /// F2: edit the selected shape, caret at the end.
+    StartEditing,
+    /// Enter or Esc: stop editing, keep the shape selected.
+    StopEditing,
+    Move(Motion),
+    /// Deletes the text selection, or else from the caret to where the motion goes.
+    Delete(Motion),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -81,6 +116,8 @@ pub enum Cursor {
     Grab,
     /// Panning.
     Grabbing,
+    /// Over the text being edited.
+    Text,
 }
 
 /// What the app does after an event.
@@ -125,6 +162,28 @@ impl Viewport {
     }
 }
 
+/// The shape being edited and where its caret is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Editing {
+    pub id: ShapeId,
+    pub caret: Caret,
+    /// The text selection's other end; `caret.offset` when nothing is selected.
+    pub anchor: usize,
+    /// Column that up/down keep, set by the first vertical move.
+    goal_x: Option<f32>,
+    /// Last edit input: the caret blinks from here until `CaretStyle::idle`.
+    since: Duration,
+}
+
+/// The caret to draw: top in canvas units, one line tall.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaretView {
+    pub pos: Point,
+    pub height: f32,
+    /// Off during the blink's hidden half.
+    pub visible: bool,
+}
+
 /// Screen pixels the pointer may wander before a press counts as a drag.
 const DRAG_START: f32 = 3.0;
 
@@ -145,6 +204,9 @@ enum Gesture {
         from: Point,
         to: Option<(i32, i32)>,
     },
+    /// Left press in the text being edited: never moves the shape.
+    // ponytail: dragging will select text (#11).
+    Text,
 }
 
 /// A selection ring easing from `from` to `to` (0 hidden, 1 shown), starting at `since`.
@@ -169,26 +231,37 @@ impl Ring {
     }
 }
 
+/// A shape's layout and the text and width it was made for.
+type Cached = (RichText, u32, Rc<Layout>);
+
 pub struct Session {
     doc: Document,
     history: History,
     theme: &'static Theme,
+    measure: Box<dyn Measure>,
+    layouts: RefCell<HashMap<ShapeId, Cached>>,
     viewport: Viewport,
     gesture: Option<Gesture>,
     space_held: bool,
     zoom: Zoom,
     selected: Option<ShapeId>,
+    editing: Option<Editing>,
+    /// The pointer is over the text being edited.
+    over_text: bool,
     rings: Vec<Ring>,
     /// Time of the last event.
     now: Duration,
 }
 
 impl Session {
-    pub fn new(doc: Document, theme: &'static Theme) -> Self {
+    /// `measure` is the app's text-measuring function.
+    pub fn new(doc: Document, theme: &'static Theme, measure: Box<dyn Measure>) -> Self {
         Session {
             doc,
             history: History::default(),
             theme,
+            measure,
+            layouts: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
                 zoom: 1.0,
@@ -198,6 +271,8 @@ impl Session {
             space_held: false,
             zoom: Zoom::default(),
             selected: None,
+            editing: None,
+            over_text: false,
             rings: Vec::new(),
             now: Duration::ZERO,
         }
@@ -216,6 +291,35 @@ impl Session {
         self.selected.as_ref()
     }
 
+    /// The shape being edited, if any, and its caret.
+    pub fn editing(&self) -> Option<&Editing> {
+        self.editing.as_ref()
+    }
+
+    /// `shape`'s text layout, positioned from the text's top-left inside the padding. Cached
+    /// per shape; recomputed only when its text or width changed.
+    pub fn layout(&self, shape: &Shape) -> Rc<Layout> {
+        let mut cache = self.layouts.borrow_mut();
+        if let Some((text, width, l)) = cache.get(&shape.id)
+            && *text == shape.text
+            && *width == shape.width
+        {
+            return l.clone();
+        }
+        let width = (shape.width as f32 - 2.0 * self.theme.shape.pad_x).max(0.0);
+        let l = Rc::new(layout(&shape.text, width, self.theme, &*self.measure));
+        cache.insert(
+            shape.id.clone(),
+            (shape.text.clone(), shape.width, l.clone()),
+        );
+        l
+    }
+
+    /// Drawn height in canvas units: text, padding and extra height.
+    pub fn shape_height(&self, shape: &Shape) -> f32 {
+        self.layout(shape).height + 2.0 * self.theme.shape.pad_y + shape.extra_height as f32
+    }
+
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
     /// still fading out after a deselect.
     pub fn selection_rings(&self, now: Duration) -> Vec<(&ShapeId, f32)> {
@@ -230,7 +334,30 @@ impl Session {
     /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
     pub fn animating(&self, now: Duration) -> bool {
         let fade = self.theme.selection.fade;
-        self.rings.iter().any(|r| r.progress(now, fade) < 1.0) || self.zoom.running(self.theme, now)
+        self.rings.iter().any(|r| r.progress(now, fade) < 1.0)
+            || self.zoom.running(self.theme, now)
+            || self.blinking(now)
+    }
+
+    fn blinking(&self, now: Duration) -> bool {
+        (self.editing.as_ref()).is_some_and(|e| now.saturating_sub(e.since) < self.theme.caret.idle)
+    }
+
+    /// The caret to draw at `now`, while editing.
+    pub fn caret(&self, now: Duration) -> Option<CaretView> {
+        let e = self.editing.as_ref()?;
+        let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
+        let p = self.layout(shape).caret_point(e.caret);
+        let (t, since) = (self.theme, now.saturating_sub(e.since));
+        Some(CaretView {
+            pos: Point {
+                x: shape.x as f32 + t.shape.pad_x + p.x,
+                y: shape.y as f32 + t.shape.pad_y + p.y,
+            },
+            height: t.line_height(),
+            visible: !self.blinking(now)
+                || (since.as_millis() / t.caret.blink.as_millis()) % 2 == 0,
+        })
     }
 
     fn select(&mut self, id: Option<ShapeId>) {
@@ -301,7 +428,7 @@ impl Session {
             y: height,
         };
         if first && let Some(s) = self.doc.shapes.first() {
-            let (w, h) = (s.width as f32, s.height(self.theme));
+            let (w, h) = (s.width as f32, self.shape_height(s));
             self.viewport.origin = Point {
                 x: s.x as f32 - ((width - w) / 2.0).round(),
                 y: s.y as f32 - ((height - h) / 2.0).round(),
@@ -315,7 +442,27 @@ impl Session {
         self.now = now;
         match input {
             Input::PointerDown { pos, button, .. } => {
-                let gesture = match (button, self.shape_at(pos)) {
+                let hit = self.shape_at(pos);
+                if self.gesture.is_none()
+                    && let Some(e) = &self.editing
+                {
+                    // Panning is ignored while editing; a left press leaves editing unless it
+                    // lands in the edited text.
+                    if button != Button::Left {
+                        return self.respond(false);
+                    }
+                    if hit.is_some_and(|i| self.doc.shapes[i].id == e.id) {
+                        let caret = self.caret_at(pos);
+                        self.set_caret(caret);
+                        self.gesture = Some(Gesture::Text);
+                        return self.respond(true);
+                    }
+                    self.stop_editing();
+                    if hit.is_none() {
+                        return self.respond(true);
+                    }
+                }
+                let gesture = match (button, hit) {
                     _ if self.gesture.is_some() => None,
                     (Button::Left, Some(index)) if !self.space_held => Some(Gesture::Press {
                         index,
@@ -363,7 +510,15 @@ impl Session {
                     ));
                     self.respond(true)
                 }
-                _ => self.respond(false),
+                Some(Gesture::Text) => self.respond(false),
+                None => {
+                    let over = self.editing.as_ref().is_some_and(|e| {
+                        (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
+                    });
+                    let changed = over != self.over_text;
+                    self.over_text = over;
+                    self.respond(changed)
+                }
             },
             Input::PointerUp { button, .. } => {
                 match self.gesture {
@@ -375,18 +530,26 @@ impl Session {
                             self.select(None);
                         }
                     }
-                    Some(Gesture::Press { index, to, .. }) if button == Button::Left => {
+                    Some(Gesture::Press { index, to, from }) if button == Button::Left => {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
                             Some((x, y)) => self.move_shape(&id, x, y),
+                            // A click on the selected shape edits it, caret where clicked.
+                            None if self.selected.as_ref() == Some(&id) => {
+                                self.start_editing(id);
+                                let caret = self.caret_at(from);
+                                self.set_caret(caret);
+                            }
                             None => self.select(Some(id)),
                         }
                     }
+                    Some(Gesture::Text) if button == Button::Left => self.gesture = None,
                     _ => {}
                 }
                 self.respond(true)
             }
+            Input::KeyDown(Key::Space) if self.editing.is_some() => self.respond(false),
             Input::KeyDown(Key::Space) => {
                 let changed = !self.space_held;
                 self.space_held = true;
@@ -398,6 +561,7 @@ impl Session {
             }
             Input::Undo => {
                 self.history.undo(&mut self.doc);
+                self.stop_editing();
                 self.respond(true)
             }
             Input::Redo => {
@@ -421,6 +585,7 @@ impl Session {
                 (self.zoom).wheel(&mut self.viewport, self.theme, pos, delta.y, now);
                 self.respond(true)
             }
+            Input::Wheel { .. } if self.editing.is_some() => self.respond(false),
             Input::Wheel {
                 mut delta, mods, ..
             } => {
@@ -429,6 +594,53 @@ impl Session {
                     delta = Point { x: delta.y, y: 0.0 };
                 }
                 self.viewport.pan(delta);
+                self.respond(true)
+            }
+            Input::Text { text, replace } => {
+                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                let mut replace = replace;
+                if self.editing.is_none() {
+                    match self.selected.clone() {
+                        Some(id) if !text.trim().is_empty() => self.start_editing(id),
+                        _ => return self.respond(false),
+                    }
+                    // A range given before editing started indexes nothing: append.
+                    replace = None;
+                }
+                let range = replace.unwrap_or_else(|| self.text_selection());
+                self.replace(range, &text);
+                self.respond(true)
+            }
+            Input::StartEditing => match self.selected.clone() {
+                Some(id) if self.editing.is_none() => {
+                    self.start_editing(id);
+                    self.respond(true)
+                }
+                _ => self.respond(false),
+            },
+            Input::StopEditing => {
+                let was = self.editing.is_some();
+                self.stop_editing();
+                self.respond(was)
+            }
+            Input::Move(m) => {
+                let Some((caret, goal)) = self.motion(m) else {
+                    return self.respond(false);
+                };
+                self.set_caret(caret);
+                if let Some(e) = &mut self.editing {
+                    e.goal_x = goal;
+                }
+                self.respond(true)
+            }
+            Input::Delete(m) => {
+                let sel = self.text_selection();
+                let range = match self.motion(m) {
+                    _ if !sel.is_empty() => sel,
+                    Some((to, _)) => sel.start.min(to.offset)..sel.start.max(to.offset),
+                    None => return self.respond(false),
+                };
+                self.replace(range, "");
                 self.respond(true)
             }
         }
@@ -446,12 +658,109 @@ impl Session {
         self.zoom.pill(self.theme, now)
     }
 
+    /// Opens an editing session on `id` with the caret at the end of its text.
+    fn start_editing(&mut self, id: ShapeId) {
+        let Some(shape) = self.doc.shapes.iter().find(|s| s.id == id) else {
+            return;
+        };
+        let end = shape.text.plain().len();
+        self.history.begin();
+        self.editing = Some(Editing {
+            id,
+            caret: Caret {
+                offset: end,
+                upstream: false,
+            },
+            anchor: end,
+            goal_x: None,
+            since: self.now,
+        });
+    }
+
+    /// Ends the editing session, if any: its changes become one undo step.
+    fn stop_editing(&mut self) {
+        if self.editing.take().is_some() {
+            self.history.end(&self.doc);
+            self.over_text = false;
+        }
+    }
+
+    /// The edited shape and its plain text.
+    fn edited(&self) -> Option<(&Shape, String)> {
+        let e = self.editing.as_ref()?;
+        let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
+        Some((shape, shape.text.plain()))
+    }
+
+    /// The caret nearest screen point `p` in the edited shape.
+    fn caret_at(&self, p: Point) -> Caret {
+        let Some((shape, _)) = self.edited() else {
+            return Caret::default();
+        };
+        let (c, pad) = (self.viewport.to_canvas(p), &self.theme.shape);
+        self.layout(shape).caret_at(Point {
+            x: c.x - shape.x as f32 - pad.pad_x,
+            y: c.y - shape.y as f32 - pad.pad_y,
+        })
+    }
+
+    /// Puts the caret at `c` with nothing selected, and restarts the blink.
+    fn set_caret(&mut self, c: Caret) {
+        if let Some(e) = &mut self.editing {
+            (e.caret, e.anchor, e.goal_x, e.since) = (c, c.offset, None, self.now);
+        }
+    }
+
+    fn text_selection(&self) -> Range<usize> {
+        self.editing.as_ref().map_or(0..0, |e| {
+            e.anchor.min(e.caret.offset)..e.anchor.max(e.caret.offset)
+        })
+    }
+
+    /// Where motion `m` takes the caret, and the column up/down keep.
+    fn motion(&self, m: Motion) -> Option<(Caret, Option<f32>)> {
+        let e = self.editing.as_ref()?;
+        let (shape, s) = self.edited()?;
+        let (i, sel) = (e.caret.offset, self.text_selection());
+        let at = |offset| Caret {
+            offset,
+            upstream: false,
+        };
+        let l = self.layout(shape);
+        let c = match m {
+            Motion::Left if !sel.is_empty() => at(sel.start),
+            Motion::Right if !sel.is_empty() => at(sel.end),
+            Motion::Left => at(prev_cluster(&s, i)),
+            Motion::Right => at(next_cluster(&s, i)),
+            Motion::WordLeft => at(word_left(&s, i)),
+            Motion::WordRight => at(word_right(&s, i)),
+            Motion::Up | Motion::Down => {
+                let goal = e.goal_x.unwrap_or_else(|| l.caret_point(e.caret).x);
+                return Some((l.vertical(e.caret, goal, m == Motion::Down), Some(goal)));
+            }
+            Motion::LineStart => l.line_bounds(e.caret).0,
+            Motion::LineEnd => l.line_bounds(e.caret).1,
+        };
+        Some((c, None))
+    }
+
+    /// Replaces `range` of the edited text with `text`; the caret lands after it.
+    fn replace(&mut self, range: Range<usize>, text: &str) {
+        let Some(e) = &self.editing else { return };
+        let (id, mut end) = (e.id.clone(), range.start);
+        (self.history).change(&mut self.doc, &id, |s| end = s.text.replace(range, text));
+        self.set_caret(Caret {
+            offset: end,
+            upstream: false,
+        });
+    }
+
     /// Index of the topmost shape under screen point `p`.
     fn shape_at(&self, p: Point) -> Option<usize> {
         let c = self.viewport.to_canvas(p);
         self.doc.shapes.iter().rposition(|s| {
             let (x, y) = (s.x as f32, s.y as f32);
-            (x..=x + s.width as f32).contains(&c.x) && (y..=y + s.height(self.theme)).contains(&c.y)
+            (x..=x + s.width as f32).contains(&c.x) && (y..=y + self.shape_height(s)).contains(&c.y)
         })
     }
 
@@ -461,6 +770,8 @@ impl Session {
             cursor: match self.gesture {
                 Some(Gesture::Pan { .. }) => Cursor::Grabbing,
                 _ if self.space_held => Cursor::Grab,
+                Some(Gesture::Text) => Cursor::Text,
+                _ if self.over_text => Cursor::Text,
                 _ => Cursor::Arrow,
             },
             animating: self.animating(self.now),

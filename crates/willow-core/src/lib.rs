@@ -1,14 +1,20 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
+mod edit;
 mod history;
+mod layout;
 mod session;
 mod theme;
 mod zoom;
 
-pub use session::{Button, Cursor, Input, Key, Modifiers, Point, Response, Session, Viewport};
+pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
+pub use session::{
+    Button, CaretView, Cursor, Editing, Input, Key, Modifiers, Motion, Point, Response, Session,
+    Viewport,
+};
 pub use theme::{
-    CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme, Transition,
-    ZoomPillStyle, ZoomStyle,
+    CaretStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme,
+    Transition, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
@@ -85,12 +91,6 @@ impl Shape {
             extra_height: 0,
             color: Color::Neutral,
         }
-    }
-
-    /// Drawn height in canvas units.
-    // ponytail: one line of text until the core's text layout lands; then text height comes from layout.
-    pub fn height(&self, theme: &Theme) -> f32 {
-        theme.line_height() + 2.0 * theme.shape.pad_y + self.extra_height as f32
     }
 }
 

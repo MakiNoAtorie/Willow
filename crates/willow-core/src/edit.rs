@@ -1,0 +1,111 @@
+//! Text editing on rich text, addressed by UTF-8 byte offsets into the plain text
+//! (paragraphs joined by `\n`), and the cluster and word boundaries caret motion uses.
+
+use std::ops::Range;
+
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::{Paragraph, RichText, Run};
+
+/// (bold, italic).
+type Style = (bool, bool);
+
+impl RichText {
+    /// The text with paragraphs joined by `\n`: what every offset indexes.
+    pub fn plain(&self) -> String {
+        let paras: Vec<String> = (self.paragraphs.iter())
+            .map(|p| p.runs.iter().map(|r| r.text.as_str()).collect())
+            .collect();
+        paras.join("\n")
+    }
+
+    /// Replaces byte range `r` with `text` (`\n` splits a paragraph); inserted text takes the
+    /// style of the text before it. Returns the offset after the inserted text. A range off
+    /// the text or off a char boundary changes nothing.
+    pub(crate) fn replace(&mut self, r: Range<usize>, text: &str) -> usize {
+        // ponytail: rebuilds the whole text per edit (O(len)); fine for shape-sized text.
+        let (mut s, mut styles) = self.flatten();
+        if r.start > r.end || !s.is_char_boundary(r.start) || !s.is_char_boundary(r.end) {
+            return r.start.min(s.len());
+        }
+        let style = (r.start.checked_sub(1))
+            .filter(|&i| s.as_bytes()[i] != b'\n')
+            .or((r.end < s.len()).then_some(r.end))
+            .map_or_else(Default::default, |i| styles[i]);
+        s.replace_range(r.clone(), text);
+        styles.splice(r.clone(), std::iter::repeat_n(style, text.len()));
+        *self = build(&s, &styles);
+        r.start + text.len()
+    }
+
+    /// Plain text and one style per byte (`\n` gets a default style).
+    fn flatten(&self) -> (String, Vec<Style>) {
+        let mut styles = Vec::new();
+        for (i, p) in self.paragraphs.iter().enumerate() {
+            if i > 0 {
+                styles.push(Style::default());
+            }
+            for r in &p.runs {
+                styles.extend(std::iter::repeat_n((r.bold, r.italic), r.text.len()));
+            }
+        }
+        (self.plain(), styles)
+    }
+}
+
+/// Rich text from plain text and per-byte styles: same-style bytes merged into runs, no
+/// empty runs, and no paragraphs at all for empty text.
+fn build(s: &str, styles: &[Style]) -> RichText {
+    if s.is_empty() {
+        return RichText::default();
+    }
+    let mut start = 0;
+    let paragraphs = s
+        .split('\n')
+        .map(|p| {
+            let mut runs: Vec<Run> = Vec::new();
+            for (i, ch) in p.char_indices() {
+                let (bold, italic) = styles[start + i];
+                match runs.last_mut() {
+                    Some(r) if (r.bold, r.italic) == (bold, italic) => r.text.push(ch),
+                    _ => runs.push(Run {
+                        text: ch.into(),
+                        bold,
+                        italic,
+                    }),
+                }
+            }
+            start += p.len() + 1;
+            Paragraph { runs }
+        })
+        .collect();
+    RichText { paragraphs }
+}
+
+/// The cluster boundary before `i` (0 at the start).
+pub(crate) fn prev_cluster(s: &str, i: usize) -> usize {
+    s[..i].grapheme_indices(true).next_back().map_or(0, |g| g.0)
+}
+
+/// The cluster boundary after `i` (the end at the end).
+pub(crate) fn next_cluster(s: &str, i: usize) -> usize {
+    s[i..].graphemes(true).next().map_or(i, |g| i + g.len())
+}
+
+fn is_word(w: &str) -> bool {
+    w.chars().any(char::is_alphanumeric)
+}
+
+/// The start of the word before `i`.
+pub(crate) fn word_left(s: &str, i: usize) -> usize {
+    (s[..i].split_word_bound_indices().rev())
+        .find(|w| is_word(w.1))
+        .map_or(0, |w| w.0)
+}
+
+/// The end of the word after `i`.
+pub(crate) fn word_right(s: &str, i: usize) -> usize {
+    (s[i..].split_word_bound_indices())
+        .find(|w| is_word(w.1))
+        .map_or(s.len(), |w| i + w.0 + w.1.len())
+}

@@ -43,11 +43,13 @@ impl History {
         self.open.get_or_insert_default();
     }
 
-    pub fn end(&mut self) {
-        if let Some(step) = self.open.take()
-            && !step.is_empty()
-        {
-            self.undo.push(step);
+    /// Closes the group. Shapes it left as they were drop out; an empty group adds no step.
+    pub fn end(&mut self, doc: &Document) {
+        if let Some(mut step) = self.open.take() {
+            step.retain(|snap| !doc.shapes.contains(snap));
+            if !step.is_empty() {
+                self.undo.push(step);
+            }
         }
     }
 
@@ -77,7 +79,7 @@ impl History {
         stacks: impl Fn(&mut Self) -> (&mut Vec<Step>, &mut Vec<Step>),
     ) {
         let was_open = self.open.is_some();
-        self.end();
+        self.end(doc);
         let (from, to) = stacks(self);
         if let Some(mut step) = from.pop() {
             for snap in &mut step {
@@ -119,7 +121,7 @@ mod tests {
         assert_eq!(x(&doc), 9);
 
         h.change(&mut doc, &a, |s| s.width = 300);
-        h.end();
+        h.end(&doc);
         h.undo(&mut doc);
         assert_eq!((x(&doc), doc.shapes[0].width), (9, 210));
         h.undo(&mut doc);

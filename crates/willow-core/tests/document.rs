@@ -1,3 +1,5 @@
+mod common;
+
 use willow_core::{Color, Document, Shape, ShapeId};
 
 #[test]
@@ -34,9 +36,10 @@ fn generated_ids_are_short_lowercase_letters_that_skip_ids_in_use() {
 
 #[test]
 fn an_empty_shape_is_one_paper_line_plus_padding_tall() {
+    let session = common::session_of(Document::new());
     let mut s = Document::new().shapes.remove(0);
     // Literata 15 px at 1.5 = 22.5, plus 13 top and bottom.
-    assert_eq!(s.height(&willow_core::PAPER), 48.5);
+    assert_eq!(session.shape_height(&s), 48.5);
     s.extra_height = 20;
-    assert_eq!(s.height(&willow_core::PAPER), 68.5);
+    assert_eq!(session.shape_height(&s), 68.5);
 }
