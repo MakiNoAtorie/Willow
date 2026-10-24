@@ -14,6 +14,10 @@ _Avoid_: Project, board
 The infinite, pannable and zoomable surface a document is drawn on.
 _Avoid_: Board, workspace
 
+**Recovery file**:
+The autosaved copy of a document with unsaved changes, kept only for crash recovery; never a save.
+_Avoid_: Backup, autosave file
+
 ### Shapes and chains
 
 **Shape**:
@@ -39,6 +43,14 @@ _Avoid_: Port, anchor
 **Neutral**:
 The light gray that new unlinked chains and new zones start with; one of the seven palette colors.
 _Avoid_: Default color, gray, none
+
+**Story order**:
+The order of the saved text: blocks by topmost shape, each chain walked depth-first from its topmost shape (ADR 0002).
+_Avoid_: File order, creation order
+
+**Creation gap**:
+The theme's edge-to-edge distance between a shape and a new or auto-placed shape linked to it.
+_Avoid_: Spacing, margin
 
 **Directional picker**:
 The overlay Tab shows over a shape, from which an arrow key creates a linked shape on that side.

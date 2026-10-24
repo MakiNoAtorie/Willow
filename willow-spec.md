@@ -46,7 +46,7 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 ## Core model
 
 - **Shape**: rounded rectangle with rich text (plain, bold, italic), a position, a width and an optional extra height. Positions and sizes are whole canvas units; mouse drags at any zoom round to the nearest unit.
-- **Link**: connects two shapes. Which side of each shape the connector leaves from (top, bottom, left, right) is **derived from the shapes' relative positions at draw time**, never stored. So a link's direction follows the shapes when they move, and "the shape below b" always means the one that is actually below.
+- **Link**: connects two shapes. Which side of each shape the connector leaves from (top, bottom, left, right) is **derived from the shapes' relative positions at draw time**, never stored: compare the two shapes' centers; if |dy| ≥ |dx| the link is vertical (above/below), otherwise horizontal, so an exact diagonal is vertical. So a link's direction follows the shapes when they move, and "the shape below b" always means the one that is actually below. Drawing, the saved text and story order all use this one rule.
 - **Chain**: the set of shapes reachable through links. A chain is a tree: a shape may have any number of links, but a link that would close a cycle is refused. An unlinked shape is a chain of one. **Color belongs to the chain**, not the shape; every shape in a chain shows the chain's color. When a chain splits (a removed link or a deleted shape), every resulting chain keeps the original color.
 - **Zone**: a titled, colored container holding shapes. Membership is **explicit** (stored in the file), not geometric: a shape is in a zone because it was put there, and it stays a member even if it is later moved, grown or resized outside the zone's rectangle. Zones can nest one level deep. A chain may span zones.
 - One canvas per file.
@@ -132,46 +132,92 @@ Goal: documents save and reload, using a human-readable text format that will al
 
 The chain, link and zone decisions in the core model are settled before this phase starts; the format encodes them and should not need to change in Phase 4 or 6.
 
-- The text format is the save file and covers the full core model (shapes, links, chains, colors, zones), even for features whose UI arrives later. It describes shapes with stable IDs, their text, links and colors, with positions kept in a separate layout section so the story content stays readable. Rough shape of the idea (illustrative, not prescriptive):
+### Model and drawing
+
+- The core model gains links, chain color and zones now, even though the UI that creates them arrives in Phases 4 and 6. Color stays on each shape, with the invariant that every shape in a chain has the same color: a split keeps colors for free, a join repaints the adopted chain. Commands enforce the invariant and tests check it.
+- The canvas draws connectors and zones read-only, exactly as the Phase 1 visual language defines them, so a file holding links and zones shows them. Nothing new is editable yet.
+- Drawing order ("later on top") is not saved; after a load, shapes stack in story order. It only matters where shapes overlap, which they may until Phase 8.
+
+### Format
+
+- The text format is the save file and covers the full core model (shapes, links, chains, colors, zones). It describes shapes with stable IDs, their text, links and colors, with positions kept in a separate layout section so the story content stays readable:
 
   ```
   willow 1
 
-  zone arc1 "Arc 1" color blue {
-    a: "The city closes its gates"
+  zone d "Arc 1" color sky {
+    a: "The city closes its gates" color sage
     b: "Food prices **spike**" below a
     c: "Protagonist smuggles grain" right of b
   }
 
-  @layout a 0,0 w240
-  @layout b 0,140 w240
-  @layout c 320,140 w240 h60
-  @layout arc1 -40,-40 400x300
+  @layout a 0,0 w210
+  @layout b 0,140 w210
+  @layout c 290,140 w210 h60
+  @layout d -40,-40 580x300
   ```
 
-- The first line is a format version, so files can be migrated later.
-- `below a` is a link. The direction word is simply the derived side at save time; positions in `@layout` are what actually place shapes. A linked shape with no layout entry is auto-placed in the stated direction.
-- Chain color is written once per chain, on the chain's first shape in story order, and omitted when it is the neutral; the loader applies it to the whole chain. Colors are written by fixed lowercase names chosen in Phase 1; names never change even if a shade is retuned.
-- The layout section holds position, width and extra height for shapes, and position and size for zones.
-- IDs are auto-generated when shapes are created on the canvas: short, readable, lowercase letters, skipping any ID already in use. They never change once assigned.
-- Bold/italic is represented inline in the text (`**bold**`, `*italic*`, nesting allowed). Text stays on one line: `"` `*` and `\` are escaped with a backslash, and a line break inside a shape is written `\n`.
-- Saving writes canonical text. Loading a canonical file and saving it reproduces it byte for byte. Canonical rules:
-  - **Story order** (ADR 0002): zone blocks and loose chains are ordered by their topmost shape (ties by x, then ID). Each chain is walked depth-first from its topmost shape, visiting neighbors by side in the order below, right, left, above. A chain spanning zones is split across those zone blocks. A nested zone's block sits inside its parent's block; within a block, shapes and nested zones interleave by their topmost shape.
-  - Each link is written once, by the shape the walk reaches second, pointing back to the shape it was reached from. The first shape of a chain writes no link, so an ID is always defined before it is referenced.
-  - One `@layout` line per shape or zone, in story order, all shapes before all zones. Width is always written; extra height `h` only when non-zero.
-  - Single spaces between tokens, no column alignment, 2-space indent inside zone blocks, one blank line between top-level blocks and before the layout section, and a trailing newline.
-- Unknown lines are ignored on load and dropped on save. Until Phase 7, loading a file with lines it cannot read marks the document unsaved, so dropping them on save is a visible choice.
-- Ctrl/Cmd+N new document, Ctrl/Cmd+O open, Ctrl/Cmd+S save. These also appear in the File menu.
-- Closing a window, or opening into it, with unsaved changes asks Save / Don't save / Cancel. This is the one dialog the app has.
-- Autosave is crash recovery, not saving: every document with unsaved changes is periodically written to a recovery folder, named or not. The saved/unsaved dot reflects manual saves only. On launch, each document with a newer recovery file opens with the recovered content, marked unsaved; Save keeps it, and closing with Don't save discards the recovery and leaves the file on disk as it was. No extra dialog. The first manual save of an untitled document asks where to put it.
-- If the file changes on disk while open (someone edited it in another editor) and the document has no unsaved changes, it reloads silently, and the reload is one undoable step so the writer's version can be brought back. If it does have unsaved changes, the app keeps its version and the dot shows unsaved.
-- The title bar's saved/unsaved dot reflects the document state.
+- Files are `.willow`, UTF-8 without BOM, LF line endings on both platforms. Loading accepts CRLF without marking the document unsaved.
+- The first line is the format version, `willow 1`, so files can be migrated later.
+- A shape line is `id: "text"`, then an optional link (`below a`, `above a`, `right of a`, `left of a`), then an optional `color name`, in that order. A zone opens with `zone id "Title" color name {` (`color` omitted when the zone is the neutral) and closes with `}` on its own line; an empty zone is those two lines. Zone titles are plain text with the same escapes as shape text.
+- `below a` is a link. The direction word is the derived side at save time (core model); positions in `@layout` are what actually place shapes.
+- Links are resolved after the whole file is parsed, so a link may point to a shape written later in the file (a chain split across zone blocks can put a child's block before its parent's).
+- Chain color is written once per chain, on the chain's first shape in story order, and omitted when it is the neutral; the loader applies it to the whole chain. Colors are written by the fixed lowercase names from Phase 1 (`neutral`, `rose`, `peach`, `butter`, `sage`, `sky`, `lilac`); names never change even if a shade is retuned.
+- The layout section holds position, width and extra height for shapes (`@layout a x,y wW [hH]`), and position and size for zones (`@layout d x,y WxH`).
+- IDs are auto-generated when shapes and zones are created: shapes and zones share one namespace and one generator (a, b, …, z, aa, ab, …), taking the first ID not in use. A deleted shape's ID may be reused by a later one. IDs never change once assigned.
+- Bold/italic is represented inline in the text (`**bold**`, `*italic*`, `***both***`). Text stays on one line: `"` `*` and `\` are always escaped with a backslash, and a line break inside a shape is written `\n`.
+
+### Canonical text
+
+Saving writes canonical text. Loading a canonical file and saving it reproduces it byte for byte.
+
+- **Story order** (ADR 0002): zone blocks and loose chains are ordered by their topmost shape (ties by x, then ID). Each chain is walked depth-first from its topmost shape, visiting neighbors by side in the order below, right, left, above. A chain spanning zones is split across those zone blocks. A nested zone's block sits inside its parent's block. Within a block, the ordered units are nested zones and, per chain, that chain's members in this block, kept together in walk order; units are ordered by their topmost shape. A chain that dips into a nested zone and comes back out is still one unit in the parent block.
+- Each link is written once, by the shape the walk reaches second, pointing back to the shape it was reached from. The first shape of a chain writes no link.
+- Rich text: adjacent runs with the same style are merged, a bold-and-italic run is written `***x***`, and style markers close before each `\n` and reopen after it.
+- One `@layout` line per shape or zone, in story order, all shapes before all zones. Width is always written; extra height `h` only when non-zero.
+- Single spaces between tokens, no column alignment, 2-space indent inside zone blocks, one blank line between top-level blocks and before the layout section, and a trailing newline.
+
+### Loading imperfect files
+
+- Unknown lines are ignored on load and dropped on save.
+- Until Phase 7, the loader repairs what it can and keeps going: a duplicate ID drops the later line; a link that would close a cycle is dropped; a reference to a missing ID drops the link but keeps the shape; a zone nested deeper than one level is flattened into its parent; conflicting colors within one chain resolve to the first in story order.
+- Missing layout is filled in. A linked shape is placed one **creation gap** away in the stated direction; an unlinked shape is placed below the lowest shape on the canvas. A missing width is the default width. A zone without layout wraps its members with padding. The creation gap is a theme size, measured edge to edge in both directions; Paper's is 48 units, and Phase 4's midpoint creation uses the same value.
+- Any repair, dropped line or filled-in layout marks the document unsaved, so the rewrite on save is a visible choice.
+- A file without a `willow 1` header, from a newer version, or not valid UTF-8 does not open: a native alert names the reason ("not a Willow file", "made by a newer Willow").
+
+### Files and windows
+
+- Ctrl/Cmd+N new document, Ctrl/Cmd+O open, Ctrl/Cmd+S save, Ctrl/Cmd+Shift+S save as. These also appear in the File menu.
+- Open always uses a new window, except that it reuses a blank, untouched untitled window. Opening a file that is already open focuses its window.
+- Closing a window with unsaved changes asks Save / Don't save / Cancel; this is the only confirm dialog the app has. Quitting (Cmd+Q, or closing the last window on Windows) asks it for each unsaved document in turn; Cancel stops the quit.
+- The first manual save of an untitled document asks where to put it.
+- Saving writes a temporary file beside the target and renames it over the target, so a crash mid-save never leaves a half-written file. If a save fails (no permission, disk full, folder gone), a native alert names the reason; the document stays unsaved and its recovery file is kept.
+- Saving overwrites the file on disk without warning, even if it changed there since it was opened.
+- The title bar's saved/unsaved dot reflects manual saves only.
+
+### Crash recovery
+
+- Autosave is crash recovery, not saving: every document with unsaved changes, named or not, is written to a recovery file 5 s after the last change and every 30 s while changes keep coming.
+- Recovery files live in the OS app data folder (`~/Library/Application Support/Willow/Recovery`, `%APPDATA%\Willow\Recovery`): `<random>.willow` plus a `<random>.path` sidecar holding the document's path (empty for an untitled one). A manual save or Don't save deletes them.
+- On launch, each recovery file newer than its document opens with the recovered content, marked unsaved; an untitled one opens as untitled. Save keeps it; closing with Don't save discards the recovery and leaves the file on disk as it was. No extra dialog. A recovery file older than its document is deleted silently. One whose path no longer exists opens as an untitled document with that content.
+- Launch reopens only recovered documents; there is no session restore. With nothing to recover, launch opens one new document.
+
+### Changes on disk
+
+- When a window gains focus, the app checks its file's modified time and content, ignoring the bytes it last wrote itself.
+- If the file changed and the document has no unsaved changes, it reloads silently, and the reload is one undoable step so the writer's version can be brought back. If it does have unsaved changes, the app keeps its version and the dot shows unsaved.
+- If the file was deleted or renamed, the document stays open and is marked unsaved; the next Save writes it again.
+
+### Tests and performance
+
+- A generator-based round-trip test: `generate(n, seed)`, extended to produce links, colors and zones, is saved, loaded and saved again across many seeds, and both saves are byte-identical. Golden files cover escaping and each repair above.
+- On the MacBook Air with the generated 10,000-shape document: save (serialize and write) ≤ 50 ms, load (read, parse, repair, auto-place) ≤ 100 ms, both recorded in bench mode's CSV. Autosave runs off the UI thread, or is measured to stay well under one frame.
 
 ## Phase 4 — Chains and editing
 
 Goal: build and reshape chains with the mouse.
 
-- Hovering a shape's border shows small circles at the edge midpoints. Clicking one creates a new linked shape in that direction and enters editing in it.
+- Hovering a shape's border shows small circles at the edge midpoints. Clicking one creates a new linked shape in that direction, one creation gap away, and enters editing in it.
 - If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves here; from Phase 8 the spacing pass keeps unrelated shapes clear (before it they may end up overlapped). Zone membership is unchanged by the insert itself. If several shapes link on that side, only the one nearest the midpoint counts as the next shape, and only its subtree is pushed.
 - If the spot is taken by an unrelated shape (another chain, or a shape not linked on that side), the new shape is created at the normal spot. Before Phase 8 it overlaps; from Phase 8 the spacing pass pushes the other chain clear.
 - Link two existing shapes by dragging from a midpoint onto another shape. A link that would close a cycle is refused. When this joins two chains, the chain the drag started from keeps its color and the other chain adopts it.
@@ -219,9 +265,9 @@ Goal: edit the diagram as text, live, alongside the canvas.
 - Canvas and text are two views of the same document. Canvas edits rewrite the text; text edits update the canvas after a short pause. The canvas never rewrites the text while the panel has focus, so the caret never jumps under the writer's hands.
 - A text edit, once applied after the pause, is one step in the document's single undo history. Ctrl/Cmd+Z in the panel undoes that step and regenerates the text; there is no separate character-level undo.
 - The parser is forgiving: an unclosed quote runs to the end of its line, and unknown lines are ignored.
-- When the text is invalid (e.g. a reference to an ID that doesn't exist yet, a duplicate ID, an unclosed zone), the canvas quietly holds its last valid state and the offending line gets a subtle underline. No popups.
+- When the text is invalid (e.g. a reference to an ID that doesn't exist anywhere in the text, a duplicate ID, an unclosed zone), the canvas quietly holds its last valid state and the offending line gets a subtle underline. No popups.
 - The file is the text. Saving with invalid text writes the text as typed, never the last valid model, so nothing the writer typed is lost. Loading an invalid file shows whatever parses, opens the panel and underlines the rest. Invalid lines survive only until the next canvas edit, which regenerates canonical text without them; that edit is undoable, so Ctrl/Cmd+Z brings the lines back.
-- Shapes added in text without a position are auto-placed next to the shape they link to. An unlinked shape without a position is placed below the lowest shape on the canvas. If the auto-placed spot is taken, the shape overlaps it until Phase 8, where the spacing pass pushes the neighbors clear.
+- Shapes added in text without a position are auto-placed as the Phase 3 loader does: one creation gap from the shape they link to, or below the lowest shape when unlinked. If the auto-placed spot is taken, the shape overlaps it until Phase 8, where the spacing pass pushes the neighbors clear.
 - IDs stay stable across edits so links never scramble. Changing an ID token in the text is not a rename: it is a new shape, and the old references become invalid lines.
 
 ## Phase 8 — Polish pass
@@ -249,3 +295,4 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 - Dark theme.
 - Comments in the file format (lines the writer adds that survive a save).
 - Renaming IDs from the code panel.
+- File associations (opening a `.willow` file from Finder or Explorer), recent files, session restore.
