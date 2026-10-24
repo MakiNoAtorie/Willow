@@ -245,7 +245,7 @@ fn moved_positions_are_whole_canvas_units_at_any_zoom() {
             zoom,
             ..s.viewport()
         });
-        let on = s.viewport().to_screen(pt(100.0, 20.0));
+        let on = s.viewport().to_screen(pt(60.0, 24.0));
 
         drag(&mut s, Button::Left, on, pt(on.x + 10.0, on.y + 7.0));
 

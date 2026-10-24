@@ -26,6 +26,18 @@ pub struct Frame<'a> {
     /// Shape shadows and the dot grid are drawn (dropped below `fade_end`).
     pub shadows: bool,
     pub grid: bool,
+    /// The hovered shape's edge midpoints, canvas units; paint them over every shape at the
+    /// theme's `midpoint` size, constant on screen.
+    pub midpoints: Vec<Point>,
+}
+
+/// A shape fading in after its creation: paint it at `opacity`, `dy` canvas units off its
+/// place and scaled by `scale` around its center.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Appear {
+    pub opacity: f32,
+    pub dy: f32,
+    pub scale: f32,
 }
 
 /// A link's straight line, between the midpoints of the sides its shapes face each other with.
@@ -68,6 +80,8 @@ pub struct Visible<'a> {
     pub selection: Vec<(Point, Point)>,
     pub marked: Option<Range<usize>>,
     pub caret: Option<CaretView>,
+    /// Set while the shape's create animation runs.
+    pub appear: Option<Appear>,
 }
 
 impl Session {
@@ -94,6 +108,7 @@ impl Session {
             };
             (s, x, y)
         };
+        let creating = self.creating(now);
         let mut connectors = Vec::new();
         for &(p, q) in self.link_ends().iter() {
             let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
@@ -115,10 +130,20 @@ impl Session {
             };
             let (pc, qc) = (center(px, py, p.width, ph), center(qx, qy, q.width, qh));
             let (from_side, to_side) = (side(pc, qc), side(qc, pc));
+            let (mut from, mut to) = (
+                midpoint(pc, p.width, ph, from_side),
+                midpoint(qc, q.width, qh, to_side),
+            );
+            // A new shape's connector draws out from the other end.
+            match creating {
+                Some((id, k)) if *id == q.id => to = lerp(from, to, k),
+                Some((id, k)) if *id == p.id => from = lerp(to, from, k),
+                _ => {}
+            }
             connectors.push(Connector {
-                from: midpoint(pc, p.width, ph, from_side),
+                from,
                 from_side,
-                to: midpoint(qc, q.width, qh, to_side),
+                to,
                 to_side,
             });
         }
@@ -168,6 +193,11 @@ impl Session {
                 }
                 let ring = self.ring(&s.id, now);
                 let e = edited.filter(|e| e.id == s.id);
+                let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
+                    opacity: k,
+                    dy: t.create.rise * (1.0 - k),
+                    scale: t.create.scale + (1.0 - t.create.scale) * k,
+                });
                 Some(Visible {
                     fill: fills[s.color as usize],
                     layout: self.layout(&s),
@@ -179,6 +209,7 @@ impl Session {
                     selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
                     marked: e.and_then(|e| e.marked.clone()),
                     caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
+                    appear,
                 })
             })
             .collect();
@@ -192,6 +223,7 @@ impl Session {
             deepen,
             shadows: full,
             grid: full,
+            midpoints: self.midpoints(),
         }
     }
 }
@@ -207,6 +239,14 @@ fn midpoint(c: Point, w: u32, h: f32, side: Side) -> Point {
     Point {
         x: c.x + dx,
         y: c.y + dy,
+    }
+}
+
+/// `a` moved `k` (0 to 1) of the way toward `b`.
+fn lerp(a: Point, b: Point, k: f32) -> Point {
+    Point {
+        x: a.x + (b.x - a.x) * k,
+        y: a.y + (b.y - a.y) * k,
     }
 }
 

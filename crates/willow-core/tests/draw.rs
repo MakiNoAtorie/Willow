@@ -111,8 +111,8 @@ fn a_shape_being_resized_draws_at_its_previewed_size() {
         Modifiers::default(),
         std::time::Duration::ZERO,
     );
-    // The centered new shape's right edge is at screen x 605; drag it 20 px right.
-    let (from, to) = (pt(605.0, 400.0), pt(625.0, 400.0));
+    // The centered new shape's right edge is at screen x 605; drag it 20 px right, clear of its midpoint.
+    let (from, to) = (pt(605.0, 385.0), pt(625.0, 385.0));
     let button = Button::Left;
     s.handle(
         Input::PointerDown {

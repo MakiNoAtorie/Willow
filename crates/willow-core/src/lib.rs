@@ -14,7 +14,7 @@ mod theme;
 mod zoom;
 
 pub use chain::{Link, Side, side};
-pub use draw::{Connector, Frame, Visible, VisibleZone};
+pub use draw::{Appear, Connector, Frame, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
@@ -28,6 +28,7 @@ pub use theme::{
     CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle,
     Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
+pub use theme::{CreateStyle, MidpointStyle};
 pub use zoom::ZoomPill;
 
 /// Width of every new shape, in canvas units. Shared by every theme.
@@ -57,10 +58,12 @@ impl Document {
 
     /// The first ID no shape or zone uses, in the order a, b, …, z, aa, ab, …
     pub fn next_id(&self) -> ShapeId {
-        let ids = || (self.shapes.iter().map(|s| &s.id)).chain(self.zones.iter().map(|z| &z.id));
+        let ids: std::collections::HashSet<&str> = (self.shapes.iter().map(|s| s.id.0.as_str()))
+            .chain(self.zones.iter().map(|z| z.id.0.as_str()))
+            .collect();
         (0..)
             .map(id_for)
-            .find(|id| ids().all(|i| i.0 != *id))
+            .find(|id| !ids.contains(id.as_str()))
             .map(ShapeId)
             .expect("unbounded")
     }

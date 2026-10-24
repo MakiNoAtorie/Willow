@@ -569,9 +569,18 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
     }
 
-    let radius = px(t.shape.radius * z);
     let sel = &t.selection;
     for v in &frame.shapes {
+        // A shape being created paints faded (`k`), offset and scaled around its center.
+        let (origin, z, k) = match v.appear {
+            Some(a) => {
+                let c = (v.x as f32 + v.shape.width as f32 / 2.0) * (1.0 - a.scale);
+                let d = (v.y as f32 + v.height / 2.0) * (1.0 - a.scale) + a.dy;
+                (origin + point(px(c * z), px(d * z)), z * a.scale, a.opacity)
+            }
+            None => (origin, z, 1.0),
+        };
+        let radius = px(t.shape.radius * z);
         let shape = &*v.shape;
         let b = Bounds::new(
             origin + point(px(v.x as f32 * z), px(v.y as f32 * z)),
@@ -579,7 +588,10 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         );
         let ring = v.ring;
         if frame.shadows {
-            let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
+            let mut shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
+            shadows
+                .iter_mut()
+                .for_each(|s| s.color = s.color.opacity(k));
             window.paint_drop_shadows(b, Corners::all(radius), &shadows);
         }
         if ring > 0.0 {
@@ -589,16 +601,16 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             window.paint_quad(quad(
                 ring_bounds,
                 radius + px(out),
-                color(t.canvas),
+                color(t.canvas).opacity(k),
                 px(sel.ring * ring * z),
-                color(sel.color),
+                color(sel.color).opacity(k),
                 Default::default(),
             ));
         }
         window.paint_quad(quad(
             b,
             radius,
-            color(v.fill),
+            color(v.fill).opacity(k),
             px(0.),
             gpui::transparent_black(),
             Default::default(),
@@ -611,7 +623,15 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
         if frame.text_opacity > 0.0 {
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
-            text::paint_text(window, o, &shape.text, &v.layout, t, z, frame.text_opacity);
+            text::paint_text(
+                window,
+                o,
+                &shape.text,
+                &v.layout,
+                t,
+                z,
+                frame.text_opacity * k,
+            );
             if let Some(m) = v.marked.clone() {
                 text::paint_marked(window, o, &v.layout, m, t, z);
             }
@@ -620,8 +640,33 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             // The caret's width is screen pixels at any zoom.
             let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
             let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-            window.paint_quad(gpui::fill(b, color(t.caret.color)));
+            window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
         }
+    }
+
+    // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
+    let m = &t.midpoint;
+    let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
+    let shadow = [BoxShadow {
+        color: color(sh.color),
+        offset: point(px(sh.x), px(sh.y)),
+        blur_radius: px(sh.blur / 2.0),
+        spread_radius: px(sh.spread),
+        inset: false,
+    }];
+    for &p in &frame.midpoints {
+        let b = Bounds::new(at(p) - point(px(d / 2.0), px(d / 2.0)), size(px(d), px(d)));
+        window.paint_drop_shadows(b, Corners::all(px(d / 2.0)), &shadow);
+        let (fill, stroke) = (color(m.fill), color(m.stroke));
+        let r = px(d / 2.0);
+        window.paint_quad(quad(
+            b,
+            r,
+            fill,
+            px(m.stroke_width),
+            stroke,
+            Default::default(),
+        ));
     }
 }
 
