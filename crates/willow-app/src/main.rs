@@ -13,6 +13,7 @@ use willow_core::{
     Button, Cursor, Document, Input, Key, Modifiers, Motion, PAPER, Rgba, Session, Shadow, Theme,
     ZoomPill,
 };
+mod bench;
 mod text;
 #[cfg(target_os = "windows")]
 mod titlebar_windows;
@@ -97,6 +98,8 @@ struct Willow {
     /// Window position of the canvas's top-left, from the last paint.
     canvas_origin: gpui::Point<Pixels>,
     start: Instant,
+    /// Set by `--bench`.
+    bench: Option<bench::Bench>,
 }
 
 impl Willow {
@@ -158,6 +161,7 @@ impl Willow {
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.session.theme();
+        bench::step(self, window);
         let now = self.start.elapsed();
         // Paint requests the next frame while the session is animating.
         self.session.tick(now);
@@ -515,10 +519,17 @@ const GENERATE_SEED: u64 = 1;
 
 fn main() {
     // `--generate N`: open a generated document of N shapes instead of a new one.
+    // `--bench --machine NAME`: run the scripted bench on 10,000 generated shapes, then quit.
     let args: Vec<String> = std::env::args().collect();
-    let doc = match args.iter().position(|a| a == "--generate") {
-        Some(i) => {
-            let n = args.get(i + 1).and_then(|n| n.parse().ok());
+    let arg = |flag: &str| args.iter().position(|a| a == flag).map(|i| args.get(i + 1));
+    let bench = args.iter().any(|a| a == "--bench").then(|| {
+        let machine = arg("--machine").flatten();
+        machine.expect("--bench needs --machine NAME").clone()
+    });
+    let doc = match arg("--generate") {
+        _ if bench.is_some() => willow_core::generate(10_000, GENERATE_SEED),
+        Some(n) => {
+            let n = n.and_then(|n| n.parse().ok());
             willow_core::generate(n.expect("--generate takes a shape count"), GENERATE_SEED)
         }
         None => Document::new(),
@@ -633,6 +644,10 @@ fn main() {
                 cx.new(|cx| {
                     let focus = cx.focus_handle();
                     window.focus(&focus, cx);
+                    if bench.is_some() {
+                        cx.spawn_in(window, async move |this, cx| bench::run(this, cx).await)
+                            .detach();
+                    }
                     Willow {
                         session: Session::new(
                             doc,
@@ -643,6 +658,7 @@ fn main() {
                         cursor: Cursor::Arrow,
                         canvas_origin: Default::default(),
                         start: Instant::now(),
+                        bench: bench.map(bench::Bench::new),
                     }
                 })
             },
