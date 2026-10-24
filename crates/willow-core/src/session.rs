@@ -6,6 +6,7 @@ mod editing;
 mod file;
 mod menu;
 use menu::Ripple;
+mod midpoints;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -13,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::Side;
 use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Layout, Measure, layout};
@@ -94,6 +96,14 @@ enum Gesture {
         from: Point,
         to: Option<ResizeTo>,
     },
+    /// Left press on the `side` midpoint of the shape at `index`; release creates a linked
+    /// shape there unless the pointer was `dragged` past `DRAG_START` from `from`.
+    Midpoint {
+        index: usize,
+        side: Side,
+        from: Point,
+        dragged: bool,
+    },
 }
 
 /// What a resize sets: a shape's x, width and extra height, in canvas units.
@@ -164,6 +174,7 @@ pub struct Session {
     rings: HashMap<ShapeId, Ring>,
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
+    mid: midpoints::Midpoints,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -206,6 +217,7 @@ impl Session {
             over_edge: None,
             rings: HashMap::new(),
             ripples: HashMap::new(),
+            mid: Default::default(),
             now: Duration::ZERO,
         }
     }
@@ -331,6 +343,7 @@ impl Session {
                 .values()
                 .any(|r| now < r.start + self.theme.ripple.fade.duration)
             || self.zoom.running(self.theme, now)
+            || self.creating(now).is_some()
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -531,6 +544,16 @@ impl Session {
                     return self.respond(true);
                 }
                 if self.gesture.is_none() && button == Button::Left && !self.space_held {
+                    if let Some((index, side)) = self.midpoint_at(pos) {
+                        let (from, dragged) = (pos, false);
+                        self.gesture = Some(Gesture::Midpoint {
+                            index,
+                            side,
+                            from,
+                            dragged,
+                        });
+                        return self.respond(true);
+                    }
                     if let Some(i) = hit.filter(|_| mods.alt && self.editing.is_none()) {
                         let id = self.doc.shapes[i].id.clone();
                         self.autofit(&id);
@@ -625,14 +648,21 @@ impl Session {
                     self.respond(true)
                 }
                 Some(Gesture::Resize { .. }) => self.respond(false),
+                Some(Gesture::Midpoint { from, dragged, .. }) => {
+                    let d = pos - *from;
+                    *dragged |= d.x.hypot(d.y) >= DRAG_START;
+                    self.respond(false)
+                }
                 None => {
                     let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
+                    let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
                     let edge = edge.map(|e| e.1);
                     let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
                     let over = self.editing.as_ref().is_some_and(|e| {
                         (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
                     });
                     let changed = over != self.over_text;
+                    let changed = self.track_hover(pos) || changed;
                     self.over_text = over;
                     self.respond(changed || edge_changed)
                 }
@@ -662,6 +692,18 @@ impl Session {
                         }
                     }
                     Some(Gesture::Text) if button == Button::Left => self.gesture = None,
+                    Some(Gesture::Midpoint {
+                        index,
+                        side,
+                        dragged,
+                        ..
+                    }) if button == Button::Left => {
+                        self.gesture = None;
+                        if !dragged {
+                            let id = self.doc.shapes[index].id.clone();
+                            self.create_linked(&id, side);
+                        }
+                    }
                     Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
                         self.gesture = None;
                         if let Some(r) = to {

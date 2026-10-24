@@ -14,10 +14,11 @@ fn session() -> Session {
     common::session_of(Document::new())
 }
 
-// The new shape is 210 wide at screen x 395..605, y 376..424.5 at zoom 1.
-const RIGHT_EDGE: Point = Point { x: 605.0, y: 400.0 };
-const LEFT_EDGE: Point = Point { x: 395.0, y: 400.0 };
-const BOTTOM_EDGE: Point = Point { x: 500.0, y: 424.5 };
+// The new shape is 210 wide at screen x 395..605, y 376..424.5 at zoom 1. Edges are grabbed
+// away from their midpoints, which win within 10 px.
+const RIGHT_EDGE: Point = Point { x: 605.0, y: 385.0 };
+const LEFT_EDGE: Point = Point { x: 395.0, y: 385.0 };
+const BOTTOM_EDGE: Point = Point { x: 450.0, y: 424.5 };
 
 fn down(s: &mut Session, pos: Point, mods: Modifiers) {
     let button = Button::Left;
@@ -49,7 +50,7 @@ fn side_drags_resize_symmetrically_in_whole_units_at_several_zooms() {
         let mut vp = s.viewport();
         vp.zoom = zoom;
         s.set_viewport(vp);
-        let edge = s.viewport().to_screen(pt(210.0, 20.0));
+        let edge = s.viewport().to_screen(pt(210.0, 2.0));
         resize_drag(&mut s, edge, 20.0, 0.0);
         assert_eq!(shape(&s), (-d, 210 + 2 * d as u32, 0), "zoom {zoom}");
     }
@@ -64,7 +65,7 @@ fn bottom_drag_changes_extra_height_only_and_never_below_zero() {
     let mut s = session();
     resize_drag(&mut s, BOTTOM_EDGE, 30.0, 40.0);
     assert_eq!(shape(&s), (0, 210, 40));
-    resize_drag(&mut s, pt(500.0, 464.5), 0.0, -100.0);
+    resize_drag(&mut s, pt(450.0, 464.5), 0.0, -100.0);
     assert_eq!(shape(&s), (0, 210, 0));
 }
 
@@ -110,9 +111,9 @@ fn cursors_near_edges_are_resize_arrows() {
     let mut s = session();
     let mods = Modifiers::default();
     let mut cursor = |p| s.handle(Input::PointerMove { pos: p, mods }, T).cursor;
-    assert_eq!(cursor(pt(603.0, 400.0)), Cursor::ResizeEw);
-    assert_eq!(cursor(pt(397.0, 400.0)), Cursor::ResizeEw);
-    assert_eq!(cursor(pt(500.0, 423.0)), Cursor::ResizeNs);
+    assert_eq!(cursor(pt(603.0, 385.0)), Cursor::ResizeEw);
+    assert_eq!(cursor(pt(397.0, 385.0)), Cursor::ResizeEw);
+    assert_eq!(cursor(pt(450.0, 423.0)), Cursor::ResizeNs);
     assert_eq!(cursor(pt(500.0, 400.0)), Cursor::Arrow);
     assert_eq!(cursor(pt(700.0, 400.0)), Cursor::Arrow);
 }
@@ -121,7 +122,7 @@ fn cursors_near_edges_are_resize_arrows() {
 fn each_resize_and_autofit_is_one_undo_step() {
     let mut s = session();
     resize_drag(&mut s, RIGHT_EDGE, 20.0, 0.0);
-    resize_drag(&mut s, pt(500.0, 424.5), 0.0, 40.0);
+    resize_drag(&mut s, pt(450.0, 424.5), 0.0, 40.0);
     s.handle(Input::Undo, T);
     assert_eq!(shape(&s), (-20, 250, 0));
     s.handle(Input::Undo, T);
@@ -135,7 +136,7 @@ fn resize_previews_live_and_lands_on_release() {
     let mods = Modifiers::default();
     s.handle(
         Input::PointerMove {
-            pos: pt(625.0, 400.0),
+            pos: pt(625.0, 385.0),
             mods,
         },
         T,

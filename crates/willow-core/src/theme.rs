@@ -248,6 +248,26 @@ pub struct CaretStyle {
     pub marked_underline: f32,
 }
 
+/// The circles on a hovered shape's edge midpoints, in screen pixels at any zoom: `size`
+/// across, `fill`, with a `stroke_width` ring of `stroke` outside it and a drop shadow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MidpointStyle {
+    pub size: f32,
+    pub fill: Rgba,
+    pub stroke: Rgba,
+    pub stroke_width: f32,
+    pub shadow: Shadow,
+}
+
+/// A shape created from a midpoint fades in from `rise` canvas units off (negative is up)
+/// and `scale`, while its connector draws from the source, over `motion`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CreateStyle {
+    pub motion: Transition,
+    pub rise: f32,
+    pub scale: f32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub name: &'static str,
@@ -283,6 +303,8 @@ pub struct Theme {
     pub menu: MenuStyle,
     /// A chain's color change rippling out from the shape that started it.
     pub ripple: RippleStyle,
+    pub midpoint: MidpointStyle,
+    pub create: CreateStyle,
 }
 
 impl Theme {
@@ -485,5 +507,26 @@ pub const PAPER: Theme = Theme {
         ],
         left: 8.0,
         gap: 2.0,
+    },
+    midpoint: MidpointStyle {
+        size: 9.0,
+        fill: hex(0xffffff),
+        stroke: hex(0x8b7760),
+        stroke_width: 1.5,
+        shadow: Shadow {
+            x: 0.0,
+            y: 1.0,
+            blur: 3.0,
+            spread: 0.0,
+            color: rgba(0, 0, 0, 0.12),
+        },
+    },
+    create: CreateStyle {
+        motion: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+        },
+        rise: -8.0,
+        scale: 0.96,
     },
 };
