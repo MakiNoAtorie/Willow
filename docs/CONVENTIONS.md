@@ -22,6 +22,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - The app's only file I/O is `willow-app/src/file.rs`: saves via `write_beside` (temp file, then rename), alerts via `file::alert`, panels via `rfd`. Windows open through `open_window(Content, bench, cx)`; `Willow.path` is canonicalized; `Willow::blank()` decides Open's window reuse. Quit is `QuitMode::LastWindowClosed`.
 - Disk changes are decided in the core by `Session::disk_changed(Option<&[u8]>)` (`None` = missing); the app only compares mtimes and reads bytes in `Willow::check_disk`, on window activation.
 - `file::settle(window, cx)` is the one "resolve unsaved changes" routine (Save / Don't Save / Cancel) for close and quit; true means the window may go. Callers needing the outcome of a save use `Willow::save_task` (`Task<bool>`).
+- Recovery: every `History` method that changes the document bumps `revision` (that's how `Session::handle` times recovery). Timing comes from `Session::recovery_wake(now)` / `take_recovery(now)`; the app's timer never calls `cx.notify`. Recovery I/O lives only in `willow-app/src/recovery.rs`, off the UI thread; call `Willow::discard_recovery()` wherever unsaved changes are resolved. Launch applies the pure `willow_core::launch_plan`. `--bench`/`--generate` skip recovery.
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
