@@ -31,6 +31,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Time-based animations take a `Transition { duration, easing: CubicBezier }` from the theme and OR their state into `Session::animating(now)`. `render` calls `Session::tick(now)`; paint calls `window.request_animation_frame()` only while animating.
 - Paint multiplies every canvas-unit value (sizes, radii, shadows, ring widths, grid) by `vp.zoom`; screen-space chrome (the zoom pill) is not scaled. Low-zoom values extend `ZoomStyle`.
 - Wheel and pinch inputs carry the canvas-relative pointer position. Modified shortcuts (Cmd/Ctrl+key) go through GPUI actions mapped to `Input` variants, not through `Key`.
+- Resize: edge hit zones are 5 screen px (`EDGE_GRAB`); a shape's interior hides edges beneath it. Previews are `Session::resize_preview()` (a `Shape` clone the app paints instead). Commands are `Session::resize_shape` and `Session::autofit`. A press on an edge leaves editing first, so the resize stays its own undo step. Side resizes keep width parity (steps of 2), so the minimum can land one unit above the theoretical one.
 - Press-versus-drag uses one threshold, `DRAG_START` (3 screen px) in `session.rs`.
 - Screen positions given to the core are relative to the canvas top-left (the app subtracts `canvas_origin`, saved during paint).
 - Pointer move/up listen window-wide in paint (`window.on_mouse_event`) so drags continue outside the canvas; pointer down and scroll listen on the canvas div.
