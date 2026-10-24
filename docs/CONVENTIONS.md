@@ -21,12 +21,16 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `willow-core/src/layout.rs`; read geometry through `Session::layout(&shape)` / `Session::shape_height(&shape)` (cached per shape, keyed on text + width). Editing ops live in `edit.rs` and go through `RichText::replace`, which keeps text normalized.
 - The app's measurer and glyph painting live in `willow-app/src/text.rs`. Fonts are embedded from `crates/willow-app/assets` (Literata + `OFL.txt`); the family is `Theme.font`. Caret visuals are `Theme.caret`; caret width is screen px at any zoom.
 - Style toggles (`Input::ToggleBold/ToggleItalic`) act on `Editing.anchor..caret.offset`; with an empty selection they set `Editing.pending`, which `set_caret` clears and `Session::replace` applies inside the same `history.change`. A toggle turns the style on unless the whole selection already has it.
+- One public way to set a text selection: `Session::set_text_selection`. Clipboard text enters the core via `Input::Paste` (keeps paragraph breaks), never `Input::Text`. The app writes `selected_text()` to the clipboard before sending `Input::Cut`; the core never touches the clipboard.
+- In core tests, compute screen points with `s.viewport().to_screen(canvas point)`, not fixed screen constants.
 - Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`.
 - Editing keys are GPUI actions in the `editing` key context; F2, Enter and Esc are bound everywhere. The input handler is registered whenever a shape is selected.
 
 ## Input and redraw
 - The app sends all input through `Session::handle(input, now)` and calls `cx.notify()` only when `Response.redraw` is true; it requests frames only while `Response.animating`. This keeps idle CPU near zero.
 - Undoable model changes go through `History::change` from a named `Session` method; viewport and selection never touch history. Editing sessions wrap changes in `History::begin()`/`end()`; undo while one is open reverts it and keeps it open.
+- Paint draws only from the draw query `Session::draw(from, to)`: previews, fill, culling and low-zoom switches live there, not in the app. Cull on position and width before asking for height or layout. Low-zoom values come from `ZoomStyle` (`fade_start`, `fade_end`, `block_mix`).
+- Big documents come from `willow_core::generate(n, seed)` (the app's `--generate` uses seed 1); bulk IDs use `id_for(i)`, not `Document::next_id`.
 - Gesture mutations land once, on release, through a named `Session` method (e.g. `move_shape`); live previews are queries (`drag_preview`), never written into the document.
 - Time-based animations take a `Transition { duration, easing: CubicBezier }` from the theme and OR their state into `Session::animating(now)`. `render` calls `Session::tick(now)`; paint calls `window.request_animation_frame()` only while animating.
 - Paint multiplies every canvas-unit value (sizes, radii, shadows, ring widths, grid) by `vp.zoom`; screen-space chrome (the zoom pill) is not scaled. Low-zoom values extend `ZoomStyle`.
