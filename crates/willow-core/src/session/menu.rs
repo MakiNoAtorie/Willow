@@ -2,6 +2,7 @@
 //! app draws; `Input::MenuChoose` runs an item against the point it was opened at.
 
 use super::Session;
+use super::clipboard::shape_items;
 use crate::input::Point;
 use crate::{Color, Shape, ShapeId};
 use std::time::Duration;
@@ -17,6 +18,8 @@ pub enum MenuKind {
     Empty,
     Shape,
     Connector,
+    /// A right-click inside a multi-selection.
+    Multi,
 }
 
 /// What an item does. One variant per item; `choose` runs it.
@@ -25,6 +28,14 @@ pub enum MenuAction {
     NewShape,
     Recolor(Color),
     RemoveLink,
+    /// The app has put `Session::clipboard_text` on the clipboard; deletes the selection.
+    Cut,
+    /// The app has put `Session::clipboard_text` on the clipboard; only closes the menu.
+    Copy,
+    /// The app sends `Input::Paste` instead while the clipboard has text; else only closes.
+    Paste,
+    Duplicate,
+    Delete,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -101,17 +112,14 @@ impl Session {
         if !self.selected.contains(&id) {
             self.select([id]);
         }
-        // ponytail: a multi-selection has no menu until Cut/Copy/Paste land.
         if self.selected.len() > 1 {
-            return;
+            return self.open_multi_menu(at);
         }
         self.menu = Some(Menu {
             kind: MenuKind::Shape,
             at,
             canvas: self.viewport.to_canvas(at),
-            entries: vec![MenuEntry::Colors {
-                current: Some(current),
-            }],
+            entries: shape_items(current),
         });
     }
 
@@ -122,6 +130,9 @@ impl Session {
         };
         match action {
             MenuAction::NewShape => self.new_shape_at(menu.canvas),
+            MenuAction::Cut | MenuAction::Delete => self.delete(&self.selected.clone()),
+            MenuAction::Copy | MenuAction::Paste => {}
+            MenuAction::Duplicate => self.duplicate(),
             MenuAction::Recolor(color) => {
                 let i = self.shape_at(self.viewport.to_screen(menu.canvas));
                 if let Some(id) = i.map(|i| self.doc.shapes[i].id.clone()) {
@@ -192,7 +203,7 @@ impl Session {
     }
 
     /// The smallest zone containing canvas point `c`.
-    fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
+    pub(super) fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
         (self.doc.zones.iter())
             .filter(|z| {
                 let (x, y) = (z.x as f32, z.y as f32);

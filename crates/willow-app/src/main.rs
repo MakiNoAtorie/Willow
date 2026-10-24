@@ -35,6 +35,8 @@ actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Delete or Backspace on the canvas, with nothing being edited.
 actions!(willow, [DeleteShapes]);
+// Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
+actions!(willow, [Duplicate]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -232,11 +234,27 @@ impl Willow {
         }
     }
 
-    /// Puts the selected text on the system clipboard as plain text.
+    /// Puts the selected text, or else the selected shapes as Willow text, on the system
+    /// clipboard as plain text.
     fn copy(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.selected_text() {
+        if let Some(text) = self.session.clipboard_text() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         }
+    }
+
+    /// Runs a context-menu item, moving clipboard text for Cut, Copy and Paste first.
+    fn choose(&mut self, action: willow_core::MenuAction, cx: &mut Context<Self>) {
+        use willow_core::MenuAction::{Copy, Cut, Paste};
+        match action {
+            Cut | Copy => self.copy(cx),
+            Paste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    return self.input(Input::Paste(text), cx);
+                }
+            }
+            _ => {}
+        }
+        self.input(Input::MenuChoose(action), cx)
     }
 
     fn mouse_down(&mut self, e: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -363,6 +381,7 @@ impl Render for Willow {
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
+            .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -844,6 +863,8 @@ fn main() {
             KeyBinding::new("delete", Delete, ed),
             KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
             KeyBinding::new("delete", DeleteShapes, Some("!editing")),
+            KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
+            KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),

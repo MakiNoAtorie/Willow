@@ -1,6 +1,7 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod clipboard;
 mod delete;
 mod editing;
 mod file;
@@ -186,6 +187,8 @@ pub struct Session {
     marquee_base: Vec<ShapeId>,
     /// A link drag in progress and the hovered connector.
     links: link::Links,
+    /// The last pointer position, screen pixels: where Paste goes.
+    pointer: Option<Point>,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -232,6 +235,7 @@ impl Session {
             slides: HashMap::new(),
             marquee_base: Vec::new(),
             links: Default::default(),
+            pointer: None,
             now: Duration::ZERO,
         }
     }
@@ -544,6 +548,9 @@ impl Session {
             Input::ResetZoom => {}
             _ => self.unmark(),
         }
+        if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
+            self.pointer = Some(pos);
+        }
         match input {
             Input::PointerDown { pos, button, mods } => {
                 // A press outside the menu closes it; a right press goes on to open another.
@@ -803,6 +810,20 @@ impl Session {
                 self.respond(true)
             }
             Input::DeleteShapes if self.editing.is_some() => self.respond(false),
+            Input::Paste(text) if self.editing.is_none() => {
+                self.paste_shapes(&text);
+                self.respond(true)
+            }
+            Input::Cut if self.editing.is_none() => {
+                self.menu = None;
+                self.delete(&self.selected.clone());
+                self.respond(true)
+            }
+            Input::Duplicate => {
+                self.menu = None;
+                self.duplicate();
+                self.respond(true)
+            }
             Input::DeleteShapes => {
                 let ids = self.selected.clone();
                 self.delete(&ids);
