@@ -1,6 +1,6 @@
 # Conventions
 
-Binding rules. Keep under ~8 KB; add only rules that bind future work, delete stale ones. The orchestrator folds implementers' proposals in at merge.
+Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind future work and that the code can't tell you, delete stale ones. The orchestrator folds implementers' proposals in at merge.
 
 ## Stack
 - Rust + GPUI pinned to `zed-industries/zed` @ `79fe6a645f68f8c9230578f154bf99852d9f716f` (ADR 0003); re-copy Zed's `[patch.crates-io]` block on every pin bump.
@@ -18,14 +18,14 @@ Binding rules. Keep under ~8 KB; add only rules that bind future work, delete st
 ## Model
 - Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
 - Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor`/`join_zone`; `Document::link`/`unlink`/`recolor` are for loaders and generators.
-- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Side rule: `willow_core::side`; centers via `Shape::center(height)`; fresh IDs via `Document::next_id` / `next_ids(n)`; chain walks via `format::walks`.
-- Shapes are removed only through `Session::delete(ids)` (one step, story order, reconnects, drops them from selection); Cut calls it after copying. Story order outside saving: `format::story_order(doc, heights)`. ID tie-breaks use generation order (shorter first, then alphabetical).
+- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `willow_core::side`, `Shape::center`, `Document::next_ids` and `format::walks`.
+- Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use generation order (shorter first, then alphabetical).
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
 ## Files
-- Format: `format.rs` (`save(doc, heights)`, `load(bytes)`); heights come from `Session::heights()`, taken on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`; tests compare models order-free.
-- Loaded files go through `Session::open` / `disk_changed` (apply `Loaded.unplaced` via `format::place`). `Theme.creation_gap` is the one creation gap.
-- File state and recovery timing live in `session/file.rs`; the app only does I/O, in `file.rs` (atomic `write_beside`, `alert`, `rfd`) and `recovery.rs` (off the UI thread).
+- Format: `format.rs`; heights for `save` come from `Session::heights()` on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`; tests compare models order-free.
+- Loaded files go through `Session::open` / `disk_changed`. `Theme.creation_gap` is the one creation gap.
+- File state and recovery timing live in `session/file.rs`; the app only does I/O (`file.rs`, `recovery.rs` off the UI thread).
 - `file::settle` is the one Save / Don't Save / Cancel routine and never deletes; `file::close` / `quit` delete recovery via `discard_recovery(cx)`.
 - Every `History` method that changes the document bumps `revision`. Call `arm_recovery` after anything that may change the session; recovery I/O runs through `Autosave::run`, never locking the UI thread.
 
@@ -36,30 +36,30 @@ Binding rules. Keep under ~8 KB; add only rules that bind future work, delete st
 
 ## Text
 - Offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
-- Every way of opening a document calls `Session::measure_ahead(n)` from idle afterwards, so saves don't stall.
+- After any open, call `Session::measure_ahead(n)` from idle so saves don't stall.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
-- Justification gaps are spaces plus UAX #14 break opportunities next to a CJK cluster; new gap kinds go in the `stretch` closure.
+- New justification gap kinds go in the `stretch` closure.
 - Style toggles take `edit::Style`; with an empty selection they set `Editing.pending` (cleared by `set_caret`, applied by `Session::replace`). A toggle turns on unless the whole selection has it.
-- Clipboard: the app writes `Session::clipboard_text()` (selected text while editing, else the selected shapes as `willow 1` text) before Cut/Copy, and sends `Input::Paste(text)` (text while editing, else shapes or one plain-text shape). The core never touches the clipboard.
+- The app writes `Session::clipboard_text()` before Cut/Copy and sends `Input::Paste(text)`; the core never touches the clipboard.
 - IME marked text (`Editing.marked`) sits outside `History`; `handle` commits it before every input except Mark/Text, Space up/down, pointer move, wheel, pinch, reset zoom. Only the app converts UTF-16 (`text.rs`).
-- The app's measurer and glyph painting live in `willow-app/src/text.rs`; Literata is embedded from `crates/willow-app/assets`. Caret width is screen px at any zoom.
+- Caret width is screen px at any zoom.
 
 ## Input and redraw
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
-- Positions given to the core are relative to the canvas top-left. Wheel and pinch carry the pointer position; wheel deltas are content movement in screen px (GPUI's sign).
+- Positions given to the core are canvas-relative. Wheel and pinch carry the pointer position; wheel deltas are content movement in screen px.
 - Pointer move/up listen window-wide (`window.on_mouse_event`); down and scroll on the canvas div. `Input::FocusLost` resets held keys and pans.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
 - Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries; the mutation lands once on release through a named `Session` method.
-- Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is `Session::selection() -> &[ShapeId]`, set only via `Session::select(ids)`; single-shape code uses `only_selected()`. Draw reads rings via `Session::ring(id, now)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
+- Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
 ## Chains
-- Menus are core data (`Session::menu()`: kind, screen/canvas point, entries); the app's `menu.rs` only draws them, all values from `Theme.menu`. New menu: `MenuKind` + `open_*_menu` from the right-press branch; new item: `MenuAction` + `MenuItem` + a `Session::choose` arm. Items needing the clipboard go through the app's `Willow::choose`. Items act on `Menu.shape` / `Menu.link`, set at open; build menus with `menu_at(kind, at, entries)`, items with `item(action, label, Shortcut::cmd(key) | Shortcut::DELETE)`, group labels with `MenuEntry::Heading`. Shortcuts are core `Shortcut`; the app adds Cmd/Ctrl.
+- Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
 - Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape. Tests grab edges away from midpoints.
-- Linked creation: `Session::create_linked(id, side)`; extra ops go between its `begin()` and `start_editing`. Copies (paste, duplicate): `insert_copies` with `fresh_ids(n)` assigned before measuring. Paste point: open menu's point, else last pointer in the canvas, else view center (the app sends `Input::PointerLeft` on window exit).
-- Pushes (`session/push.rs`): `Session::push(block_indices, dx, dy)`, a saved move in the open step, never touching zones; distance from `clearance` (zero when clear). Growth paths take `rect_of(id)` before a change and call `make_room(id, old)` after it, inside the open group; other chains go through `clear_others(side, movers)`. Crowding is judged on positions before the change; a pushed block keeps shapes it was already closer than the gap to at that distance (only the change itself pushes to the full gap), which is what ends cascades. Anything that can make a shape taller (text, style, width) calls `make_room`. Own-chain gap `Theme.creation_gap`, other chains `Theme.min_gap`.
-- Multi-selection moves only via `Session::move_selection` (no push). Menu recolors via `ripple_recolor`. Link drag and connector hover live in `session/link.rs`. A gesture that changes structure calls `stop_editing` first.
-- Animations are `Visible` fields computed in the core (`appear`, `slide`, blended `fill`) and counted in `animating`; undo/redo clears slides. Screen-constant overlays (midpoints, marquee, link drag) are `Frame` fields painted after shapes.
+- Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured (the layout cache keys on ID).
+- Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap, which is what ends cascades. Moves, drags and pastes never push.
+- A gesture that changes structure calls `stop_editing` first.
+- Animations are `Visible` fields computed in the core and counted in `animating`; screen-constant overlays are `Frame` fields painted after shapes.
 
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
@@ -70,6 +70,3 @@ Binding rules. Keep under ~8 KB; add only rules that bind future work, delete st
 - Property tests use the built-in fixed-seed xorshift (no new dependency) and print the case number in every assertion.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1). Tool output is CSV.
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
-
-## Workflow
-- Model per task: Opus for state, serialization, rendering, gestures, cross-module refactors, unexplained failures; Sonnet for mechanical work. State the pick and why in one line.
