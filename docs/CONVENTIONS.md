@@ -16,6 +16,9 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 
 ## Input and redraw
 - The app sends all input through `Session::handle(input, now)` and calls `cx.notify()` only when `Response.redraw` is true; it requests frames only while `Response.animating`. This keeps idle CPU near zero.
+- Gesture mutations land once, on release, through a named `Session` method (e.g. `move_shape`); live previews are queries (`drag_preview`), never written into the document.
+- Time-based animations report through `Session::animating(now)`; the app calls `window.request_animation_frame()` from paint only while it is true.
+- Press-versus-drag uses one threshold, `DRAG_START` (3 screen px) in `session.rs`.
 - Screen positions given to the core are relative to the canvas top-left (the app subtracts `canvas_origin`, saved during paint).
 - Pointer move/up listen window-wide in paint (`window.on_mouse_event`) so drags continue outside the canvas; pointer down and scroll listen on the canvas div.
 - Wheel deltas are content movement in screen px (GPUI's sign). Paint rounds the screen position of canvas (0,0) to whole pixels.
@@ -24,7 +27,7 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - `ci.bat` on Windows, `./ci.sh` on macOS: fmt, build, test, clippy `-D warnings`, and the GPUI-free-core rule (ADR 0001). Optional arg: cargo job count (default 4; 2 when another build runs). Add new checks to both scripts.
 - Keep output filtered: `./ci.sh 2>&1 | grep -E 'error|warning:|FAILED|passed' | head -40`.
 
-- Share the build cache: `CARGO_TARGET_DIR=<main checkout>/target`, so worktrees skip the cold GPUI compile.
+- Don't share one `CARGO_TARGET_DIR` across worktrees: workspace crates collide. Clone the cache per worktree instead: `cp -cR <main>/target <worktree>/target` (APFS clone, skips the cold GPUI compile).
 
 ## Tests
 - Large or many input files come from generators, not hand-written fixtures. Parser edge cases may use small golden files.
