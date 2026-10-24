@@ -8,9 +8,9 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Windows and macOS from day one; both must build and feel equally good. Bundle one font so text renders identically on both; Phase 1 picks it, and Phase 0 checks emoji fallback on Windows.
 - Light theme only.
 - Memory and CPU efficiency matter: idle should be near-zero CPU, and large canvases must stay smooth. Animations must stop their redraw loop when they finish.
-- Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001).
+- Tests attach to one seam: a core crate with no GPUI dependency holding the document model, every editing command, the undo history and the text format. Tests drive commands and assert on the model and on saved text; the GPUI layer only turns input into commands and draws the model (ADR 0001). Shape height comes from text layout, which needs GPUI's text system, so the core takes a text-measuring function from the UI layer instead of measuring text itself (ADR 0002).
 - Tests that need large or many input files build them with file generators rather than hand-written fixtures. Parser edge cases (escaping, invalid files) may use small golden files. Any benchmark or tool output should be CSV.
-- Performance targets, measured on a generated 10,000-shape document: p95 frame time ≤ 8 ms while panning and zooming, keystroke-to-paint ≤ 16 ms while typing in a shape, idle CPU near zero within 1 s of the last input or animation. Reference machines: a MacBook Air M4, which must meet the targets, and a Windows desktop (Ryzen 5 9600X, RTX 5060 Ti), checked for correctness and feel. Optionally repeat the Windows run once on the 9600X's integrated graphics as a stand-in for a weak laptop.
+- Performance targets, measured on a generated 10,000-shape document: p95 frame time ≤ 8 ms while panning and zooming, draw ≤ 8 ms per keystroke while typing in a shape with the next vsync never missed (keystroke-to-paint is bounded by the display refresh, not draw cost; ADR 0002), idle CPU near zero within 1 s of the last input or animation. Reference machines: a MacBook Air M4, which must meet the targets, and a Windows desktop (Ryzen 5 9600X, RTX 5060 Ti), checked for correctness and feel. Optionally repeat the Windows run once on the 9600X's integrated graphics as a stand-in for a weak laptop.
 
 ## Look and feel (fixed decisions)
 
@@ -70,7 +70,7 @@ Goal: nail exactly how Willow looks before building any real UI. No Rust in this
 - Where motion matters (shape creation, insert-and-push, color change, selection), HTML mockups can animate to show timing and easing.
 - Everything shown must be achievable in GPUI; mockups are reference only and never ship.
 - Present options where there's a real choice, and refine based on the owner's feedback until approved.
-- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, plus a visual-language document with the concrete values (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades).
+- Record the approved result in the repo as the visual reference for all later phases: the mockup files themselves, plus a visual-language document with the concrete values (colors for both picker and pastel, the bundled font and typography, sizes, corner radii, border and selection styles, spacing, shadows, connector stroke and hit tolerance, animation timings and easing, minimum and maximum zoom, and the zoom level where text fades). Text is not drawn below about 7 px on screen, so text must have fully faded by the zoom where it would drop under that size (ADR 0002).
 
 Done when: the owner has approved the mockups and the visual-language document exists.
 
