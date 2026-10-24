@@ -14,6 +14,12 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 - macOS: the title bar floats over the canvas, so add it as the last child or the canvas paints over it.
 - Platform window chrome lives in `<name>_<os>.rs` modules gated by `#[cfg(target_os = ...)]` in `main.rs`, each exposing `title_bar(theme, window)` with the same signature.
 
+## Input and redraw
+- The app sends all input through `Session::handle(input, now)` and calls `cx.notify()` only when `Response.redraw` is true; it requests frames only while `Response.animating`. This keeps idle CPU near zero.
+- Screen positions given to the core are relative to the canvas top-left (the app subtracts `canvas_origin`, saved during paint).
+- Pointer move/up listen window-wide in paint (`window.on_mouse_event`) so drags continue outside the canvas; pointer down and scroll listen on the canvas div.
+- Wheel deltas are content movement in screen px (GPUI's sign). Paint rounds the screen position of canvas (0,0) to whole pixels.
+
 ## Local checks (run before pushing)
 - `ci.bat` on Windows, `./ci.sh` on macOS: fmt, build, test, clippy `-D warnings`, and the GPUI-free-core rule (ADR 0001). Optional arg: cargo job count (default 4; 2 when another build runs). Add new checks to both scripts.
 - Keep output filtered: `./ci.sh 2>&1 | grep -E 'error|warning:|FAILED|passed' | head -40`.
