@@ -82,6 +82,8 @@ pub struct Visible<'a> {
     pub caret: Option<CaretView>,
     /// Set while the shape's create animation runs.
     pub appear: Option<Appear>,
+    /// Canvas units to paint the shape off `x`, `y` while it slides after a push; (0, 0) at rest.
+    pub slide: Point,
 }
 
 impl Session {
@@ -124,11 +126,15 @@ impl Session {
             if (py as f32 + ph).max(qy as f32 + qh) < a.y {
                 continue;
             }
-            let center = |x: i32, y: i32, w: u32, h: f32| Point {
-                x: x as f32 + w as f32 / 2.0,
-                y: y as f32 + h / 2.0,
+            // A sliding shape's connector end slides with it.
+            let center = |s: &Shape, x: i32, y: i32, h: f32| {
+                let o = self.sliding(&s.id, now);
+                Point {
+                    x: x as f32 + s.width as f32 / 2.0 + o.x,
+                    y: y as f32 + h / 2.0 + o.y,
+                }
             };
-            let (pc, qc) = (center(px, py, p.width, ph), center(qx, qy, q.width, qh));
+            let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));
             let (from_side, to_side) = (side(pc, qc), side(qc, pc));
             let (mut from, mut to) = (
                 midpoint(pc, p.width, ph, from_side),
@@ -191,7 +197,7 @@ impl Session {
                 if fy + height < a.y {
                     return None;
                 }
-                let ring = self.ring(&s.id, now);
+                let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
                 let e = edited.filter(|e| e.id == s.id);
                 let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
                     opacity: k,
@@ -213,6 +219,7 @@ impl Session {
                     marked: e.and_then(|e| e.marked.clone()),
                     caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
                     appear,
+                    slide,
                 })
             })
             .collect();

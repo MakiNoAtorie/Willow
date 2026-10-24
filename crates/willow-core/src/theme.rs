@@ -305,6 +305,8 @@ pub struct Theme {
     pub ripple: RippleStyle,
     pub midpoint: MidpointStyle,
     pub create: CreateStyle,
+    /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
+    pub push: Transition,
 }
 
 impl Theme {
@@ -528,5 +530,9 @@ pub const PAPER: Theme = Theme {
         },
         rise: -8.0,
         scale: 0.96,
+    },
+    push: Transition {
+        duration: Duration::from_millis(220),
+        easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
 };

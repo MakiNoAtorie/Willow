@@ -7,6 +7,7 @@ mod file;
 mod menu;
 use menu::Ripple;
 mod midpoints;
+mod push;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -175,6 +176,8 @@ pub struct Session {
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
     mid: midpoints::Midpoints,
+    /// Shapes sliding to where a push moved them.
+    slides: push::Slides,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -218,6 +221,7 @@ impl Session {
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
+            slides: HashMap::new(),
             now: Duration::ZERO,
         }
     }
@@ -344,6 +348,7 @@ impl Session {
                 .any(|r| now < r.start + self.theme.ripple.fade.duration)
             || self.zoom.running(self.theme, now)
             || self.creating(now).is_some()
+            || self.slides_running(now)
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -752,6 +757,8 @@ impl Session {
                 }
                 self.stop_editing();
                 self.drop_missing_selection();
+                // Undone pushes jump back; a slide still running would draw them off.
+                self.slides.clear();
                 self.respond(true)
             }
             Input::DeleteShapes if self.editing.is_some() => self.respond(false),

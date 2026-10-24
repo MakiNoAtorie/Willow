@@ -571,6 +571,8 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
 
     let sel = &t.selection;
     for v in &frame.shapes {
+        // A pushed shape paints off its place while it slides there.
+        let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
         // A shape being created paints faded (`k`), offset and scaled around its center.
         let (origin, z, k) = match v.appear {
             Some(a) => {

@@ -113,10 +113,25 @@ impl Session {
             Side::Left => (a.x - new.width as i32 - gap as i32, a.y),
         };
         let new_id = new.id.clone();
+        // Insert: the nearest shape already on that side links on from the new one instead,
+        // its subtree pushed a creation gap clear of it.
+        let insert = self.linked_on(id, side).into_iter().next().map(|n| {
+            let far = self.doc.shapes.iter().find(|s| s.id == n).expect("linked");
+            (
+                self.clearance(&new, far, side, gap),
+                self.subtree(&n, id),
+                n,
+            )
+        });
         // `start_editing`'s group is this one; `stop_editing` closes both as one step.
         self.history.begin();
         self.history.add(&mut self.doc, new);
         self.history.link(&mut self.doc, id, &new_id);
+        if let Some(((dx, dy), block, n)) = insert {
+            self.push(&block, dx, dy);
+            self.history.unlink(&mut self.doc, id, &n);
+            self.history.link(&mut self.doc, &new_id, &n);
+        }
         self.select([new_id.clone()]);
         self.start_editing(new_id.clone());
         self.mid = Midpoints {

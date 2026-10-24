@@ -70,16 +70,15 @@ fn each_side_creates_a_linked_shape_one_gap_away_in_the_chain_color_in_editing()
 }
 
 #[test]
-fn a_side_already_linked_gains_another_link() {
+fn a_side_already_linked_inserts_the_new_shape() {
     let mut s = session();
     click(&mut s, BOTTOM);
     input(&mut s, Input::StopEditing);
     click(&mut s, BOTTOM);
     let doc = s.document();
     assert_eq!(doc.shapes.len(), 3);
-    let a = &doc.shapes[0].id;
-    assert!(doc.links.iter().all(|Link(p, _)| p == a));
-    assert_eq!(doc.links.len(), 2);
+    let [a, b, c] = [0, 1, 2].map(|i| doc.shapes[i].id.clone());
+    assert_eq!(doc.links, [Link(a, c.clone()), Link(c, b)]);
 }
 
 #[test]
