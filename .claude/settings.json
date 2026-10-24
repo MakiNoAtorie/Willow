@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Artifact",
+      "SearchPlugins",
+      "SuggestPluginInstall",
+      "SuggestSkills",
+      "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__*",
+      "mcp__visualize__*",
+      "mcp__claude-in-chrome__*"
+    ]
+  }
+}
