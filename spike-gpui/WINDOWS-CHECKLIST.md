@@ -65,4 +65,15 @@ The self-test drives the input handler directly, so it can't exercise the real m
 - [ ] Japanese (Kana or Romaji) input: `nihongo` shows underlined, the candidate window sits at the caret, and Enter commits.
 - [ ] Option+e then e gives é.
 
+### Trackpad (MacBook Air), `spike-gpui/run.sh --large`
+
+The Windows machine has no precision touchpad, so the Mac trackpad stands in for it.
+
+- [ ] Two-finger swipe pans in every direction, follows your fingers 1:1, and stops dead when you lift them (no runaway pan).
+- [ ] Momentum: a quick flick keeps gliding briefly, then stops. Nothing keeps redrawing afterwards: Activity Monitor shows spike-gpui near 0 % CPU a second later.
+- [ ] Pinch zooms around the point between your fingers, not the window corner, and the zoom badge appears and fades.
+- [ ] Cmd + two-finger swipe also zooms.
+- [ ] Panning and pinching across the whole 10k document stays smooth, including zoomed far out.
+- [ ] Clicking a shape (tap-to-click and a full press) places the caret, and a two-finger tap opens the context menu.
+
 Commit `results.csv`, the evidence files and this ticked list on the branch.
