@@ -156,7 +156,6 @@ impl History {
     }
 
     /// Removes shape `id` and its links, as one step. Nothing else changes: no reconnecting.
-    #[cfg_attr(not(test), allow(dead_code))] // delete, cut (#36 on)
     pub fn remove(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Shape> {
         let i = doc.shapes.iter().position(|s| &s.id == id)?;
         let shape = doc.shapes[i].clone();

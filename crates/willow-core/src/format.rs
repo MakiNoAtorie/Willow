@@ -641,6 +641,28 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
     out
 }
 
+/// Every shape (indices into `doc.shapes`) in story order within its chain: chains from their
+/// topmost shape, each walked as `save` walks it. Chains come in no particular order.
+pub(crate) fn story_order(doc: &Document, heights: &[f32]) -> Vec<usize> {
+    let shapes = &doc.shapes;
+    let center = |i: usize| Point {
+        x: shapes[i].x as f32 + shapes[i].width as f32 / 2.0,
+        y: shapes[i].y as f32 + heights.get(i).copied().unwrap_or(0.0) / 2.0,
+    };
+    let next = neighbors(doc);
+    let mut tops: Vec<usize> = (0..shapes.len()).collect();
+    tops.sort_by_key(|&i| key(&shapes[i]));
+    let (mut chain, mut from) = (vec![usize::MAX; shapes.len()], vec![None; shapes.len()]);
+    let mut order = Vec::new();
+    for top in tops {
+        if chain[top] == usize::MAX {
+            let c = order.len();
+            order.extend(walk(top, c, &next, shapes, &center, &mut chain, &mut from));
+        }
+    }
+    order
+}
+
 /// Each shape's linked shapes (indices into `doc.shapes`).
 fn neighbors(doc: &Document) -> Vec<Vec<usize>> {
     let index: HashMap<&ShapeId, usize> = (doc.shapes.iter().enumerate())
