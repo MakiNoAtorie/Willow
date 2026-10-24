@@ -16,6 +16,8 @@ Status: all three themes drafted, awaiting owner approval. Desk and Poster below
 |---|---|
 | `mac-window` | macOS window, transparent title bar, menu bar with Edit open, "Edited" title |
 | `mac-view-menu` | View menu with the Theme submenu |
+| `mac-text-align` | View > Text Alignment, with Left chosen and applied |
+| `align-centered` | the canvas with Centered text |
 | `win-window` | Windows custom title bar, unsaved dot, menu button open with Edit cascade |
 | `canvas` | trunk and branches, selected shape, shape being edited (caret, bold, italic), midpoint circles on hover, hovered connector, resize cursor |
 | `menu-shape`, `menu-multi`, `menu-connector`, `menu-empty`, `menu-zone` | the five context menus |
@@ -32,7 +34,7 @@ Status: all three themes drafted, awaiting owner approval. Desk and Poster below
 
 | Use | Font | Size / line height | Notes |
 |---|---|---|---|
-| Shape text | Literata (OFL), bundled | 15 px / 1.5, weight 400 | Bold 700, italic. Justified, no hyphenation |
+| Shape text | Literata (OFL), bundled | 15 px / 1.5, weight 400 | Bold 700, italic. Justified by default (Left or Centered via View > Text Alignment), no hyphenation |
 | Zone titles | Literata | 13 px, weight 600 | Never drawn smaller than 12 px on screen (see Zoom) |
 | Code panel | JetBrains Mono (OFL), bundled | 12.5 px / 1.65 | |
 | Menus, title bar, zoom pill | system UI font (SF on macOS, Segoe UI Variable on Windows) | 13 px (menus), 13 / 12.5 px (title) | Native feel for chrome |
@@ -162,7 +164,7 @@ Typewritten index cards on a linen desk.
 | sky | `#f2f7fc` | `#4a84c4` |
 | lilac | `#f8f4fc` | `#8a66c0` |
 
-Known issue: a monospaced font plus justified text leaves wide gaps between words in narrow cards (see `png/desk/canvas.png`). Options: accept it, pick a proportional typewriter-style font, or let Desk left-align. The owner decides.
+Accepted: a monospaced font plus justified text leaves wide gaps between words in narrow cards (see `png/desk/canvas.png`). View > Text Alignment > Left is the remedy (see `png/desk/mac-text-align.png`).
 
 ## Poster
 

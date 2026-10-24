@@ -27,6 +27,13 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink and may overlap a neighbor, as text growth already can. Nothing is pushed, the document stays saved, and the switch is not undoable.
 - New shapes use one default width in every theme (Paper's), so the model never depends on the theme.
 
+## Text alignment
+
+- Shape text is justified by default. View > Text Alignment switches every shape to Justified, Left or Centered. In justified text the last line of a paragraph is left-aligned.
+- Like the theme, it is an app preference: the same in every open window, remembered across launches, never stored in documents, and not undoable.
+- Alignment only moves words within a line: line breaks, and so shape heights, are the same in all three, so switching never reflows.
+- Justified text in narrow shapes can leave wide gaps between words, most of all in Desk's monospaced font. That is accepted; Left is the remedy.
+
 ## Window
 
 - The canvas fills the window. No toolbar: every action lives in right-click menus and shortcuts.
@@ -103,7 +110,7 @@ Goal: an infinite canvas where shapes can be created, moved and written in, insi
   - Mouse-down on the shape that **is** being edited: dragging selects text. To move it, press Esc first (it stays selected) and then drag.
 - F2, or typing any character except Space, starts editing the selected shape with the caret at the end of its text (typing adds to the existing text).
 - Enter or Esc leaves editing; the shape stays selected.
-- Text is justified. The shape grows vertically to fit text; width stays fixed. A single word wider than the shape is broken across lines rather than widening the shape. Line breaking follows UAX #14, so CJK text breaks between characters and is justified too, with kinsoku (no line starts with closing punctuation such as `。`) (ADR 0003).
+- Text is justified (see Text alignment). The shape grows vertically to fit text; width stays fixed. A single word wider than the shape is broken across lines rather than widening the shape. Line breaking follows UAX #14, so CJK text breaks between characters and is justified too, with kinsoku (no line starts with closing punctuation such as `。`) (ADR 0003).
 - Width: dragging either side edge resizes both sides symmetrically around the center. The cursor changes to a resize arrow near side edges.
 - Height: dragging the bottom edge extends the shape downward. Only the bottom edge resizes vertically.
 - A shape can never be smaller than its text.
@@ -219,6 +226,7 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 
 - Review every interaction on both platforms against the approved mockups: animation timing, hover states, cursor changes, spacing and text rendering.
 - Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
+- Add View > Text Alignment (Left and Centered next to the default Justified).
 - Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
 
 ---

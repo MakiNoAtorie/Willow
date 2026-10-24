@@ -143,6 +143,8 @@ function willow() {
 const SCREENS = [
   { id: 'mac-window', title: 'macOS window · Edit menu', os: 'mac', sc: gull, macMenu: 'Edit', edited: true },
   { id: 'mac-view-menu', title: 'macOS · View menu, Theme', os: 'mac', sc: gull, macMenu: 'View' },
+  { id: 'mac-text-align', title: 'View > Text Alignment: Left', os: 'mac', sc: gull, macMenu: 'View', viewSub: 'align', align: 'left' },
+  { id: 'align-centered', title: 'Text alignment: Centered', sc: gull, sel: ['b'], align: 'center' },
   { id: 'win-window', title: 'Windows title bar · menu', os: 'win', sc: gull, winMenu: true, edited: true },
   { id: 'canvas', title: 'Canvas: select, edit, hover', sc: gull, sel: ['b'], edit: 'd', hover: 'c', hoverLink: ['g','h'], resize: 'a' },
   { id: 'menu-shape', title: 'Shape menu', sc: gull, sel: ['h'], menu: 'shape' },
@@ -263,7 +265,7 @@ function render(screen) {
   for (const s of sc.shapes) {
     const selected = (screen.sel || []).includes(s.id) || screen.edit === s.id;
     const d = el('div', 'shape', { left: s.x + 'px', top: s.y + 'px', width: (s.w || T.shape.width) + 'px',
-      ...shapeStyle(T, s.c, { selected, deepen: 1 - fade, shadowOn: fade > 0.4 }) }, `<span style="opacity:${fade}">${s.t}</span>`);
+      ...shapeStyle(T, s.c, { selected, deepen: 1 - fade, shadowOn: fade > 0.4 }), textAlign: screen.align || 'justify' }, `<span style="opacity:${fade}">${s.t}</span>`);
     if (screen.edit === s.id) d.firstChild.insertAdjacentHTML('beforeend', `<span class="caret" style="width:${T.caret.width}px;background:${T.caret.color}"></span>`);
     world.append(d); els[s.id] = d;
   }
@@ -343,7 +345,7 @@ function render(screen) {
       `<span class="${screen.macMenu === 'Edit' ? 'open' : ''}">Edit</span><span class="${screen.macMenu === 'View' ? 'open' : ''}">View</span>` +
       `<span>Window</span><span>Help</span><span class="right">Sat 24 Oct  10:41</span>`);
     desk.append(mb);
-    if (screen.macMenu) desk.append(macMenu(screen.macMenu));
+    if (screen.macMenu) desk.append(macMenu(screen));
   } else if (screen.winMenu) {
     const m1 = menuEl(os, [['File', '>'], ['Edit', '>'], ['View', '>'], '-', ['Exit', 'Alt+F4']], 1);
     Object.assign(m1.style, { left: '58px', top: '76px' }); desk.append(m1);
@@ -354,7 +356,8 @@ function render(screen) {
   return desk;
 }
 
-function macMenu(which) {
+function macMenu(screen) {
+  const which = screen.macMenu;
   const box = (items, left, top) => {
     const m = el('div', 'menu', { left: left + 'px', top: top + 'px', background: 'rgba(244,244,246,.88)', backdropFilter: 'blur(24px)', color: '#1d1d1f',
       borderRadius: '11px', boxShadow: '0 0 0 .5px rgba(0,0,0,.18), 0 12px 34px rgba(0,0,0,.22)', font: '400 13px/1.2 -apple-system, system-ui', padding: '5px', zIndex: 30 });
@@ -369,9 +372,12 @@ function macMenu(which) {
   const wrap = el('div');
   if (which === 'Edit') wrap.append(box([['Undo', '⌘Z'], ['Redo', '⇧⌘Z'], '-', ['Cut', '⌘X'], ['Copy', '⌘C', true], ['Paste', '⌘V']], 156, 27));
   if (which === 'View') {
-    const v = box([['Show Code Panel', '⌘E'], '-', ['Zoom In', '⌘+'], ['Zoom Out', '⌘−'], ['Actual Size', '⌘0'], '-', ['Theme', '>', true], '-', ['Enter Full Screen', '⌃⌘F']], 196, 27);
+    const align = screen.viewSub === 'align';
+    const v = box([['Show Code Panel', '⌘E'], '-', ['Zoom In', '⌘+'], ['Zoom Out', '⌘−'], ['Actual Size', '⌘0'], '-', ['Theme', '>', !align], ['Text Alignment', '>', align], '-', ['Enter Full Screen', '⌃⌘F']], 196, 27);
     wrap.append(v);
-    queueMicrotask(() => { const row = v.querySelectorAll('.it')[4]; wrap.append(box([['Paper', '', false, true], ['Desk', ''], ['Poster', '']], 196 + v.offsetWidth - 4, 27 + row.offsetTop - 5)); });
+    const sub = align ? [['Justified', ''], ['Left', '', false, true], ['Centered', '']]
+                      : Object.values(THEMES).map(t => [t.name, '', false, t === T]);
+    queueMicrotask(() => { const row = v.querySelectorAll('.it')[align ? 5 : 4]; wrap.append(box(sub, 196 + v.offsetWidth - 4, 27 + row.offsetTop - 5)); });
   }
   return wrap;
 }
