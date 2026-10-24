@@ -1,0 +1,8 @@
+[package]
+name = "willow-core"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+# ADR 0001: no GPUI here, directly or through any dependency (checked by ci.sh / ci.bat).
+[dependencies]
