@@ -53,6 +53,8 @@ Binding rules for build, test and code. Keep under ~8 KB. Add a line only when a
 ## Tests
 - Large or many input files come from generators, not hand-written fixtures. Parser edge cases may use small golden files.
 - Benchmark and tool output is CSV.
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`; bump `GPUI_REV` in `bench.rs` with the GPUI pin. Bench scripts feed input through `Session::handle` (typing via `window.dispatch_keystroke`), never edit the document directly. The app's gpui keeps the `profiler` feature for `frame_duration_snapshot()`.
+- Judge idle by `renders == 0`: ~0.5% CPU at idle is GPUI's display-link floor on macOS.
 
 ## Workflow
 - Implementers don't poll CI: they run the local checks, push, report. The orchestrator merges on green local checks without waiting for CI; if CI later runs red, it sends the failing job's tail back to the same implementer.
