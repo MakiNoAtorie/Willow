@@ -4,7 +4,7 @@ mod session;
 mod theme;
 
 pub use session::{Button, Cursor, Input, Key, Modifiers, Point, Response, Session, Viewport};
-pub use theme::{PAPER, Rgba, Shadow, ShapeStyle, Theme};
+pub use theme::{PAPER, Rgba, SelectionStyle, Shadow, ShapeStyle, Theme};
 
 /// Width of every new shape, in canvas units. Shared by every theme.
 pub const DEFAULT_WIDTH: u32 = 210;

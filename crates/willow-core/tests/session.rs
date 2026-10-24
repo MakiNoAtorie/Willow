@@ -154,3 +154,132 @@ fn a_pan_shows_the_grabbing_cursor_and_ends_on_release() {
     assert!(!r.redraw);
     assert_eq!(s.viewport(), before);
 }
+
+fn click(s: &mut Session, pos: Point, now: Duration) -> willow_core::Response {
+    let (button, mods) = (Button::Left, Modifiers::default());
+    s.handle(Input::PointerDown { pos, button, mods }, now);
+    s.handle(Input::PointerUp { pos, button, mods }, now)
+}
+
+fn id(s: &str) -> willow_core::ShapeId {
+    willow_core::ShapeId(s.into())
+}
+
+#[test]
+fn press_release_on_an_unselected_shape_selects_it() {
+    let mut s = session();
+    assert_eq!(s.selection(), None);
+
+    click(&mut s, ON_SHAPE, T);
+
+    assert_eq!(s.selection(), Some(&id("a")));
+}
+
+#[test]
+fn press_drag_on_a_shape_moves_it_on_release_instead_of_selecting() {
+    let mut s = session();
+    let mods = Modifiers::default();
+    s.handle(
+        Input::PointerDown {
+            pos: ON_SHAPE,
+            button: Button::Left,
+            mods,
+        },
+        T,
+    );
+
+    s.handle(
+        Input::PointerMove {
+            pos: pt(530.0, 380.0),
+            mods,
+        },
+        T,
+    );
+    // Previewed live; the document only changes on release.
+    assert_eq!(s.drag_preview(), Some((&id("a"), 30, -20)));
+    assert_eq!((s.document().shapes[0].x, s.document().shapes[0].y), (0, 0));
+
+    s.handle(
+        Input::PointerUp {
+            pos: pt(530.0, 380.0),
+            button: Button::Left,
+            mods,
+        },
+        T,
+    );
+    assert_eq!(s.drag_preview(), None);
+    assert_eq!(
+        (s.document().shapes[0].x, s.document().shapes[0].y),
+        (30, -20)
+    );
+    assert_eq!(s.selection(), None);
+}
+
+#[test]
+fn moved_positions_are_whole_canvas_units_at_any_zoom() {
+    // A 10 x 7 px drag is 10/z x 7/z canvas units, rounded.
+    for (zoom, expected) in [(0.37, (27, 19)), (1.0, (10, 7)), (2.5, (4, 3))] {
+        let mut s = session();
+        s.set_viewport(willow_core::Viewport {
+            zoom,
+            ..s.viewport()
+        });
+        let on = s.viewport().to_screen(pt(100.0, 20.0));
+
+        drag(&mut s, Button::Left, on, pt(on.x + 10.0, on.y + 7.0));
+
+        let a = &s.document().shapes[0];
+        assert_eq!((a.x, a.y), expected, "zoom {zoom}");
+    }
+}
+
+#[test]
+fn clicking_empty_canvas_deselects_but_panning_does_not() {
+    let mut s = session();
+    click(&mut s, ON_SHAPE, T);
+
+    drag(&mut s, Button::Left, pt(50.0, 50.0), pt(90.0, 50.0));
+    assert_eq!(s.selection(), Some(&id("a")));
+
+    click(&mut s, pt(50.0, 50.0), T);
+    assert_eq!(s.selection(), None);
+}
+
+#[test]
+fn a_click_where_shapes_overlap_hits_the_later_one() {
+    let mut doc = Document::new();
+    let b = doc.next_id();
+    doc.shapes.push(willow_core::Shape::new(b, 100, 20));
+    let mut s = Session::new(doc, &PAPER);
+    s.resize(1000.0, 800.0);
+
+    // Canvas (150, 30) is inside both a (0..210) and b (100..310).
+    let overlap = s.viewport().to_screen(pt(150.0, 30.0));
+    click(&mut s, overlap, T);
+
+    assert_eq!(s.selection(), Some(&id("b")));
+}
+
+fn ms(n: u64) -> Duration {
+    Duration::from_millis(n)
+}
+
+#[test]
+fn the_selection_ring_fades_in_and_out_over_120_ms_and_then_stops() {
+    let mut s = session();
+    let a = id("a");
+
+    assert!(click(&mut s, ON_SHAPE, ms(1000)).animating);
+    assert_eq!(s.selection_rings(ms(1000)), vec![(&a, 0.0)]);
+    let mid = s.selection_rings(ms(1060))[0].1;
+    assert!(0.0 < mid && mid < 1.0, "{mid}");
+    assert!(s.animating(ms(1060)));
+    assert_eq!(s.selection_rings(ms(1120)), vec![(&a, 1.0)]);
+    assert!(!s.animating(ms(1120)));
+
+    assert!(click(&mut s, pt(50.0, 50.0), ms(2000)).animating);
+    assert_eq!(s.selection_rings(ms(2000)), vec![(&a, 1.0)]);
+    assert!(s.animating(ms(2060)));
+    assert_eq!(s.selection_rings(ms(2120)), vec![]);
+    assert!(!s.animating(ms(2120)));
+}

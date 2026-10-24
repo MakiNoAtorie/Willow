@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::{Document, Theme};
+use crate::{Document, ShapeId, Theme};
 
 /// A point in screen pixels (relative to the canvas's top-left) or in canvas units.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -112,10 +112,48 @@ impl Viewport {
     }
 }
 
+/// Screen pixels the pointer may wander before a press counts as a drag.
+const DRAG_START: f32 = 3.0;
+
 /// A pointer gesture in progress.
 #[derive(Clone, Copy, Debug)]
 enum Gesture {
-    Pan { button: Button, last: Point },
+    /// `click` is the press point while a left press on empty canvas could still be a click,
+    /// which deselects on release.
+    Pan {
+        button: Button,
+        last: Point,
+        click: Option<Point>,
+    },
+    /// Left press on the shape at `index`. Once dragged past `DRAG_START`, `to` is the
+    /// previewed top-left; release then moves the shape there instead of selecting it.
+    Press {
+        index: usize,
+        from: Point,
+        to: Option<(i32, i32)>,
+    },
+}
+
+/// A selection ring easing from `from` to `to` (0 hidden, 1 shown), starting at `since`.
+#[derive(Clone, Debug)]
+struct Ring {
+    id: ShapeId,
+    from: f32,
+    to: f32,
+    since: Duration,
+}
+
+impl Ring {
+    fn progress(&self, now: Duration, fade: Duration) -> f32 {
+        (now.saturating_sub(self.since).as_secs_f32() / fade.as_secs_f32()).min(1.0)
+    }
+
+    fn value(&self, now: Duration, fade: Duration) -> f32 {
+        let p = self.progress(now, fade);
+        // ponytail: quadratic ease-out stands in for CSS `ease-out`; use the theme's cubic-bezier
+        // once the core has one (#7's zoom easing).
+        self.from + (self.to - self.from) * (1.0 - (1.0 - p) * (1.0 - p))
+    }
 }
 
 pub struct Session {
@@ -124,6 +162,10 @@ pub struct Session {
     viewport: Viewport,
     gesture: Option<Gesture>,
     space_held: bool,
+    selected: Option<ShapeId>,
+    rings: Vec<Ring>,
+    /// Time of the last event.
+    now: Duration,
 }
 
 impl Session {
@@ -138,6 +180,9 @@ impl Session {
             },
             gesture: None,
             space_held: false,
+            selected: None,
+            rings: Vec::new(),
+            now: Duration::ZERO,
         }
     }
 
@@ -149,8 +194,77 @@ impl Session {
         self.theme
     }
 
+    /// The selected shape (at most one in Phase 2).
+    pub fn selection(&self) -> Option<&ShapeId> {
+        self.selected.as_ref()
+    }
+
+    /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
+    /// still fading out after a deselect.
+    pub fn selection_rings(&self, now: Duration) -> Vec<(&ShapeId, f32)> {
+        let fade = self.theme.selection.fade;
+        self.rings
+            .iter()
+            .filter(|r| r.to > 0.0 || r.progress(now, fade) < 1.0)
+            .map(|r| (&r.id, r.value(now, fade)))
+            .collect()
+    }
+
+    /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
+    pub fn animating(&self, now: Duration) -> bool {
+        let fade = self.theme.selection.fade;
+        self.rings.iter().any(|r| r.progress(now, fade) < 1.0)
+    }
+
+    fn select(&mut self, id: Option<ShapeId>) {
+        if id == self.selected {
+            return;
+        }
+        let (now, fade) = (self.now, self.theme.selection.fade);
+        let old = std::mem::replace(&mut self.selected, id.clone());
+        for (id, to) in [(old, 0.0), (id, 1.0)] {
+            let Some(id) = id else { continue };
+            let from = match self.rings.iter().position(|r| r.id == id) {
+                Some(i) => self.rings.swap_remove(i).value(now, fade),
+                None => 0.0,
+            };
+            self.rings.push(Ring {
+                id,
+                from,
+                to,
+                since: now,
+            });
+        }
+        // Drop rings that have finished fading out.
+        self.rings
+            .retain(|r| r.to > 0.0 || r.progress(now, fade) < 1.0);
+    }
+
+    /// The shape being dragged and its previewed top-left; the document still holds the old one.
+    pub fn drag_preview(&self) -> Option<(&ShapeId, i32, i32)> {
+        match self.gesture {
+            Some(Gesture::Press {
+                index,
+                to: Some((x, y)),
+                ..
+            }) => Some((&self.doc.shapes[index].id, x, y)),
+            _ => None,
+        }
+    }
+
+    /// Moves a shape's top-left to (x, y): one discrete change to the document.
+    pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
+        if let Some(s) = self.doc.shapes.iter_mut().find(|s| &s.id == id) {
+            (s.x, s.y) = (x, y);
+        }
+    }
+
     pub fn viewport(&self) -> Viewport {
         self.viewport
+    }
+
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        self.viewport = viewport;
     }
 
     /// The canvas is now `width` x `height` screen pixels. The first call centers the first shape
@@ -172,22 +286,35 @@ impl Session {
     }
 
     /// Handles one input event at time `now` (any monotonic clock).
-    pub fn handle(&mut self, input: Input, _now: Duration) -> Response {
+    pub fn handle(&mut self, input: Input, now: Duration) -> Response {
+        self.now = now;
         match input {
             Input::PointerDown { pos, button, .. } => {
-                let pans = match button {
-                    _ if self.gesture.is_some() => false,
-                    Button::Left => self.space_held || self.shape_at(pos).is_none(),
-                    Button::Middle => true,
-                    Button::Right => false,
+                let gesture = match (button, self.shape_at(pos)) {
+                    _ if self.gesture.is_some() => None,
+                    (Button::Left, Some(index)) if !self.space_held => Some(Gesture::Press {
+                        index,
+                        from: pos,
+                        to: None,
+                    }),
+                    (Button::Left | Button::Middle, hit) => Some(Gesture::Pan {
+                        button,
+                        last: pos,
+                        click: (button == Button::Left && hit.is_none()).then_some(pos),
+                    }),
+                    (Button::Right, _) => None,
                 };
-                if pans {
-                    self.gesture = Some(Gesture::Pan { button, last: pos });
+                let pans = matches!(gesture, Some(Gesture::Pan { .. }));
+                if gesture.is_some() {
+                    self.gesture = gesture;
                 }
                 self.respond(pans)
             }
             Input::PointerMove { pos, .. } => match &mut self.gesture {
-                Some(Gesture::Pan { last, .. }) => {
+                Some(Gesture::Pan { last, click, .. }) => {
+                    if click.is_some_and(|c| (pos.x - c.x).hypot(pos.y - c.y) >= DRAG_START) {
+                        *click = None;
+                    }
                     let d = Point {
                         x: pos.x - last.x,
                         y: pos.y - last.y,
@@ -196,11 +323,42 @@ impl Session {
                     self.viewport.pan(d);
                     self.respond(true)
                 }
-                None => self.respond(false),
+                Some(Gesture::Press { index, from, to }) => {
+                    let d = Point {
+                        x: pos.x - from.x,
+                        y: pos.y - from.y,
+                    };
+                    if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+                        return self.respond(false);
+                    }
+                    let (s, z) = (&self.doc.shapes[*index], self.viewport.zoom);
+                    *to = Some((
+                        (s.x as f32 + d.x / z).round() as i32,
+                        (s.y as f32 + d.y / z).round() as i32,
+                    ));
+                    self.respond(true)
+                }
+                _ => self.respond(false),
             },
             Input::PointerUp { button, .. } => {
-                if matches!(self.gesture, Some(Gesture::Pan { button: b, .. }) if b == button) {
-                    self.gesture = None;
+                match self.gesture {
+                    Some(Gesture::Pan {
+                        button: b, click, ..
+                    }) if b == button => {
+                        self.gesture = None;
+                        if click.is_some() {
+                            self.select(None);
+                        }
+                    }
+                    Some(Gesture::Press { index, to, .. }) if button == Button::Left => {
+                        self.gesture = None;
+                        let id = self.doc.shapes[index].id.clone();
+                        match to {
+                            Some((x, y)) => self.move_shape(&id, x, y),
+                            None => self.select(Some(id)),
+                        }
+                    }
+                    _ => {}
                 }
                 self.respond(true)
             }
@@ -240,10 +398,10 @@ impl Session {
             redraw,
             cursor: match self.gesture {
                 Some(Gesture::Pan { .. }) => Cursor::Grabbing,
-                None if self.space_held => Cursor::Grab,
-                None => Cursor::Arrow,
+                _ if self.space_held => Cursor::Grab,
+                _ => Cursor::Arrow,
             },
-            animating: false,
+            animating: self.animating(self.now),
         }
     }
 }

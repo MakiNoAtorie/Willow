@@ -9,7 +9,8 @@ use gpui::{
     actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
-    Button, Cursor, Document, Input, Key, Modifiers, PAPER, Rgba, Session, Theme, Viewport,
+    Button, Cursor, Document, Input, Key, Modifiers, PAPER, Rgba, Session, Shadow, ShapeId, Theme,
+    Viewport,
 };
 #[cfg(target_os = "windows")]
 mod titlebar_windows;
@@ -133,13 +134,19 @@ impl Render for Willow {
                 if grabbing {
                     window.set_window_cursor_style(CursorStyle::ClosedHand);
                 }
-                let session = &entity.read(cx).session;
+                let w = entity.read(cx);
+                let (session, now) = (&w.session, w.start.elapsed());
+                if session.animating(now) {
+                    window.request_animation_frame();
+                }
                 paint(
                     bounds,
                     session.document(),
                     session.viewport(),
                     theme,
                     window,
+                    session.drag_preview(),
+                    &session.selection_rings(now),
                 );
             },
         )
@@ -184,7 +191,15 @@ impl Render for Willow {
 }
 
 /// Canvas, dot grid and shapes. Zoom is 1 until zoom lands (#7).
-fn paint(bounds: Bounds<Pixels>, doc: &Document, vp: Viewport, t: &Theme, window: &mut Window) {
+fn paint(
+    bounds: Bounds<Pixels>,
+    doc: &Document,
+    vp: Viewport,
+    t: &Theme,
+    window: &mut Window,
+    preview: Option<(&ShapeId, i32, i32)>,
+    rings: &[(&ShapeId, f32)],
+) {
     window.paint_quad(gpui::fill(bounds, color(t.canvas)));
     // Screen position of canvas (0, 0), on whole pixels.
     let o = vp.to_screen(willow_core::Point::default());
@@ -217,26 +232,36 @@ fn paint(bounds: Bounds<Pixels>, doc: &Document, vp: Viewport, t: &Theme, window
         y += s;
     }
 
-    let shadows: Vec<BoxShadow> = t
-        .shape
-        .shadow
-        .iter()
-        .map(|s| BoxShadow {
-            color: color(s.color),
-            offset: point(px(s.x), px(s.y)),
-            // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
-            blur_radius: px(s.blur / 2.0),
-            spread_radius: px(s.spread),
-            inset: false,
-        })
-        .collect();
     let radius = px(t.shape.radius);
+    let sel = &t.selection;
     for shape in &doc.shapes {
+        let (x, y) = match preview {
+            Some((id, x, y)) if *id == shape.id => (x, y),
+            _ => (shape.x, shape.y),
+        };
         let b = Bounds::new(
-            origin + point(px(shape.x as f32), px(shape.y as f32)),
+            origin + point(px(x as f32), px(y as f32)),
             size(px(shape.width as f32), px(shape.height(t))),
         );
+        let ring = rings
+            .iter()
+            .find(|(id, _)| **id == shape.id)
+            .map_or(0.0, |r| r.1);
+        let shadows = shadows(&t.shape.shadow, &sel.shadow, ring);
         window.paint_drop_shadows(b, Corners::all(radius), &shadows);
+        if ring > 0.0 {
+            // As the mockups' box-shadow spreads: a canvas gap, then the accent ring, both growing.
+            let out = (sel.gap + sel.ring) * ring;
+            let ring_bounds = b.dilate(px(out));
+            window.paint_quad(quad(
+                ring_bounds,
+                radius + px(out),
+                color(t.canvas),
+                px(sel.ring * ring),
+                color(sel.color),
+                Default::default(),
+            ));
+        }
         window.paint_quad(quad(
             b,
             radius,
@@ -246,6 +271,26 @@ fn paint(bounds: Bounds<Pixels>, doc: &Document, vp: Viewport, t: &Theme, window
             Default::default(),
         ));
     }
+}
+
+/// The resting shadow eased toward the selected one by `k` (0 to 1).
+fn shadows(rest: &[Shadow; 2], selected: &[Shadow; 2], k: f32) -> Vec<BoxShadow> {
+    let mix = |a: f32, b: f32| a + (b - a) * k;
+    rest.iter()
+        .zip(selected)
+        .map(|(a, b)| {
+            let (ca, cb) = (a.color.0.to_be_bytes(), b.color.0.to_be_bytes());
+            let c: [u8; 4] = std::array::from_fn(|i| mix(ca[i] as f32, cb[i] as f32).round() as u8);
+            BoxShadow {
+                color: color(Rgba(u32::from_be_bytes(c))),
+                offset: point(px(mix(a.x, b.x)), px(mix(a.y, b.y))),
+                // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
+                blur_radius: px(mix(a.blur, b.blur) / 2.0),
+                spread_radius: px(mix(a.spread, b.spread)),
+                inset: false,
+            }
+        })
+        .collect()
 }
 
 /// macOS: transparent title bar over the canvas; the traffic lights are native.

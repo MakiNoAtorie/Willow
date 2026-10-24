@@ -1,5 +1,7 @@
 //! Themes as plain data, from `design/mockups/themes.js`. Drawing reads every visual value from here.
 
+use std::time::Duration;
+
 use crate::Color;
 
 /// A color as 0xRRGGBBAA.
@@ -35,6 +37,18 @@ pub struct ShapeStyle {
     pub shadow: [Shadow; 2],
 }
 
+/// The selected shape's look: a canvas-colored `gap`, then a `ring` of `color`, and `shadow`
+/// in place of the resting one. Fades in and out over `fade`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionStyle {
+    pub gap: f32,
+    pub ring: f32,
+    pub color: Rgba,
+    /// Same layer count as `ShapeStyle::shadow`, so one can ease into the other.
+    pub shadow: [Shadow; 2],
+    pub fade: Duration,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub name: &'static str,
@@ -49,6 +63,7 @@ pub struct Theme {
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
     pub shape: ShapeStyle,
+    pub selection: SelectionStyle,
     /// Shape fill per color, indexed in `Color::ALL` order.
     pub pastel: [Rgba; 7],
     /// Saturated swatch per color, indexed in `Color::ALL` order.
@@ -100,6 +115,28 @@ pub const PAPER: Theme = Theme {
                 color: rgba(70, 50, 20, 0.08),
             },
         ],
+    },
+    selection: SelectionStyle {
+        gap: 2.0,
+        ring: 2.0,
+        color: hex(0x8b7760),
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 2.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.07),
+            },
+            Shadow {
+                x: 0.0,
+                y: 6.0,
+                blur: 18.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.12),
+            },
+        ],
+        fade: Duration::from_millis(120),
     },
     pastel: [
         hex(0xe9e5dd),
