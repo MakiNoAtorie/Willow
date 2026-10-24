@@ -1,12 +1,16 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
+mod draw;
 mod edit;
+mod generate;
 mod history;
 mod layout;
 mod session;
 mod theme;
 mod zoom;
 
+pub use draw::{Frame, Visible};
+pub use generate::generate;
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use session::{
     Button, CaretView, Cursor, Editing, Input, Key, Modifiers, Motion, Point, Response, Session,
