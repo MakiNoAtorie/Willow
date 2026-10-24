@@ -20,6 +20,7 @@ Binding rules. Keep under ~8 KB; add only rules that bind future work, delete st
 - Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
 - Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor`/`join_zone` (undoable, one-color trees); `Document::link`/`unlink`/`recolor` are for loaders and generators. Bulk loaders do their own union-find.
 - A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Side rule: `willow_core::side`; centers need `Session::shape_height`.
+- Shapes are removed only through `Session::delete(ids)` (one step, story order, reconnects, drops them from selection); Cut calls it after copying. Story order outside saving: `format::story_order(doc, heights)`. ID tie-breaks use generation order (shorter first, then alphabetical).
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
 ## Files
@@ -60,6 +61,7 @@ Binding rules. Keep under ~8 KB; add only rules that bind future work, delete st
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
+- Property tests use the built-in fixed-seed xorshift (no new dependency) and print the case number in every assertion.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1). Tool output is CSV.
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
 
