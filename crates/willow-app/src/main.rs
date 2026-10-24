@@ -430,6 +430,12 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
             text::paint_text(window, o, &shape.text, &v.layout, t, z, frame.text_opacity);
+            if let Some(m) = (session.editing())
+                .filter(|e| e.id == shape.id)
+                .and_then(|e| e.marked.clone())
+            {
+                text::paint_marked(window, o, &v.layout, m, t, z);
+            }
         }
     }
     if let Some(c) = session.caret(now)

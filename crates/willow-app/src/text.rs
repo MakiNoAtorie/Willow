@@ -125,6 +125,30 @@ pub(crate) fn paint_text(
     }
 }
 
+/// Underlines byte range `marked` (IME composition) of text laid out as `layout`, with the
+/// text's top-left at `origin` (screen), scaled by zoom `z`: one stroke per line it spans.
+pub(crate) fn paint_marked(
+    window: &mut Window,
+    origin: gpui::Point<Pixels>,
+    layout: &Layout,
+    marked: Range<usize>,
+    t: &Theme,
+    z: f32,
+) {
+    // Just under the em box, centered in the line.
+    let below = (t.line_height() + t.font_size) / 2.0;
+    for line in &layout.lines {
+        let mut span = (line.clusters.iter())
+            .filter(|c| c.range.start < marked.end && marked.start < c.range.end)
+            .map(|c| (c.x, c.x + c.width));
+        let Some(first) = span.next() else { continue };
+        let (x0, x1) = span.fold(first, |(a, _), (_, b)| (a, b));
+        let p = origin + point(px(x0 * z), px((line.y + below) * z));
+        let b = Bounds::new(p, size(px((x1 - x0) * z), px(t.caret.marked_underline)));
+        window.paint_quad(gpui::fill(b, color(t.ink)));
+    }
+}
+
 /// UTF-8 offset to UTF-16 offset in `s`.
 fn to16(s: &str, i: usize) -> usize {
     s[..i.min(s.len())].encode_utf16().count()
@@ -153,7 +177,6 @@ impl Willow {
     }
 }
 
-// ponytail: IME marked text isn't shown or tracked (#13); a commit arrives as plain text.
 impl EntityInputHandler for Willow {
     fn text_for_range(
         &mut self,
@@ -184,10 +207,14 @@ impl EntityInputHandler for Willow {
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        None
+        let m = self.session.editing()?.marked.clone()?;
+        let s = self.edited_text();
+        Some(to16(&s, m.start)..to16(&s, m.end))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.input(Input::Unmark, cx);
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -204,27 +231,50 @@ impl EntityInputHandler for Willow {
 
     fn replace_and_mark_text_in_range(
         &mut self,
-        _: Option<Range<usize>>,
-        _: &str,
-        _: Option<Range<usize>>,
+        range: Option<Range<usize>>,
+        text: &str,
+        selected: Option<Range<usize>>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        let s = self.edited_text();
+        let replace = range.map(|r| from16(&s, r.start)..from16(&s, r.end));
+        // The IME's selection is UTF-16 into the new marked text.
+        let selected = selected.map(|r| from16(text, r.start)..from16(text, r.end));
+        let text = text.to_string();
+        self.input(
+            Input::Mark {
+                text,
+                replace,
+                selected,
+            },
+            cx,
+        );
     }
 
+    /// Screen bounds of the range's start, as wide as the range while it stays on one line:
+    /// macOS puts the IME candidate window under it.
     fn bounds_for_range(
         &mut self,
-        _: Range<usize>,
+        range: Range<usize>,
         _: Bounds<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let c = self.session.caret(self.start.elapsed())?;
+        let s = self.edited_text();
+        let (a, b) = (from16(&s, range.start), from16(&s, range.end));
+        let (a, b) = (self.session.text_point(a)?, self.session.text_point(b)?);
         let vp = self.session.viewport();
-        let p = vp.to_screen(c.pos);
+        let width = if a.y == b.y {
+            (b.x - a.x) * vp.zoom
+        } else {
+            0.0
+        };
+        let p = vp.to_screen(a);
+        let height = self.session.theme().line_height() * vp.zoom;
         Some(Bounds::new(
             self.canvas_origin + point(px(p.x), px(p.y)),
-            size(px(1.0), px(c.height * vp.zoom)),
+            size(px(width.max(1.0)), px(height)),
         ))
     }
 

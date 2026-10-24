@@ -110,6 +110,17 @@ pub enum Input {
     Move(Motion),
     /// Deletes the text selection, or else from the caret to where the motion goes.
     Delete(Motion),
+    /// IME composition: replaces byte range `replace`, or else the marked text, or else the
+    /// text selection with `text` and marks it. `selected` (bytes into `text`) is the caret
+    /// and anchor, else the caret goes after it. Marked text is no undo step until a `Text`
+    /// input commits it. Starts editing on a selected shape, as `Text` does.
+    Mark {
+        text: String,
+        replace: Option<Range<usize>>,
+        selected: Option<Range<usize>>,
+    },
+    /// Commits the marked text as it is. Any input other than `Mark` and `Text` does too.
+    Unmark,
     /// Shift+motion: moves the caret and keeps the selection's other end.
     Select(Motion),
     SelectAll,
@@ -185,6 +196,8 @@ pub struct Editing {
     pub caret: Caret,
     /// The text selection's other end; `caret.offset` when nothing is selected.
     pub anchor: usize,
+    /// IME composition shown in the text, not yet committed: no undo step holds it.
+    pub marked: Option<Range<usize>>,
     /// Column that up/down keep, set by the first vertical move.
     goal_x: Option<f32>,
     /// (bold, italic) for the next typed text, set by a toggle with nothing selected; any
@@ -399,6 +412,22 @@ impl Session {
         })
     }
 
+    /// Top of the caret stop at byte `offset` of the edited text, in canvas units; the line
+    /// is `Theme::line_height()` tall. The app places the IME candidate window with it.
+    pub fn text_point(&self, offset: usize) -> Option<Point> {
+        let (shape, _) = self.edited()?;
+        let c = Caret {
+            offset,
+            upstream: false,
+        };
+        let p = self.layout(shape).caret_point(c);
+        let pad = &self.theme.shape;
+        Some(Point {
+            x: shape.x as f32 + pad.pad_x + p.x,
+            y: shape.y as f32 + pad.pad_y + p.y,
+        })
+    }
+
     fn select(&mut self, id: Option<ShapeId>) {
         if id == self.selected {
             return;
@@ -540,6 +569,14 @@ impl Session {
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
+        // Anything that may edit, undo or end the session commits the marked text first, so
+        // no undo step ever holds it. Space keys come while the IME converts: leave it alone.
+        match input {
+            Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
+            Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
+            Input::ResetZoom => {}
+            _ => self.unmark(),
+        }
         match input {
             Input::PointerDown { pos, button, mods } => {
                 let hit = self.shape_at(pos);
@@ -750,10 +787,49 @@ impl Session {
                     // A range given before editing started indexes nothing: append.
                     replace = None;
                 }
-                let range = replace.unwrap_or_else(|| self.text_selection());
+                let marked = self.editing.as_ref().and_then(|e| e.marked.clone());
+                let range = (replace.or(marked)).unwrap_or_else(|| self.text_selection());
+                let range = self.drop_marked(range);
                 self.replace(range, &text);
                 self.respond(true)
             }
+            Input::Mark {
+                text,
+                mut replace,
+                selected,
+            } => {
+                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                if self.editing.is_none() {
+                    match self.selected.clone() {
+                        Some(id) if !text.trim().is_empty() => self.start_editing(id),
+                        _ => return self.respond(false),
+                    }
+                    replace = None;
+                }
+                let marked = self.editing.as_ref().and_then(|e| e.marked.clone());
+                let range = (replace.or(marked)).unwrap_or_else(|| self.text_selection());
+                let range = self.drop_marked(range);
+                // Text the composition replaces outside the marked text is a real edit.
+                let pending = self.editing.as_ref().and_then(|e| e.pending);
+                self.replace(range.clone(), "");
+                if let Some(e) = &mut self.editing {
+                    e.pending = pending;
+                }
+                let start = range.start;
+                self.raw_replace(start..start, &text);
+                let sel = selected.unwrap_or(text.len()..text.len());
+                let at = |i: usize| start + i.min(text.len());
+                self.set_caret(Caret {
+                    offset: at(sel.end),
+                    upstream: false,
+                });
+                if let Some(e) = &mut self.editing {
+                    (e.anchor, e.pending) = (at(sel.start), pending);
+                    e.marked = (!text.is_empty()).then(|| start..start + text.len());
+                }
+                self.respond(true)
+            }
+            Input::Unmark => self.respond(true),
             Input::StartEditing => match self.selected.clone() {
                 Some(id) if self.editing.is_none() => {
                     self.start_editing(id);
@@ -851,6 +927,7 @@ impl Session {
                 upstream: false,
             },
             anchor: end,
+            marked: None,
             goal_x: None,
             pending: None,
             since: self.now,
@@ -972,6 +1049,45 @@ impl Session {
             offset: end,
             upstream: false,
         });
+    }
+
+    /// Changes the edited text outside the history, in the pending style: only marked text
+    /// goes this way.
+    fn raw_replace(&mut self, range: Range<usize>, text: &str) {
+        let Some(e) = &self.editing else { return };
+        if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
+            let end = s.text.replace(range.clone(), text);
+            if let Some((bold, italic)) = e.pending {
+                s.text.set_style(range.start..end, false, bold);
+                s.text.set_style(range.start..end, true, italic);
+            }
+        }
+    }
+
+    /// Takes the marked text out of the document; returns `r` as it indexes the text without it.
+    fn drop_marked(&mut self, r: Range<usize>) -> Range<usize> {
+        let Some(m) = self.editing.as_mut().and_then(|e| e.marked.take()) else {
+            return r;
+        };
+        self.raw_replace(m.clone(), "");
+        let f = |i: usize| {
+            if i >= m.end {
+                i - m.len()
+            } else {
+                i.min(m.start)
+            }
+        };
+        f(r.start)..f(r.end)
+    }
+
+    /// Commits the marked text as it is, through the history.
+    fn unmark(&mut self) {
+        let Some(m) = self.editing.as_ref().and_then(|e| e.marked.clone()) else {
+            return;
+        };
+        let text = self.edited().map(|(_, s)| s[m.clone()].to_string());
+        let at = self.drop_marked(m.start..m.start);
+        self.replace(at, &text.unwrap_or_default());
     }
 
     /// Updates the previewed size of the resize gesture for the pointer at `pos`.

@@ -165,6 +165,8 @@ pub struct CaretStyle {
     /// How long the caret stays shown, then hidden.
     pub blink: Duration,
     pub idle: Duration,
+    /// Underline under IME marked text, in ink color: thickness in screen px at any zoom.
+    pub marked_underline: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -272,6 +274,7 @@ pub const PAPER: Theme = Theme {
         blink: Duration::from_millis(530),
         // ponytail: "a few seconds" after the last edit; tune by feel.
         idle: Duration::from_secs(5),
+        marked_underline: 1.0,
     },
     pastel: [
         hex(0xe9e5dd),

@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use unicode_linebreak::linebreaks;
+use unicode_linebreak::{BreakClass, break_property, linebreaks};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Paragraph, Point, RichText, Theme};
@@ -168,8 +168,26 @@ impl Layout {
 /// Slack for float sums when comparing against the width.
 const EPS: f32 = 0.01;
 
-/// Lays `text` out in `width` canvas units: greedy breaks at UAX #14 opportunities, between
-/// clusters inside a word wider than the line; non-last lines of a paragraph justified.
+/// Ideographs, kana and Hangul: justification may open a gap at a break next to one.
+fn cjk(s: &str) -> bool {
+    use BreakClass::*;
+    s.chars().next().is_some_and(|c| {
+        matches!(
+            break_property(c as u32),
+            Ideographic
+                | ConditionalJapaneseStarter
+                | HangulLvSyllable
+                | HangulLvtSyllable
+                | HangulLJamo
+                | HangulVJamo
+                | HangulTJamo
+        )
+    })
+}
+
+/// Lays `text` out in `width` canvas units: greedy breaks at UAX #14 opportunities (so CJK
+/// breaks between characters, with kinsoku), between clusters inside a word wider than the
+/// line; non-last lines of a paragraph justified over spaces and CJK break gaps.
 pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> Layout {
     let lh = theme.line_height();
     let empty = [Paragraph::default()];
@@ -190,6 +208,7 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
             .iter()
             .map(|r| s[r.clone()].chars().all(char::is_whitespace))
             .collect();
+        let wide: Vec<bool> = ranges.iter().map(|r| cjk(&s[r.clone()])).collect();
         // starts[i]: a line may start at cluster i.
         let mut starts = vec![false; ranges.len()];
         let mut i = 0;
@@ -217,7 +236,15 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
             }
             // Spaces at the line's end hang: they neither count nor stretch.
             let ink_end = (a..end).rev().find(|&i| !space[i]).map_or(a, |i| i + 1);
-            let gaps = (a..ink_end).filter(|&i| space[i]).count();
+            // Cluster i stretches: a space, or the left side of a CJK break gap.
+            let stretch = |i: usize| {
+                space[i]
+                    || (i + 1 < ink_end
+                        && starts[i + 1]
+                        && !space[i + 1]
+                        && (wide[i] || wide[i + 1]))
+            };
+            let gaps = (a..ink_end).filter(|&i| stretch(i)).count();
             let natural: f32 = adv[a..ink_end].iter().sum();
             let extra = if end < n && gaps > 0 {
                 ((width - natural) / gaps as f32).max(0.0)
@@ -227,7 +254,12 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
             let mut x = 0.0;
             let clusters: Vec<Cluster> = (a..end)
                 .map(|i| {
-                    let w = adv[i] + if space[i] && i < ink_end { extra } else { 0.0 };
+                    let w = adv[i]
+                        + if i < ink_end && stretch(i) {
+                            extra
+                        } else {
+                            0.0
+                        };
                     let c = Cluster {
                         range: para_start + ranges[i].start..para_start + ranges[i].end,
                         x,
