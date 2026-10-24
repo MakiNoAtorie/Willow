@@ -89,7 +89,11 @@ impl Transition {
 pub struct ZoomStyle {
     pub min: f32,
     pub max: f32,
-    /// Below this zoom text is gone and the dot grid is hidden.
+    /// Text is fully shown at and above `fade_start` and fades linearly to gone at `fade_end`,
+    /// while fills deepen up to `block_mix` toward their picker color.
+    pub fade_start: f32,
+    pub block_mix: f32,
+    /// Below this zoom text is gone and shadows and the dot grid are dropped.
     pub fade_end: f32,
 }
 
@@ -289,7 +293,9 @@ pub const PAPER: Theme = Theme {
     zoom: ZoomStyle {
         min: 0.1,
         max: 4.0,
+        fade_start: 0.75,
         fade_end: 0.5,
+        block_mix: 0.3,
     },
     zoom_step: Transition {
         duration: Duration::from_millis(120),

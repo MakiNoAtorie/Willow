@@ -300,8 +300,13 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
 
 /// Canvas, dot grid, shapes with their text, and the caret.
 fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
-    let (doc, vp, t) = (session.document(), session.viewport(), session.theme());
-    let (preview, rings) = (session.drag_preview(), session.selection_rings(now));
+    let (vp, t) = (session.viewport(), session.theme());
+    let rings = session.selection_rings(now);
+    let (w, h) = (bounds.size.width.into(), bounds.size.height.into());
+    let frame = session.draw(
+        willow_core::Point::default(),
+        willow_core::Point { x: w, y: h },
+    );
     window.paint_quad(gpui::fill(bounds, color(t.canvas)));
     // Screen position of canvas (0, 0), on whole pixels.
     let o = vp.to_screen(willow_core::Point::default());
@@ -316,12 +321,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         phase(origin.y, bounds.origin.y),
     );
     let dot = color(t.grid_dot);
-    // No grid below fade_end: it would be a haze of thousands of dots.
-    let mut y = if z < t.zoom.fade_end {
-        f32::INFINITY
-    } else {
-        y0
-    };
+    let mut y = if frame.grid { y0 } else { f32::INFINITY };
     while y < f32::from(bounds.size.height) {
         let mut x = x0;
         while x < f32::from(bounds.size.width) {
@@ -342,29 +342,20 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
 
     let radius = px(t.shape.radius * z);
     let sel = &t.selection;
-    let resized = session.resize_preview();
-    for shape in &doc.shapes {
-        let shape = resized
-            .as_ref()
-            .filter(|r| r.id == shape.id)
-            .unwrap_or(shape);
-        let (x, y) = match preview {
-            Some((id, x, y)) if *id == shape.id => (x, y),
-            _ => (shape.x, shape.y),
-        };
+    for v in &frame.shapes {
+        let shape = &*v.shape;
         let b = Bounds::new(
-            origin + point(px(x as f32 * z), px(y as f32 * z)),
-            size(
-                px(shape.width as f32 * z),
-                px(session.shape_height(shape) * z),
-            ),
+            origin + point(px(v.x as f32 * z), px(v.y as f32 * z)),
+            size(px(shape.width as f32 * z), px(v.height * z)),
         );
         let ring = rings
             .iter()
             .find(|(id, _)| **id == shape.id)
             .map_or(0.0, |r| r.1);
-        let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
-        window.paint_drop_shadows(b, Corners::all(radius), &shadows);
+        if frame.shadows {
+            let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
+            window.paint_drop_shadows(b, Corners::all(radius), &shadows);
+        }
         if ring > 0.0 {
             // As the mockups' box-shadow spreads: a canvas gap, then the accent ring, both growing.
             let out = (sel.gap + sel.ring) * ring * z;
@@ -381,15 +372,14 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         window.paint_quad(quad(
             b,
             radius,
-            color(t.pastel(shape.color)),
+            color(v.fill),
             px(0.),
             gpui::transparent_black(),
             Default::default(),
         ));
-        // Text is gone where the grid is: it would be under about 7 px on screen.
-        if z >= t.zoom.fade_end {
+        if frame.text_opacity > 0.0 {
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
-            text::paint_text(window, o, &shape.text, &session.layout(shape), t, z);
+            text::paint_text(window, o, &shape.text, &v.layout, t, z, frame.text_opacity);
         }
     }
     if let Some(c) = session.caret(now)
@@ -464,8 +454,20 @@ fn set_menus(cx: &mut App) {
     ]);
 }
 
+/// Seed for `--generate N`: the same document on every run and machine.
+const GENERATE_SEED: u64 = 1;
+
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
+    // `--generate N`: open a generated document of N shapes instead of a new one.
+    let args: Vec<String> = std::env::args().collect();
+    let doc = match args.iter().position(|a| a == "--generate") {
+        Some(i) => {
+            let n = args.get(i + 1).and_then(|n| n.parse().ok());
+            willow_core::generate(n.expect("--generate takes a shape count"), GENERATE_SEED)
+        }
+        None => Document::new(),
+    };
+    gpui_platform::application().run(move |cx: &mut App| {
         let quit = if cfg!(target_os = "macos") {
             "cmd-q"
         } else {
@@ -563,7 +565,7 @@ fn main() {
                     window.focus(&focus, cx);
                     Willow {
                         session: Session::new(
-                            Document::new(),
+                            doc,
                             &PAPER,
                             Box::new(text::TextMeasure(window.text_system().clone())),
                         ),

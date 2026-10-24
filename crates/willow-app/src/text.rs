@@ -71,7 +71,7 @@ impl Measure for TextMeasure {
 }
 
 /// Paints `text` laid out as `layout`, with the text's top-left at `origin` (screen), scaled
-/// by zoom `z`. Each glyph keeps its offset inside its cluster; the cluster goes where the
+/// by zoom `z`, in ink at `opacity`. Each glyph keeps its offset inside its cluster; the cluster goes where the
 /// core placed it.
 pub(crate) fn paint_text(
     window: &mut Window,
@@ -80,11 +80,12 @@ pub(crate) fn paint_text(
     layout: &Layout,
     t: &Theme,
     z: f32,
+    opacity: f32,
 ) {
     let ts = window.text_system().clone();
     // Quantised to half pixels to bound glyph atlas entries across zoom levels.
     let font_size = px((t.font_size * z * 2.0).round() / 2.0);
-    let ink = color(t.ink);
+    let ink = color(t.ink).opacity(opacity);
     let mut shaped: Option<(usize, Arc<LineLayout>, Vec<f32>)> = None;
     for line in &layout.lines {
         let Some(para) = text.paragraphs.get(line.para) else {
