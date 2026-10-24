@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use gpui::{AnyWindowHandle, App, Context, PromptLevel, Window, WindowHandle};
+use gpui::{AnyWindowHandle, App, AsyncApp, Context, PromptLevel, Task, Window, WindowHandle};
 use willow_core::{Document, load};
 
 use crate::{Content, Willow, open_window};
@@ -83,8 +83,20 @@ fn alert(window: &mut Window, message: &str, detail: &str, cx: &mut App) {
 impl Willow {
     /// Saves to the document's file, or asks for one first (always, with `choose`).
     pub(crate) fn save(&mut self, choose: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_task(choose, window, cx).detach();
+    }
+
+    /// Like `save`; resolves to whether the document is saved afterwards (false when the
+    /// panel was cancelled or the write failed).
+    fn save_task(
+        &mut self,
+        choose: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
         if let Some(path) = self.path.clone().filter(|_| !choose) {
-            return self.write(path, window, cx);
+            self.write(path, window, cx);
+            return Task::ready(self.session.is_saved());
         }
         let mut panel = panel().set_file_name(format!("{}.willow", self.name()));
         if let Some(dir) = self.path.as_ref().and_then(|p| p.parent()) {
@@ -92,16 +104,17 @@ impl Willow {
         }
         let pick = panel.save_file();
         cx.spawn_in(window, async move |this, cx| {
-            if let Some(file) = pick.await {
-                let mut path = file.path().to_path_buf();
-                if path.extension().is_none() {
-                    path.set_extension("willow");
-                }
-                this.update_in(cx, |w, window, cx| w.write(path, window, cx))
-                    .ok();
+            let Some(file) = pick.await else { return false };
+            let mut path = file.path().to_path_buf();
+            if path.extension().is_none() {
+                path.set_extension("willow");
             }
+            this.update_in(cx, |w, window, cx| {
+                w.write(path, window, cx);
+                w.session.is_saved()
+            })
+            .unwrap_or(false)
         })
-        .detach();
     }
 
     fn write(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -156,4 +169,57 @@ impl Willow {
         self.session.disk_changed(bytes.as_deref());
         cx.notify();
     }
+}
+
+/// Asks Save / Don't save / Cancel when the window has unsaved changes. Resolves to true when
+/// the caller may discard the window (saved, or Don't save), false when the user cancelled
+/// (including cancelling the save panel).
+pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
+    let ask = w.update(cx, |this, window, cx| {
+        if this.session.is_saved() {
+            return None;
+        }
+        window.activate_window();
+        let message = format!("Do you want to save changes to “{}”?", this.name());
+        let detail = "Your changes will be lost if you don't save them.";
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &message,
+            Some(detail),
+            &["Save", "Don't Save", "Cancel"],
+            cx,
+        );
+        Some(answer)
+    });
+    let Ok(Some(answer)) = ask else { return true };
+    match answer.await {
+        Ok(0) => {
+            let saving = w.update(cx, |this, window, cx| this.save_task(false, window, cx));
+            match saving {
+                Ok(task) => task.await,
+                Err(_) => true,
+            }
+        }
+        // Don't save: the one place to drop the window's recovery file (#25).
+        Ok(1) => true,
+        _ => false,
+    }
+}
+
+/// Quits after settling each window in turn; Cancel anywhere leaves the rest open.
+pub(crate) fn quit(cx: &mut App) {
+    let windows: Vec<_> = cx
+        .windows()
+        .into_iter()
+        .filter_map(|w| w.downcast::<Willow>())
+        .collect();
+    cx.spawn(async move |cx| {
+        for w in windows {
+            if !settle(w, cx).await {
+                return;
+            }
+        }
+        cx.update(|cx| cx.quit());
+    })
+    .detach();
 }

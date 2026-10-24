@@ -706,7 +706,7 @@ fn main() {
             .expect("bundled fonts");
         #[cfg(target_os = "macos")]
         set_menus(cx);
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
         cx.set_quit_mode(QuitMode::LastWindowClosed);
@@ -729,6 +729,21 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
+            if let Some(w) = window.window_handle().downcast::<Willow>() {
+                window.on_window_should_close(cx, move |_, cx| {
+                    if w.read(cx).is_ok_and(|w| w.session.is_saved()) {
+                        return true;
+                    }
+                    // Close only once the user has settled unsaved changes.
+                    cx.spawn(async move |cx| {
+                        if file::settle(w, cx).await {
+                            w.update(cx, |_, window, _| window.remove_window()).ok();
+                        }
+                    })
+                    .detach();
+                    false
+                });
+            }
             cx.new(|cx| {
                 let focus = cx.focus_handle();
                 window.focus(&focus, cx);
