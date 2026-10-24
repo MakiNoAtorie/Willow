@@ -109,6 +109,8 @@ struct Willow {
     start: Instant,
     /// Redraws at the caret's next blink edge; replacing it cancels the old timer.
     wake: Option<gpui::Task<()>>,
+    /// Lays the document out ahead of the first save; see `measure_ahead`.
+    ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
     /// Set by `--bench`.
@@ -146,7 +148,7 @@ impl Content {
     }
 
     fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
-        let measure = Box::new(text::TextMeasure(window.text_system().clone()));
+        let measure = Box::new(text::TextMeasure::new(window.text_system().clone()));
         let session = Session::open(self.loaded, self.bytes, &PAPER, measure);
         (session, self.path)
     }
@@ -178,7 +180,24 @@ impl Willow {
         let path;
         (self.session, path) = content.session(window);
         self.set_path(path, window);
+        self.measure_ahead(cx);
         cx.notify();
+    }
+
+    /// Lays a just-opened document out a few hundred shapes at a time while idle, without
+    /// redrawing, so the first save (which needs every shape's height) doesn't stall on it.
+    fn measure_ahead(&mut self, cx: &mut Context<Self>) {
+        self.ahead = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(4))
+                    .await;
+                let done = this.update(cx, |w, _| w.session.measure_ahead(200));
+                if done.unwrap_or(true) {
+                    break;
+                }
+            }
+        }));
     }
 
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
@@ -831,19 +850,22 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 });
                 let recovery = content.recovery.clone();
                 let (session, path) = content.session(window);
-                Willow {
+                let mut w = Willow {
                     session,
                     focus,
                     cursor: Cursor::Arrow,
                     canvas_origin: Default::default(),
                     start: Instant::now(),
                     wake: None,
+                    ahead: None,
                     _activation,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
                     bench: bench.map(bench::Bench::new),
                     path,
                     mtime: None,
-                }
+                };
+                w.measure_ahead(cx);
+                w
             })
         },
     )

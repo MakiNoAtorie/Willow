@@ -1,6 +1,8 @@
 //! Shape text on the GPUI side: the text-measuring function the core lays out with, glyphs
 //! painted one by one where the core put their clusters, and the platform text input adapter.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -8,7 +10,7 @@ use gpui::{
     Bounds, Context, EntityInputHandler, Font, FontStyle, FontWeight, LineLayout, Pixels, TextRun,
     UTF16Selection, Window, WindowTextSystem, point, px, size,
 };
-use willow_core::{Input, Layout, Measure, Paragraph, RichText, Theme};
+use willow_core::{Input, Layout, Measure, Paragraph, RichText, Run, Theme};
 
 use crate::{Willow, color};
 
@@ -60,12 +62,60 @@ fn x_by_byte(line: &LineLayout) -> Vec<f32> {
     x
 }
 
-/// The core's text-measuring function, backed by the window's text system.
-pub(crate) struct TextMeasure(pub Arc<WindowTextSystem>);
+/// The core's text-measuring function, backed by the window's text system. Shapes each word
+/// (and each run of spaces) of a style run on its own and keeps it, so a paragraph of known
+/// words costs no shaping: the first save after opening a big file measures every shape.
+// ponytail: the word cache never shrinks; bound it if a session's vocabulary ever shows in RSS.
+pub(crate) struct TextMeasure {
+    ts: Arc<WindowTextSystem>,
+    words: RefCell<Words>,
+}
+
+/// x at every byte of a word shaped alone, per style (`bold as usize * 2 + italic`), for one
+/// font and size.
+#[derive(Default)]
+struct Words {
+    font: (&'static str, f32),
+    by_style: [HashMap<String, Box<[f32]>>; 4],
+}
+
+impl TextMeasure {
+    pub(crate) fn new(ts: Arc<WindowTextSystem>) -> Self {
+        let words = RefCell::default();
+        TextMeasure { ts, words }
+    }
+}
 
 impl Measure for TextMeasure {
     fn advances(&self, para: &Paragraph, clusters: &[Range<usize>], t: &Theme) -> Vec<f32> {
-        let x = x_by_byte(&shape(&self.0, para, t));
+        let mut words = self.words.borrow_mut();
+        if words.font != (t.font, t.font_size) {
+            *words = Words {
+                font: (t.font, t.font_size),
+                ..Default::default()
+            };
+        }
+        // x at every byte of the paragraph: its words' x, end to end.
+        let len: usize = para.runs.iter().map(|r| r.text.len()).sum();
+        let mut x = Vec::with_capacity(len + 1);
+        x.push(0.0);
+        for r in &para.runs {
+            let words = &mut words.by_style[r.bold as usize * 2 + r.italic as usize];
+            let mut rest = r.text.as_str();
+            while let Some(c) = rest.chars().next() {
+                let len = (rest.find(|d: char| (d == ' ') != (c == ' '))).unwrap_or(rest.len());
+                let word = &rest[..len];
+                rest = &rest[len..];
+                if !words.contains_key(word) {
+                    let (text, bold, italic) = (word.into(), r.bold, r.italic);
+                    let runs = vec![Run { text, bold, italic }];
+                    let wx = x_by_byte(&shape(&self.ts, &Paragraph { runs }, t));
+                    words.insert(word.into(), wx.into());
+                }
+                let (start, wx) = (*x.last().unwrap(), &words[word]);
+                x.extend(wx[1..].iter().map(|wx| start + wx));
+            }
+        }
         clusters.iter().map(|c| x[c.end] - x[c.start]).collect()
     }
 }

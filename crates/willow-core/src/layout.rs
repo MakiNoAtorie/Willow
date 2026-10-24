@@ -199,10 +199,21 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
     let mut para_start = 0;
     for (p, para) in paras.iter().enumerate() {
         let s: String = para.runs.iter().map(|r| r.text.as_str()).collect();
-        let ranges: Vec<Range<usize>> = s
-            .grapheme_indices(true)
-            .map(|(i, g)| i..i + g.len())
-            .collect();
+        let ranges: Vec<Range<usize>> = if s.is_ascii() {
+            // Every ASCII byte is a cluster, except CR LF (UAX #29 GB3): skips the segmenter.
+            let mut ranges = Vec::with_capacity(s.len());
+            let mut i = 0;
+            while i < s.len() {
+                let n = if s[i..].starts_with("\r\n") { 2 } else { 1 };
+                ranges.push(i..i + n);
+                i += n;
+            }
+            ranges
+        } else {
+            (s.grapheme_indices(true))
+                .map(|(i, g)| i..i + g.len())
+                .collect()
+        };
         let adv = m.advances(para, &ranges, theme);
         let space: Vec<bool> = ranges
             .iter()

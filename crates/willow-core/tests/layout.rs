@@ -166,3 +166,34 @@ fn up_and_down_go_to_the_stop_nearest_the_goal_column() {
     assert_eq!(l.vertical(at(7), 66.0, !DOWN), at(0));
     assert_eq!(l.vertical(at(31), 66.0, DOWN), at(31));
 }
+
+#[test]
+fn ascii_text_is_one_cluster_per_byte_except_cr_lf() {
+    let run = willow_core::Run {
+        text: "a\r\nb c".into(),
+        ..Default::default()
+    };
+    let paragraphs = vec![Paragraph { runs: vec![run] }];
+    let l = layout(&willow_core::RichText { paragraphs }, W, &PAPER, &Fake);
+
+    let clusters: Vec<Range<usize>> = (l.lines.iter().flat_map(|l| &l.clusters))
+        .map(|c| c.range.clone())
+        .collect();
+    assert_eq!(clusters, [0..1, 1..3, 3..4, 4..5, 5..6]);
+}
+
+#[test]
+fn measuring_ahead_in_steps_leaves_nothing_for_a_save_to_measure() {
+    let calls = Rc::new(Cell::new(0));
+    let doc = willow_core::generate(5, 1);
+    let mut s = Session::new(doc, &PAPER, Box::new(Counting(calls.clone())));
+
+    assert!(!s.measure_ahead(2));
+    assert_eq!(calls.get(), 2);
+    assert!(!s.measure_ahead(2));
+    assert!(s.measure_ahead(2));
+    assert_eq!(calls.get(), 5);
+
+    s.save(|_| Ok(())).unwrap();
+    assert_eq!(calls.get(), 5);
+}

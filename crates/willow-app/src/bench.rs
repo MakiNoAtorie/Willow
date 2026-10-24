@@ -5,6 +5,12 @@
 //! CPU only), `dirty_to_present` runs from the first invalidation to handing the frame to the
 //! GPU, `frames_late`/`missed_refreshes` count presented frames that overran their vsync.
 //! Scripted input goes through `Session::handle`, one event per frame, as the platform's would.
+//!
+//! `file_10k` times, in milliseconds, saves of the generated document (serialize and write
+//! beside): `save_unwarmed` from a new session that has measured nothing (a save the moment a
+//! file opens), `save` the window's first (after the idle `measure_ahead`), `save_again` the
+//! next; then `load` of that file (read, parse, repair, auto-place, a new session). The loaded
+//! session replaces the window's, so `open_first_frame` and every later scenario run on it.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -220,6 +226,46 @@ async fn idle(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext, scenario: 
     .ok();
 }
 
+/// The `file_10k` rows; see the module docs.
+async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    let path = std::env::temp_dir().join("willow-bench-10k.willow");
+    this.update_in(cx, |w, window, cx| {
+        let save = |w: &mut Willow| {
+            let t = Instant::now();
+            (w.session.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
+            t.elapsed().as_secs_f64() * 1e3
+        };
+        let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
+        let doc = w.session.document().clone();
+        let mut fresh = willow_core::Session::new(doc, w.session.theme(), measure);
+        let t = Instant::now();
+        (fresh.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
+        let unwarmed = t.elapsed().as_secs_f64() * 1e3;
+        let (first, again) = (save(w), save(w));
+        let t = Instant::now();
+        let bytes = std::fs::read(&path).expect("bench read");
+        let loaded = willow_core::load(&bytes).expect("bench load");
+        let content = crate::Content {
+            loaded,
+            bytes,
+            path: None,
+            recovery: None,
+        };
+        let vp = w.session.viewport();
+        w.show(content, window, cx);
+        let load = t.elapsed().as_secs_f64() * 1e3;
+        w.session.set_viewport(vp);
+        let b = w.bench.as_mut().unwrap();
+        b.row("file_10k", "save_unwarmed", unwarmed, "ms");
+        b.row("file_10k", "save", first, "ms");
+        b.row("file_10k", "save_again", again, "ms");
+        b.row("file_10k", "load", load, "ms");
+    })
+    .unwrap();
+    let _ = std::fs::remove_file(&path);
+    scripted(this, cx, "open_first_frame", None, Vec::new()).await;
+}
+
 fn at(zoom: f32, origin: Point, size: Point) -> Option<Viewport> {
     Some(Viewport { origin, zoom, size })
 }
@@ -237,6 +283,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         delta: Point { x: dx, y: 0.0 },
         mods,
     };
+    files(&this, cx).await;
     // Each zoom pans right over new ground (cold: first layout of revealed shapes), then back
     // over the same ground (warm).
     let origin = Point { x: -40.0, y: -40.0 };

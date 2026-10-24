@@ -4,7 +4,7 @@
 mod editing;
 mod file;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
@@ -141,6 +141,8 @@ pub struct Session {
     theme: &'static Theme,
     measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
+    /// Where `measure_ahead` goes on: a shape index.
+    ahead: Cell<usize>,
     /// Each link's shape indices, for drawing; see `link_ends`.
     link_ends: RefCell<Vec<(usize, usize)>>,
     viewport: Viewport,
@@ -176,6 +178,7 @@ impl Session {
             theme,
             measure,
             layouts: RefCell::default(),
+            ahead: Cell::default(),
             link_ends: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
@@ -265,6 +268,19 @@ impl Session {
             .iter()
             .map(|s| self.shape_height(s))
             .collect()
+    }
+
+    /// Lays out the next `n` shapes in document order, drawn or not, so that `heights` (every
+    /// save and recovery write) finds them cached. True once it has been through them all.
+    /// The app calls it in small steps while idle after opening a document.
+    pub fn measure_ahead(&self, n: usize) -> bool {
+        let (shapes, from) = (&self.doc.shapes, self.ahead.get());
+        let to = (from + n).min(shapes.len());
+        for s in &shapes[from.min(to)..to] {
+            self.layout(s);
+        }
+        self.ahead.set(to);
+        to == shapes.len()
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
