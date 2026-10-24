@@ -13,7 +13,7 @@ Rules:
 - Build test-first (red, then green) with the `tdd` skill.
 - Stay inside the module dirs you were given. Edit shared files only by adding lines.
 - Keep output filtered: builds `cargo build 2>&1 | grep -E '^(error|warning)' | head -40`, tests `cargo test -q 2>&1 | tail -40`. Never pull full logs into context.
-- Run the local checks from `docs/CONVENTIONS.md`. Do not poll or wait on CI.
+- Run the local CI before pushing: `./ci.sh` on macOS, `ci.bat` on Windows. Filter its output: `./ci.sh 2>&1 | grep -E 'error|warning:|FAILED|passed' | head -40`. Push only when it prints `CI checks passed.` Do not poll or wait on GitHub CI.
 - Merge the integration-branch tip, then one commit with "Refs #<n>" and the attribution trailers, then push your branch.
 - Do not edit `docs/CONVENTIONS.md` or other shared notes.
 - If a dependency or network setting blocks you, stop and report exactly which host or setting, don't loop.
