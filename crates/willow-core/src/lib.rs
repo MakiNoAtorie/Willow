@@ -14,16 +14,20 @@ mod theme;
 mod zoom;
 
 pub use chain::{Link, Side, side};
-pub use draw::{Connector, Frame, Visible, VisibleZone};
+pub use draw::{Appear, Connector, Frame, LinkDrag, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
-pub use session::{CaretView, DragPreview, Editing, ResizeTo, Session, Viewport};
+pub use session::{
+    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, ResizeTo,
+    Session, Shortcut, Viewport,
+};
 pub use theme::{
-    CaretStyle, ChromeStyle, ConnectorStyle, CubicBezier, MenuStyle, PAPER, Rgba, SelectionStyle,
-    Shadow, ShapeStyle, Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, ConnectorStyle, CreateStyle, CubicBezier, MenuStyle, MidpointStyle,
+    PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle, Theme, Transition, ZoneStyle,
+    ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
@@ -54,12 +58,20 @@ impl Document {
 
     /// The first ID no shape or zone uses, in the order a, b, …, z, aa, ab, …
     pub fn next_id(&self) -> ShapeId {
-        let ids = || (self.shapes.iter().map(|s| &s.id)).chain(self.zones.iter().map(|z| &z.id));
+        self.next_ids(1).remove(0)
+    }
+
+    /// The first `n` IDs no shape or zone uses, in generation order.
+    pub(crate) fn next_ids(&self, n: usize) -> Vec<ShapeId> {
+        let ids: std::collections::HashSet<&str> = (self.shapes.iter().map(|s| s.id.0.as_str()))
+            .chain(self.zones.iter().map(|z| z.id.0.as_str()))
+            .collect();
         (0..)
             .map(id_for)
-            .find(|id| ids().all(|i| i.0 != *id))
+            .filter(|id| !ids.contains(id.as_str()))
+            .take(n)
             .map(ShapeId)
-            .expect("unbounded")
+            .collect()
     }
 }
 
@@ -107,6 +119,14 @@ impl Shape {
             width: DEFAULT_WIDTH,
             extra_height: 0,
             color: Color::Neutral,
+        }
+    }
+
+    /// The center of the shape drawn `height` tall, in canvas units.
+    pub fn center(&self, height: f32) -> Point {
+        Point {
+            x: self.x as f32 + self.width as f32 / 2.0,
+            y: self.y as f32 + height / 2.0,
         }
     }
 }

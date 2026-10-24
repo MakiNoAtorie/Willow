@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime};
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
     FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent, TitlebarOptions,
-    Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent,
+    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*,
+    px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
@@ -16,6 +17,7 @@ use willow_core::{
 };
 mod bench;
 mod file;
+mod menu;
 mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
@@ -32,6 +34,10 @@ actions!(willow, [Quit, ResetZoom]);
 actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
+// Delete or Backspace on the canvas, with nothing being edited.
+actions!(willow, [DeleteShapes]);
+// Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
+actions!(willow, [Duplicate]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -229,11 +235,27 @@ impl Willow {
         }
     }
 
-    /// Puts the selected text on the system clipboard as plain text.
+    /// Puts the selected text, or else the selected shapes as Willow text, on the system
+    /// clipboard as plain text.
     fn copy(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.selected_text() {
+        if let Some(text) = self.session.clipboard_text() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         }
+    }
+
+    /// Runs a context-menu item, moving clipboard text for Cut, Copy and Paste first.
+    fn choose(&mut self, action: willow_core::MenuAction, cx: &mut Context<Self>) {
+        use willow_core::MenuAction::{Copy, Cut, Paste};
+        match action {
+            Cut | Copy => self.copy(cx),
+            Paste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    return self.input(Input::Paste(text), cx);
+                }
+            }
+            _ => {}
+        }
+        self.input(Input::MenuChoose(action), cx)
     }
 
     fn mouse_down(&mut self, e: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -312,6 +334,12 @@ impl Render for Willow {
                     }
                 });
                 let e = entity.clone();
+                window.on_mouse_event(move |_: &MouseExitEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble {
+                        e.update(cx, |w, cx| w.input(Input::PointerLeft, cx));
+                    }
+                });
+                let e = entity.clone();
                 window.on_mouse_event(move |ev: &MouseUpEvent, phase, _, cx| {
                     if phase == DispatchPhase::Bubble
                         && let Some(button) = button(ev.button)
@@ -329,7 +357,7 @@ impl Render for Willow {
                 let (session, now) = (&w.session, w.start.elapsed());
                 paint(bounds, session, now, window);
                 // Text input reaches the selected shape too: typing on it starts editing.
-                if session.selection().is_some() {
+                if !session.selection().is_empty() {
                     let handler = ElementInputHandler::new(bounds, entity.clone());
                     window.handle_input(&w.focus, handler, cx);
                 }
@@ -359,6 +387,8 @@ impl Render for Willow {
                 }
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
+            .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -431,7 +461,8 @@ impl Render for Willow {
             .on_pinch(cx.listener(Self::pinch))
             .relative()
             .child(canvas)
-            .children(pill);
+            .children(pill)
+            .children(menu::menu(&self.session, cx));
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         let name = self.name();
         if cfg!(target_os = "windows") {
@@ -542,31 +573,31 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
+    let cs = &t.connector;
+    let (hover_width, hover) = ((cs.hover_width * z).max(cs.min_screen), color(cs.hover));
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
-        let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
-        if dx.max(dy) < 1.0 {
-            // Under a pixel long: nothing to see.
-            continue;
-        }
-        if dx < 1.0 || dy < 1.0 {
-            // Within a pixel of straight across or down: a quad is far cheaper than a path.
-            let half = point(px(width / 2.0), px(width / 2.0));
-            let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
-            window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
-            continue;
-        }
-        let mut path = gpui::PathBuilder::stroke(px(width));
-        path.move_to(p);
-        path.line_to(q);
-        if let Ok(path) = path.build() {
-            window.paint_path(path, ink);
+        if c.hovered {
+            line(window, p, q, hover_width, hover);
+        } else {
+            line(window, p, q, width, ink);
         }
     }
 
-    let radius = px(t.shape.radius * z);
     let sel = &t.selection;
     for v in &frame.shapes {
+        // A pushed shape paints off its place while it slides there.
+        let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
+        // A shape being created paints faded (`k`), offset and scaled around its center.
+        let (origin, z, k) = match v.appear {
+            Some(a) => {
+                let c = (v.x as f32 + v.shape.width as f32 / 2.0) * (1.0 - a.scale);
+                let d = (v.y as f32 + v.height / 2.0) * (1.0 - a.scale) + a.dy;
+                (origin + point(px(c * z), px(d * z)), z * a.scale, a.opacity)
+            }
+            None => (origin, z, 1.0),
+        };
+        let radius = px(t.shape.radius * z);
         let shape = &*v.shape;
         let b = Bounds::new(
             origin + point(px(v.x as f32 * z), px(v.y as f32 * z)),
@@ -574,7 +605,10 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         );
         let ring = v.ring;
         if frame.shadows {
-            let shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
+            let mut shadows = shadows(&t.shape.shadow, &sel.shadow, ring, z);
+            shadows
+                .iter_mut()
+                .for_each(|s| s.color = s.color.opacity(k));
             window.paint_drop_shadows(b, Corners::all(radius), &shadows);
         }
         if ring > 0.0 {
@@ -584,16 +618,16 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             window.paint_quad(quad(
                 ring_bounds,
                 radius + px(out),
-                color(t.canvas),
+                color(t.canvas).opacity(k),
                 px(sel.ring * ring * z),
-                color(sel.color),
+                color(sel.color).opacity(k),
                 Default::default(),
             ));
         }
         window.paint_quad(quad(
             b,
             radius,
-            color(v.fill),
+            color(v.fill).opacity(k),
             px(0.),
             gpui::transparent_black(),
             Default::default(),
@@ -606,7 +640,15 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
         if frame.text_opacity > 0.0 {
             let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
-            text::paint_text(window, o, &shape.text, &v.layout, t, z, frame.text_opacity);
+            text::paint_text(
+                window,
+                o,
+                &shape.text,
+                &v.layout,
+                t,
+                z,
+                frame.text_opacity * k,
+            );
             if let Some(m) = v.marked.clone() {
                 text::paint_marked(window, o, &v.layout, m, t, z);
             }
@@ -615,8 +657,81 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             // The caret's width is screen pixels at any zoom.
             let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
             let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-            window.paint_quad(gpui::fill(b, color(t.caret.color)));
+            window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
         }
+    }
+
+    // A link drag's band over every shape, in the hovered connector's style.
+    if let Some(l) = frame.link_drag {
+        line(window, at(l.from), at(l.to), hover_width, hover);
+    }
+
+    // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
+    let m = &t.midpoint;
+    let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
+    let shadow = [BoxShadow {
+        color: color(sh.color),
+        offset: point(px(sh.x), px(sh.y)),
+        blur_radius: px(sh.blur / 2.0),
+        spread_radius: px(sh.spread),
+        inset: false,
+    }];
+    for &p in &frame.midpoints {
+        let b = Bounds::new(at(p) - point(px(d / 2.0), px(d / 2.0)), size(px(d), px(d)));
+        window.paint_drop_shadows(b, Corners::all(px(d / 2.0)), &shadow);
+        let (fill, stroke) = (color(m.fill), color(m.stroke));
+        let r = px(d / 2.0);
+        window.paint_quad(quad(
+            b,
+            r,
+            fill,
+            px(m.stroke_width),
+            stroke,
+            Default::default(),
+        ));
+    }
+    // The marquee, on top; its border and radius are screen pixels at any zoom.
+    if let Some((a, c)) = frame.marquee {
+        let snap = |p: willow_core::Point| {
+            let p = at(p);
+            point(px(f32::from(p.x).round()), px(f32::from(p.y).round()))
+        };
+        window.paint_quad(quad(
+            Bounds::from_corners(snap(a), snap(c)),
+            px(sel.marquee_radius),
+            color(sel.marquee_fill),
+            px(sel.marquee_width),
+            color(sel.marquee),
+            Default::default(),
+        ));
+    }
+}
+
+/// A straight line from `p` to `q`, `width` screen pixels wide.
+fn line(
+    window: &mut Window,
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+    ink: Hsla,
+) {
+    let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
+    if dx.max(dy) < 1.0 {
+        // Under a pixel long: nothing to see.
+        return;
+    }
+    if dx < 1.0 || dy < 1.0 {
+        // Within a pixel of straight across or down: a quad is far cheaper than a path.
+        let half = point(px(width / 2.0), px(width / 2.0));
+        let (lo, hi) = (p.min(&q) - half, p.max(&q) + half);
+        window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
+        return;
+    }
+    let mut path = gpui::PathBuilder::stroke(px(width));
+    path.move_to(p);
+    path.line_to(q);
+    if let Ok(path) = path.build() {
+        window.paint_path(path, ink);
     }
 }
 
@@ -753,6 +868,10 @@ fn main() {
             KeyBinding::new("end", LineEnd, ed),
             KeyBinding::new("backspace", Backspace, ed),
             KeyBinding::new("delete", Delete, ed),
+            KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
+            KeyBinding::new("delete", DeleteShapes, Some("!editing")),
+            KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
+            KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),

@@ -77,7 +77,7 @@ impl Session {
                 self.respond(true)
             }
             Input::Unmark => self.respond(true),
-            Input::StartEditing => match self.selected.clone() {
+            Input::StartEditing => match self.only_selected() {
                 Some(id) if self.editing.is_none() => {
                     self.start_editing(id);
                     self.respond(true)
@@ -108,6 +108,7 @@ impl Session {
                 if self.editing.is_none() {
                     return self.respond(false);
                 }
+                let text = super::clipboard::as_text(text);
                 let text: String = (text.replace("\r\n", "\n").replace('\r', "\n").chars())
                     .filter(|&c| c == '\n' || !c.is_control())
                     .collect();
@@ -164,7 +165,7 @@ impl Session {
     ) -> Option<(String, Range<usize>)> {
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if self.editing.is_none() {
-            match self.selected.clone() {
+            match self.only_selected() {
                 Some(id) if !text.trim().is_empty() => self.start_editing(id),
                 _ => return None,
             }
@@ -230,18 +231,19 @@ impl Session {
         })
     }
 
-    /// Whether Cut and Copy have something to act on: text selected in the edited shape.
+    /// Whether Cut and Copy have something to act on: text selected in the edited shape, or
+    /// with nothing edited, selected shapes.
     pub fn can_cut(&self) -> bool {
-        !self.text_selection().is_empty()
+        !self.text_selection().is_empty() || (self.editing.is_none() && !self.selected.is_empty())
     }
 
     pub fn can_copy(&self) -> bool {
         self.can_cut()
     }
 
-    /// Whether Paste has somewhere to go: a shape being edited.
+    /// Whether Paste has somewhere to go: always, into the edited shape or onto the canvas.
     pub fn can_paste(&self) -> bool {
-        self.editing.is_some()
+        true
     }
 
     /// Opens an editing session on `id` with the caret at the end of its text.
@@ -369,6 +371,7 @@ impl Session {
     fn replace(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
         let (id, pending, mut end) = (e.id.clone(), e.pending, range.start);
+        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = pending {
@@ -376,6 +379,9 @@ impl Session {
                 s.text.set_style(range.start..end, Style::Italic, italic);
             }
         });
+        if let Some(old) = old {
+            self.make_room(&id, old);
+        }
         self.set_caret(Caret {
             offset: end,
             upstream: false,
@@ -436,10 +442,15 @@ impl Session {
             }
             return;
         }
+        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             let on = !s.text.all_styled(sel.clone(), style);
             s.text.set_style(sel, style, on);
         });
+        // Bold is wider: the text may rewrap taller.
+        if let Some(old) = old {
+            self.make_room(&id, old);
+        }
     }
 
     /// Selects `range` of the edited text, caret at its end.

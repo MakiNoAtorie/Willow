@@ -1,14 +1,24 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod clipboard;
+mod delete;
 mod editing;
 mod file;
+mod menu;
+use menu::Ripple;
+mod link;
+mod midpoints;
+mod push;
+mod select;
+pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::Side;
 use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Layout, Measure, layout};
@@ -90,6 +100,16 @@ enum Gesture {
         from: Point,
         to: Option<ResizeTo>,
     },
+    /// Left press on the `side` midpoint of the shape at `index`; release creates a linked
+    /// shape there unless the pointer was `dragged` past `DRAG_START` from `from`.
+    Midpoint {
+        index: usize,
+        side: Side,
+        from: Point,
+        dragged: bool,
+    },
+    /// Shift+drag from empty canvas: the marquee's press and current corner, canvas units.
+    Marquee { from: Point, to: Point },
 }
 
 /// What a resize sets: a shape's x, width and extra height, in canvas units.
@@ -111,7 +131,6 @@ pub struct DragPreview<'a> {
 /// A selection ring easing from `from` to `to` (0 hidden, 1 shown), starting at `since`.
 #[derive(Clone, Debug)]
 struct Ring {
-    id: ShapeId,
     from: f32,
     to: f32,
     since: Duration,
@@ -149,13 +168,27 @@ pub struct Session {
     gesture: Option<Gesture>,
     space_held: bool,
     zoom: Zoom,
-    selected: Option<ShapeId>,
+    /// In the order selected. The edited shape (`editing`) stays selected while edited.
+    selected: Vec<ShapeId>,
     editing: Option<Editing>,
+    /// The open context menu.
+    menu: Option<Menu>,
     /// The pointer is over the text being edited.
     over_text: bool,
     /// The pointer is over a shape's edge.
     over_edge: Option<Edge>,
-    rings: Vec<Ring>,
+    rings: HashMap<ShapeId, Ring>,
+    /// Shapes whose color is still fading in after a menu recolor.
+    ripples: HashMap<ShapeId, Ripple>,
+    mid: midpoints::Midpoints,
+    /// Shapes sliding to where a push moved them.
+    slides: push::Slides,
+    /// The selection when the marquee started.
+    marquee_base: Vec<ShapeId>,
+    /// A link drag in progress and the hovered connector.
+    links: link::Links,
+    /// The last pointer position, screen pixels: where Paste goes.
+    pointer: Option<Point>,
     /// Time of the last event.
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
@@ -191,11 +224,18 @@ impl Session {
             gesture: None,
             space_held: false,
             zoom: Zoom::default(),
-            selected: None,
+            selected: Vec::new(),
             editing: None,
+            menu: None,
             over_text: false,
             over_edge: None,
-            rings: Vec::new(),
+            rings: HashMap::new(),
+            ripples: HashMap::new(),
+            mid: Default::default(),
+            slides: HashMap::new(),
+            marquee_base: Vec::new(),
+            links: Default::default(),
+            pointer: None,
             now: Duration::ZERO,
         }
     }
@@ -208,9 +248,17 @@ impl Session {
         self.theme
     }
 
-    /// The selected shape (at most one in Phase 2).
-    pub fn selection(&self) -> Option<&ShapeId> {
-        self.selected.as_ref()
+    /// The selected shapes, in the order selected. The shape being edited is `editing()`.
+    pub fn selection(&self) -> &[ShapeId] {
+        &self.selected
+    }
+
+    /// The selected shape when exactly one is: what a click edits and typing starts editing.
+    fn only_selected(&self) -> Option<ShapeId> {
+        match self.selected.as_slice() {
+            [id] => Some(id.clone()),
+            _ => None,
+        }
     }
 
     /// `shape`'s text layout, positioned from the text's top-left inside the padding. Cached
@@ -292,48 +340,74 @@ impl Session {
         let fade = &self.theme.selection.fade;
         self.rings
             .iter()
-            .filter(|r| r.to > 0.0 || !r.done(now, fade))
-            .map(|r| (&r.id, r.value(now, fade)))
+            .filter(|(_, r)| r.to > 0.0 || !r.done(now, fade))
+            .map(|(id, r)| (id, r.value(now, fade)))
             .collect()
+    }
+
+    /// `id`'s selection ring opacity at `now`, 0 to 1.
+    pub(crate) fn ring(&self, id: &ShapeId, now: Duration) -> f32 {
+        let fade = &self.theme.selection.fade;
+        self.rings.get(id).map_or(0.0, |r| r.value(now, fade))
     }
 
     /// Whether anything is still animating at `now`; the app keeps requesting frames until not.
     /// The caret blink isn't: see `next_wake`.
     pub fn animating(&self, now: Duration) -> bool {
         let fade = &self.theme.selection.fade;
-        self.rings.iter().any(|r| !r.done(now, fade)) || self.zoom.running(self.theme, now)
+        self.rings.values().any(|r| !r.done(now, fade))
+            || self
+                .ripples
+                .values()
+                .any(|r| now < r.start + self.theme.ripple.fade.duration)
+            || self.zoom.running(self.theme, now)
+            || self.creating(now).is_some()
+            || self.slides_running(now)
     }
 
-    /// Deselects a shape the document no longer has (after a whole-document replace).
+    /// Deselects shapes the document no longer has (after undo, redo or a reload).
     fn drop_missing_selection(&mut self) {
-        if let Some(id) = &self.selected
-            && !self.doc.shapes.iter().any(|s| &s.id == id)
-        {
-            self.select(None);
+        if self.selected.is_empty() {
+            return;
         }
+        let ids: HashSet<&ShapeId> = self.doc.shapes.iter().map(|s| &s.id).collect();
+        let kept: Vec<ShapeId> = (self.selected.iter())
+            .filter(|id| ids.contains(id))
+            .cloned()
+            .collect();
+        self.select(kept);
     }
 
-    fn select(&mut self, id: Option<ShapeId>) {
-        if id == self.selected {
+    /// Makes `ids` the selection, duplicates dropped. Rings fade in on newly selected shapes
+    /// and out on deselected ones. Not an undo step.
+    pub fn select(&mut self, ids: impl IntoIterator<Item = ShapeId>) {
+        let mut seen = HashSet::new();
+        let ids: Vec<ShapeId> = (ids.into_iter())
+            .filter(|id| seen.insert(id.clone()))
+            .collect();
+        if ids == self.selected {
             return;
         }
         let (now, fade) = (self.now, &self.theme.selection.fade);
-        let old = std::mem::replace(&mut self.selected, id.clone());
-        for (id, to) in [(old, 0.0), (id, 1.0)] {
-            let Some(id) = id else { continue };
-            let from = match self.rings.iter().position(|r| r.id == id) {
-                Some(i) => self.rings.swap_remove(i).value(now, fade),
-                None => 0.0,
-            };
-            self.rings.push(Ring {
+        let (old, new): (HashSet<_>, HashSet<_>) =
+            (self.selected.iter().collect(), ids.iter().collect());
+        let fades: Vec<(ShapeId, f32)> = (old.difference(&new).map(|&id| (id.clone(), 0.0)))
+            .chain(new.difference(&old).map(|&id| (id.clone(), 1.0)))
+            .collect();
+        for (id, to) in fades {
+            let from = self.rings.get(&id).map_or(0.0, |r| r.value(now, fade));
+            self.rings.insert(
                 id,
-                from,
-                to,
-                since: now,
-            });
+                Ring {
+                    from,
+                    to,
+                    since: now,
+                },
+            );
         }
         // Drop rings that have finished fading out.
-        self.rings.retain(|r| r.to > 0.0 || !r.done(now, fade));
+        self.rings.retain(|_, r| r.to > 0.0 || !r.done(now, fade));
+        self.selected = ids;
     }
 
     /// The shape being dragged and its previewed top-left; the document still holds the old one.
@@ -367,11 +441,21 @@ impl Session {
         }
     }
 
-    /// Sets a shape's x, width and extra height: one discrete change to the document.
+    /// Sets a shape's x, width and extra height, pushing what it grows into: one undo step.
     pub fn resize_shape(&mut self, id: &ShapeId, r: ResizeTo) {
+        // One step written out by hand, not `history.step`: `make_room` needs `&mut self`,
+        // which the step's closure can't have. Inside an open group it just joins it.
+        let (opened, old) = (!self.history.is_open(), self.rect_of(id));
+        self.history.begin();
         self.history.change(&mut self.doc, id, |s| {
             (s.x, s.width, s.extra_height) = (r.x, r.width, r.extra_height)
         });
+        if let Some(old) = old {
+            self.make_room(id, old);
+        }
+        if opened {
+            self.history.end(&self.doc);
+        }
     }
 
     /// Drops a shape's extra height so it fits its text; the width stays.
@@ -401,6 +485,22 @@ impl Session {
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
         self.history
             .change(&mut self.doc, id, |s| (s.x, s.y) = (x, y));
+    }
+
+    /// Links `a` to `b` as one undo step; refused (false, no change) for the same shape, an
+    /// existing link or a cycle. A join repaints `b`'s chain in `a`'s color.
+    pub fn link(&mut self, a: &ShapeId, b: &ShapeId) -> bool {
+        self.history.link(&mut self.doc, a, b)
+    }
+
+    /// Removes the link between `a` and `b` as one undo step; both parts keep the color.
+    pub fn unlink(&mut self, a: &ShapeId, b: &ShapeId) -> bool {
+        self.history.unlink(&mut self.doc, a, b)
+    }
+
+    /// Paints `id`'s whole chain `color` as one undo step.
+    pub fn recolor(&mut self, id: &ShapeId, color: crate::Color) {
+        self.history.recolor(&mut self.doc, id, color);
     }
 
     /// Whether there is a document change to undo; the Undo menu item enables from it.
@@ -455,13 +555,40 @@ impl Session {
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom => {}
+            Input::ResetZoom | Input::PointerLeft => {}
             _ => self.unmark(),
+        }
+        if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
+            self.pointer = Some(pos);
         }
         match input {
             Input::PointerDown { pos, button, mods } => {
+                // A press outside the menu closes it; a right press goes on to open another.
+                if self.menu.take().is_some() && button != Button::Right {
+                    return self.respond(true);
+                }
                 let hit = self.shape_at(pos);
+                if button == Button::Right && self.gesture.is_none() {
+                    match hit {
+                        None if let Some(l) = self.connector_at(pos) => {
+                            self.open_connector_menu(pos, l)
+                        }
+                        None => self.open_empty_menu(pos),
+                        Some(i) => self.open_shape_menu(pos, i),
+                    }
+                    return self.respond(true);
+                }
                 if self.gesture.is_none() && button == Button::Left && !self.space_held {
+                    if let Some((index, side)) = self.midpoint_at(pos) {
+                        let (from, dragged) = (pos, false);
+                        self.gesture = Some(Gesture::Midpoint {
+                            index,
+                            side,
+                            from,
+                            dragged,
+                        });
+                        return self.respond(true);
+                    }
                     if let Some(i) = hit.filter(|_| mods.alt && self.editing.is_none()) {
                         let id = self.doc.shapes[i].id.clone();
                         self.autofit(&id);
@@ -469,13 +596,18 @@ impl Session {
                     }
                     if let Some((index, edge)) = self.edge_at(pos) {
                         self.stop_editing();
-                        self.select(Some(self.doc.shapes[index].id.clone()));
+                        self.select([self.doc.shapes[index].id.clone()]);
                         self.gesture = Some(Gesture::Resize {
                             index,
                             edge,
                             from: pos,
                             to: None,
                         });
+                        return self.respond(true);
+                    }
+                    if hit.is_none() && mods.shift {
+                        self.stop_editing();
+                        self.start_marquee(pos);
                         return self.respond(true);
                     }
                 }
@@ -528,6 +660,12 @@ impl Session {
                 self.resize_to(pos);
                 self.respond(true)
             }
+            Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::Marquee { .. })) =>
+            {
+                self.marquee_to(pos);
+                self.respond(true)
+            }
             Input::PointerMove { pos, .. } => match &mut self.gesture {
                 Some(Gesture::Pan { last, click, .. }) => {
                     if click.is_some_and(|c| (pos.x - c.x).hypot(pos.y - c.y) >= DRAG_START) {
@@ -556,43 +694,79 @@ impl Session {
                     self.respond(true)
                 }
                 Some(Gesture::Resize { .. }) => self.respond(false),
+                Some(Gesture::Midpoint { from, dragged, .. }) => {
+                    let d = pos - *from;
+                    *dragged |= d.x.hypot(d.y) >= DRAG_START;
+                    if *dragged {
+                        let redraw = self.drag_link(pos);
+                        return self.respond(redraw);
+                    }
+                    self.respond(false)
+                }
+                Some(Gesture::Marquee { .. }) => self.respond(false),
                 None => {
                     let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
+                    let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
                     let edge = edge.map(|e| e.1);
                     let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
                     let over = self.editing.as_ref().is_some_and(|e| {
                         (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
                     });
                     let changed = over != self.over_text;
+                    let changed = self.track_hover(pos) || changed;
+                    let changed = self.track_connector(pos) || changed;
                     self.over_text = over;
                     self.respond(changed || edge_changed)
                 }
             },
-            Input::PointerUp { button, .. } => {
+            Input::PointerUp { button, mods, .. } => {
                 match self.gesture {
                     Some(Gesture::Pan {
                         button: b, click, ..
                     }) if b == button => {
                         self.gesture = None;
                         if click.is_some() {
-                            self.select(None);
+                            self.select([]);
                         }
+                    }
+                    Some(Gesture::Press { .. })
+                        if button == Button::Left
+                            && let Some((dx, dy)) = self.group_drag() =>
+                    {
+                        self.gesture = None;
+                        self.move_selection(dx, dy);
                     }
                     Some(Gesture::Press { index, to, from }) if button == Button::Left => {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
                             Some((x, y)) => self.move_shape(&id, x, y),
+                            None if mods.shift => self.toggle_selected(id),
                             // A click on the selected shape edits it, caret where clicked.
-                            None if self.selected.as_ref() == Some(&id) => {
+                            None if self.selected == [id.clone()] => {
                                 self.start_editing(id);
                                 let caret = self.caret_at(from);
                                 self.set_caret(caret);
                             }
-                            None => self.select(Some(id)),
+                            None => self.select([id]),
                         }
                     }
                     Some(Gesture::Text) if button == Button::Left => self.gesture = None,
+                    Some(Gesture::Midpoint {
+                        index,
+                        side,
+                        dragged,
+                        ..
+                    }) if button == Button::Left => {
+                        self.gesture = None;
+                        if !dragged {
+                            let id = self.doc.shapes[index].id.clone();
+                            self.create_linked(&id, side);
+                        } else {
+                            self.drop_link(index);
+                        }
+                    }
+                    Some(Gesture::Marquee { .. }) if button == Button::Left => self.gesture = None,
                     Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
                         self.gesture = None;
                         if let Some(r) = to {
@@ -604,6 +778,18 @@ impl Session {
                 }
                 self.respond(true)
             }
+            Input::StopEditing if self.menu.is_some() => {
+                self.menu = None;
+                self.respond(true)
+            }
+            Input::MenuChoose(action) => {
+                self.choose(action);
+                self.respond(true)
+            }
+            Input::CloseMenu => {
+                self.menu = None;
+                self.respond(true)
+            }
             Input::KeyDown(Key::Space) if self.editing.is_some() => self.respond(false),
             Input::KeyDown(Key::Space) => {
                 let changed = !self.space_held;
@@ -613,6 +799,10 @@ impl Session {
             Input::KeyUp(Key::Space) => {
                 self.space_held = false;
                 self.respond(true)
+            }
+            Input::PointerLeft => {
+                self.pointer = None;
+                self.respond(false)
             }
             Input::FocusLost => {
                 self.space_held = false;
@@ -629,6 +819,28 @@ impl Session {
                 }
                 self.stop_editing();
                 self.drop_missing_selection();
+                // Undone pushes jump back; a slide still running would draw them off.
+                self.slides.clear();
+                self.respond(true)
+            }
+            Input::DeleteShapes if self.editing.is_some() => self.respond(false),
+            Input::Paste(text) if self.editing.is_none() => {
+                self.paste_shapes(&text);
+                self.respond(true)
+            }
+            Input::Cut if self.editing.is_none() => {
+                self.menu = None;
+                self.delete(&self.selected.clone());
+                self.respond(true)
+            }
+            Input::Duplicate => {
+                self.menu = None;
+                self.duplicate();
+                self.respond(true)
+            }
+            Input::DeleteShapes => {
+                let ids = self.selected.clone();
+                self.delete(&ids);
                 self.respond(true)
             }
             Input::ResetZoom => {

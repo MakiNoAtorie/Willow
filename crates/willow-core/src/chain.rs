@@ -45,18 +45,22 @@ pub fn side(from: Point, to: Point) -> Side {
 impl Document {
     /// Links `a` and `b`, unless that would close a cycle (they're already in one chain) or
     /// either is missing. Joining two chains repaints `b`'s in `a`'s color. True if linked.
-    // ponytail: walks every link per call; a bulk loader wants union-find instead.
     pub fn link(&mut self, a: &ShapeId, b: &ShapeId) -> bool {
-        let Some(color) = self.shapes.iter().find(|s| &s.id == a).map(|s| s.color) else {
+        let Some(color) = self.link_color(a, b) else {
             return false;
         };
-        let adopted = self.chain(b);
-        if adopted.is_empty() || adopted.contains(&a) {
-            return false;
-        }
         self.recolor(b, color);
         self.links.push(Link(a.clone(), b.clone()));
         true
+    }
+
+    /// The color linking `a` to `b` paints `b`'s chain (`a`'s), or `None` when the link is
+    /// refused: a missing shape, or both already in one chain (same shape, linked, a cycle).
+    // ponytail: walks every link per call; a bulk loader wants union-find instead.
+    pub(crate) fn link_color(&self, a: &ShapeId, b: &ShapeId) -> Option<crate::Color> {
+        let color = self.shapes.iter().find(|s| &s.id == a)?.color;
+        let adopted = self.chain(b);
+        (!adopted.is_empty() && !adopted.contains(&a)).then_some(color)
     }
 
     /// Removes the link between `a` and `b`, in either order. Both halves keep the chain's

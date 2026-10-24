@@ -44,6 +44,11 @@ pub struct ConnectorStyle {
     /// Canvas units, but never thinner than `min_screen` screen pixels.
     pub width: f32,
     pub min_screen: f32,
+    /// Hovered: `hover` color, `hover_width` canvas units (same floor).
+    pub hover: Rgba,
+    pub hover_width: f32,
+    /// Screen pixels either side of the line that hover or right-click it.
+    pub hit: f32,
 }
 
 /// A zone: a rounded rectangle of its pastel mixed into the canvas, with an inset edge and a
@@ -155,27 +160,56 @@ pub struct MenuStyle {
     pub bg: Rgba,
     pub ink: Rgba,
     pub hover: Rgba,
+    /// A destructive item (zone Delete).
+    pub destructive: Rgba,
     pub separator: Rgba,
-    /// Space above and below a separator line.
+    /// Space above and below a separator line, and its thickness.
     pub separator_pad_y: f32,
+    pub separator_width: f32,
     pub radius: f32,
     pub item_radius: f32,
     /// Inside the menu, around the items.
     pub padding: f32,
     pub item_pad_x: f32,
     pub item_pad_y: f32,
+    /// Between an item's label and its shortcut.
+    pub item_gap: f32,
     pub min_width: f32,
     pub font_size: f32,
+    /// A multiple of `font_size`.
+    pub line_height: f32,
+    /// CSS weight (500 is medium).
+    pub font_weight: f32,
+    /// A heading over a group of entries ("Color"): size, opacity and the space above and
+    /// below it.
+    pub heading_size: f32,
+    pub heading_opacity: f32,
+    pub heading_pad_top: f32,
+    pub heading_pad_bottom: f32,
     /// Shortcut text and the submenu arrow.
     pub shortcut_opacity: f32,
     /// A command that can't run now (Undo with nothing to undo).
     pub disabled_opacity: f32,
+    /// The color row's circles: diameter, space between, and the current one's ring width and
+    /// its gap from the circle.
+    pub swatch: f32,
+    pub swatch_gap: f32,
+    pub swatch_ring: f32,
+    pub swatch_ring_gap: f32,
     /// Ring, then drop shadow.
     pub shadow: [Shadow; 2],
     /// The menu's left edge from the window's.
     pub left: f32,
     /// Between the title bar and the menu, and between a menu and its cascade.
     pub gap: f32,
+}
+
+/// A color change rippling along a chain: each shape fades `fade` long, starting `step`
+/// after the one before it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RippleStyle {
+    pub fade: Transition,
+    pub step: Duration,
 }
 
 /// The window's title bar, in screen pixels.
@@ -217,6 +251,11 @@ pub struct SelectionStyle {
     pub fade: Transition,
     /// Highlight behind selected text while editing.
     pub text: Rgba,
+    /// The Shift+drag marquee: border, fill, and border width and corner radius in screen px.
+    pub marquee: Rgba,
+    pub marquee_fill: Rgba,
+    pub marquee_width: f32,
+    pub marquee_radius: f32,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -230,6 +269,26 @@ pub struct CaretStyle {
     pub idle: Duration,
     /// Underline under IME marked text, in ink color: thickness in screen px at any zoom.
     pub marked_underline: f32,
+}
+
+/// The circles on a hovered shape's edge midpoints, in screen pixels at any zoom: `size`
+/// across, `fill`, with a `stroke_width` ring of `stroke` outside it and a drop shadow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MidpointStyle {
+    pub size: f32,
+    pub fill: Rgba,
+    pub stroke: Rgba,
+    pub stroke_width: f32,
+    pub shadow: Shadow,
+}
+
+/// A shape created from a midpoint fades in from `rise` canvas units off (negative is up)
+/// and `scale`, while its connector draws from the source, over `motion`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CreateStyle {
+    pub motion: Transition,
+    pub rise: f32,
+    pub scale: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -251,6 +310,8 @@ pub struct Theme {
     /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
     /// linked to it.
     pub creation_gap: f32,
+    /// Edge-to-edge distance a push keeps between a shape and another chain.
+    pub min_gap: f32,
     pub connector: ConnectorStyle,
     pub zone: ZoneStyle,
     pub selection: SelectionStyle,
@@ -265,6 +326,12 @@ pub struct Theme {
     pub zoom_step: Transition,
     pub zoom_pill: ZoomPillStyle,
     pub menu: MenuStyle,
+    /// A chain's color change rippling out from the shape that started it.
+    pub ripple: RippleStyle,
+    pub midpoint: MidpointStyle,
+    pub create: CreateStyle,
+    /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
+    pub push: Transition,
 }
 
 impl Theme {
@@ -311,10 +378,14 @@ pub const PAPER: Theme = Theme {
         ],
     },
     creation_gap: 48.0,
+    min_gap: 24.0,
     connector: ConnectorStyle {
         color: hex(0xcbbfae),
         width: 2.0,
         min_screen: 1.0,
+        hover: hex(0x8b7760),
+        hover_width: 3.0,
+        hit: 8.0,
     },
     zone: ZoneStyle {
         radius: 22.0,
@@ -334,6 +405,10 @@ pub const PAPER: Theme = Theme {
         ring: 2.0,
         color: hex(0x8b7760),
         text: rgba(139, 119, 96, 0.22),
+        marquee: rgba(139, 119, 96, 0.65),
+        marquee_fill: rgba(139, 119, 96, 0.08),
+        marquee_width: 1.0,
+        marquee_radius: 3.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -408,6 +483,13 @@ pub const PAPER: Theme = Theme {
         duration: Duration::from_millis(120),
         easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
+    ripple: RippleStyle {
+        fade: Transition {
+            duration: Duration::from_millis(200),
+            easing: CubicBezier::EASE_OUT,
+        },
+        step: Duration::from_millis(40),
+    },
     zoom_pill: ZoomPillStyle {
         bg: rgba(59, 52, 44, 0.84),
         ink: hex(0xfffdf8),
@@ -425,18 +507,31 @@ pub const PAPER: Theme = Theme {
         bg: hex(0xfffdf8),
         ink: hex(0x3b342c),
         hover: hex(0xf1ebe0),
+        destructive: hex(0xb5463b),
         // The mockups' ink at 0x18 alpha.
         separator: rgba(59, 52, 44, 0.094),
         separator_pad_y: 5.0,
+        separator_width: 1.0,
         radius: 10.0,
         item_radius: 6.0,
         padding: 6.0,
         item_pad_x: 10.0,
         item_pad_y: 6.0,
+        item_gap: 24.0,
         min_width: 200.0,
         font_size: 13.0,
+        line_height: 1.2,
+        font_weight: 500.0,
+        heading_size: 11.5,
+        heading_opacity: 0.55,
+        heading_pad_top: 6.0,
+        heading_pad_bottom: 3.0,
         shortcut_opacity: 0.45,
         disabled_opacity: 0.4,
+        swatch: 18.0,
+        swatch_gap: 7.0,
+        swatch_ring: 1.5,
+        swatch_ring_gap: 2.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -455,5 +550,30 @@ pub const PAPER: Theme = Theme {
         ],
         left: 8.0,
         gap: 2.0,
+    },
+    midpoint: MidpointStyle {
+        size: 9.0,
+        fill: hex(0xffffff),
+        stroke: hex(0x8b7760),
+        stroke_width: 1.5,
+        shadow: Shadow {
+            x: 0.0,
+            y: 1.0,
+            blur: 3.0,
+            spread: 0.0,
+            color: rgba(0, 0, 0, 0.12),
+        },
+    },
+    create: CreateStyle {
+        motion: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+        },
+        rise: -8.0,
+        scale: 0.96,
+    },
+    push: Transition {
+        duration: Duration::from_millis(220),
+        easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
 };

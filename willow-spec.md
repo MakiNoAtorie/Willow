@@ -217,18 +217,53 @@ Saving writes canonical text. Loading a canonical file and saving it reproduces 
 
 Goal: build and reshape chains with the mouse.
 
-- Hovering a shape's border shows small circles at the edge midpoints. Clicking one creates a new linked shape in that direction, one creation gap away, and enters editing in it.
-- If that spot is already taken by the next shape in the chain, the new shape is **inserted** and everything beyond it in that direction (the linked subtree) is pushed along to make room. Nothing else moves here; from Phase 8 the spacing pass keeps unrelated shapes clear (before it they may end up overlapped). Zone membership is unchanged by the insert itself. If several shapes link on that side, only the one nearest the midpoint counts as the next shape, and only its subtree is pushed.
-- If the spot is taken by an unrelated shape (another chain, or a shape not linked on that side), the new shape is created at the normal spot. Before Phase 8 it overlaps; from Phase 8 the spacing pass pushes the other chain clear.
-- Link two existing shapes by dragging from a midpoint onto another shape. A link that would close a cycle is refused. When this joins two chains, the chain the drag started from keeps its color and the other chain adopts it.
-- Remove a link by right-clicking the connector (Remove link). Connectors have a generous hit tolerance and highlight on hover.
-- Delete key removes the selected shape(s). Deleting a shape in the middle of a chain reconnects its neighbors on opposite sides: the one above with the one below, the one left with the one right. With several neighbors on a side, the nearest one on one side becomes the hub and every neighbor on the opposite side links to it; the other neighbors on the hub's side lose their link and become their own chains. Links on sides with no opposite neighbor are dropped. This can never close a cycle. Cut behaves the same way.
+### Midpoints and linked shapes
+
+- Hovering a shape shows small circles at its four edge midpoints, at every zoom and at a constant size on screen. They never show on the shape being edited. Each has a 10 px hit radius on screen, which wins over the resize edges it sits on.
+- Clicking a midpoint creates a new linked shape on that side, one creation gap away, in the chain's color, and enters editing in it.
+- If a shape is already linked on that side, the new shape is **inserted**: the nearest such shape (by center) is relinked to the new shape instead of the source, and its subtree is pushed along just far enough to keep one creation gap on each side of the new shape (often not at all). Other shapes linked on that side keep their link to the source.
+- If the new shape lands on an unrelated shape (another chain, or a shape not linked on that side), that shape's whole chain is pushed clear (see Pushing).
+- One undo step covers the creation, any push and the first editing session in the new shape, so a single Undo takes it all back. A new shape left empty is kept.
+- Link two existing shapes by dragging from a midpoint onto another shape. While dragging, a connector follows the cursor and a valid target shows the hover ring. Dropping on empty space cancels. Dropping on the source, on a shape already linked to it, or where the link would close a cycle does nothing; those targets never highlight. The new link's side is derived as usual, so it may differ from the midpoint the drag started from. When this joins two chains, the chain the drag started from keeps its color and the other chain adopts it.
+- Remove a link by right-clicking the connector (Remove link). Connectors have a generous hit tolerance and highlight on hover. Connectors are never selected.
 - Connectors follow shapes as they move.
-- Multi-select: Shift+drag for a marquee, Shift+click to toggle. Selections can be moved together.
+
+### Pushing
+
+Until Phase 8's spacing pass, a few changes push shapes out of the way. Pushes are real moves (ADR 0004).
+
+- **What pushes**: a shape growing (typing, dragging its bottom edge, or a width change that reflows its text taller), a shape getting wider (dragging a side edge), midpoint creation and insert-and-push, and blocks that were themselves pushed, so pushes cascade. The writer's own drags, moves and pastes never push: a shape dropped onto another overlaps it.
+- **Own chain**: the subtrees linked on the growing side (below for height; left and right for width) keep at least one **creation gap** from the grown shape and move as blocks.
+- **Other chains**: a shape of another chain that the change brings closer than the **minimum gap** (a theme size, edge to edge; Paper's is 24 units) is pushed with its whole chain as one block, out to the minimum gap.
+- A push only happens when a change brings a shape closer than it was. Shapes the writer left closer than the gap stay where they are until something grows into them. In a cascade, a block that was itself pushed keeps shapes it was already closer than the gap to at that same distance; only the change itself (the grown shape, its subtree, a new shape) pushes out to the full gap. This is what makes cascades end.
+- Pushes go in the direction of the growth: down for height, outward from the center for width (left-side shapes left, right-side shapes right). Shrinking never pulls anything back.
+- Every push folds into the undo step that caused it (the typing session, the resize, the creation). Pushes never change zone membership.
+
+### Deleting
+
+- Delete or Backspace removes the selected shape(s) when nothing is being edited. Deleting a shape in the middle of a chain reconnects its neighbors on opposite sides: the one above with the one below, the one left with the one right. With several neighbors on a side, the **hub** is the neighbor nearest the deleted shape (by center, ties by ID) on the side with fewer neighbors (a tie goes to above, or left), and every neighbor on the opposite side links to it; the other neighbors on the hub's side lose their link and become their own chains. Links on sides with no opposite neighbor are dropped. This can never close a cycle.
+- Several selected shapes are deleted one at a time in story order, each reconnecting its own neighbors, so each chain is handled on its own and a run of deleted shapes in one chain closes into one link. The whole delete is one undo step.
+- Nothing moves on delete: the gap stays and the connector gets longer.
+- Cut behaves the same way, after copying.
+
+### Selection
+
+- Shift+drag starting on empty space draws a marquee; shapes it touches are added to the selection. Shift+click toggles a shape.
+- A plain click on a shape in a multi-selection, without dragging, selects only that shape; clicking it again edits it (Phase 2). Clicking empty space clears the selection.
+- Dragging any selected shape moves the whole selection, as one undo step.
+
+### Menus
+
+- Right-clicking a shape that isn't selected selects only that shape. Right-clicking inside a multi-selection keeps it.
 - Right-click on a shape: Cut, Copy, Paste, Duplicate, Change color (seven circles).
 - Right-click on a multi-selection: Cut, Copy, Duplicate, Delete (Create zone is added in Phase 6).
-- Right-click on empty space: create an unlinked shape there (a new parallel branch).
-- Paste creates copies at the cursor; Duplicate creates copies beside the originals. Copies get fresh IDs and keep the links among themselves (remapped) and their chain color, but are not linked to the originals. Pasted copies join the innermost zone under the cursor; duplicates join the originals' zone. Zones themselves are not copied. The clipboard carries the text format, so paste works between documents; pasting plain text from another app creates one unlinked shape with that text.
+- Right-click on empty space: New shape, an unlinked neutral shape centered on the click, in editing, joining the innermost zone under the click (a new parallel branch).
+
+### Copy, paste and color
+
+- Paste creates copies at the cursor: the copied group's bounding box is centered on it, keeping the copies' layout; with the cursor outside the canvas, at the view center. Duplicate creates copies one creation gap to the right of the originals' bounding box. Either way the copies become the selection.
+- Copies get fresh IDs and keep the links among themselves (remapped) and their chain color, but are not linked to the originals. Pasted copies join the innermost zone under the cursor; duplicates join the originals' zone. Zones themselves are not copied.
+- The clipboard carries the text format, so paste works between documents; pasting plain text from another app creates one unlinked shape with that text. While a shape is being edited, paste inserts plain text: copied shapes give their texts joined by line breaks.
 - Changing color paints the shape and its whole chain. A new shape created from a chain joins that chain's color. Unlinked shapes start with the neutral color.
 
 ## Phase 5 — Keyboard flow
@@ -241,8 +276,9 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 - Ctrl/Cmd+Shift+Left/Right change width (symmetric). Ctrl/Cmd+Shift+Up/Down move the bottom edge. Same minimum-size rule as the mouse.
 - Ctrl/Cmd+X/C/V cut, copy, paste. Ctrl/Cmd+D duplicates.
 - Ctrl/Cmd+Shift+C opens the color picker, navigable by keyboard.
-- **Tab** shows the directional picker over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. If the spot is taken, insert, push or overlap exactly as in Phase 4.
+- **Tab** shows the directional picker over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. Inserting and pushing work exactly as in Phase 4.
 - Ctrl/Cmd+Shift+N creates an unlinked shape.
+- **Select chain** (Ctrl/Cmd+L): selects every shape in the chains of the selected shapes. With nothing selected it does nothing. It is also an item in the shape menu and the multi-selection menu (shortcut shown). Not an undo step, like any selection change.
 
 ## Phase 6 — Zones
 
@@ -278,7 +314,7 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 - Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
 - Add View > Text Alignment (Left and Centered next to the default Justified).
 - Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
-- Shapes never overlap: every shape keeps at least a minimum gap (a theme size, set in this phase) from every other shape. This replaces the earlier "may overlap; nothing is pushed" rules for text growth, theme switching, shape creation in Phase 4/5 and auto-placement in Phase 7.
+- Shapes never overlap: every shape keeps at least the minimum gap (Phase 4) from every other shape. This replaces Phase 4's pushing (saved moves, ADR 0004) and the earlier "may overlap" rules for theme switching, drags and auto-placement in Phase 7.
   - Spacing is its own process, separate from editing. Each shape keeps the position the writer gave it (by moving, creating or placing it). Where it is drawn is worked out from those positions by the spacing pass, which runs after every change.
   - When a shape grows, by typing or resizing, any shape it would come closer to than the gap is pushed away in whatever direction gets it clear soonest, sideways included. Pushes cascade: a pushed shape pushes what it then crowds.
   - A shape in another chain (a branch, say) is never pushed alone: its whole chain moves with it as one block, keeping its own layout. Within the growing shape's own chain, the linked subtree beyond the crowded shape moves, as in Phase 4's insert-and-push.

@@ -193,10 +193,7 @@ fn recolor(doc: &mut Document, stated: &[(usize, Color)], height: &impl Fn(&Shap
     }
     let colors: HashMap<usize, Color> = stated.iter().copied().collect();
     let (shapes, next) = (&doc.shapes, neighbors(doc));
-    let center = |i: usize| Point {
-        x: shapes[i].x as f32 + shapes[i].width as f32 / 2.0,
-        y: shapes[i].y as f32 + height(&shapes[i]) / 2.0,
-    };
+    let center = |i: usize| shapes[i].center(height(&shapes[i]));
     let n = shapes.len();
     let (mut seen, mut chain, mut from) = (vec![false; n], vec![usize::MAX; n], vec![None; n]);
     let mut paint = Vec::new();
@@ -541,31 +538,8 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         }
     }
 
-    // Walk each chain depth-first from its topmost shape, neighbors below, right, left, above.
-    let center = |i: usize| Point {
-        x: shapes[i].x as f32 + shapes[i].width as f32 / 2.0,
-        y: shapes[i].y as f32 + heights.get(i).copied().unwrap_or(0.0) / 2.0,
-    };
-    let next = neighbors(doc);
-    let mut order: Vec<usize> = (0..shapes.len()).collect();
-    order.sort_by_key(|&i| key(&shapes[i]));
-    let (mut chain, mut from) = (vec![usize::MAX; shapes.len()], vec![None; shapes.len()]);
-    let mut walks: Vec<Vec<usize>> = Vec::new();
-    for &top in &order {
-        if chain[top] != usize::MAX {
-            continue;
-        }
-        let walk = walk(
-            top,
-            walks.len(),
-            &next,
-            shapes,
-            &center,
-            &mut chain,
-            &mut from,
-        );
-        walks.push(walk);
-    }
+    let center = |i: usize| shapes[i].center(heights.get(i).copied().unwrap_or(0.0));
+    let Walks { walks, chain, from } = walks(doc, &center);
 
     // Units per block, each keyed by its topmost shape.
     let mut units: Vec<Vec<(Key, Unit)>> = (0..=zones.len()).map(|_| Vec::new()).collect();
@@ -639,6 +613,37 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         );
     }
     out
+}
+
+/// Every shape (indices into `doc.shapes`) in story order within its chain: chains from their
+/// topmost shape, each walked as `save` walks it. Chains come in no particular order.
+pub(crate) fn story_order(doc: &Document, heights: &[f32]) -> Vec<usize> {
+    let center = |i: usize| doc.shapes[i].center(heights.get(i).copied().unwrap_or(0.0));
+    walks(doc, &center).walks.concat()
+}
+
+/// Every chain walked depth-first from its topmost shape (`walk`), chains in order of their
+/// topmost shapes; each shape's chain (an index into `walks`) and the shape it was reached
+/// from.
+struct Walks {
+    walks: Vec<Vec<usize>>,
+    chain: Vec<usize>,
+    from: Vec<Option<usize>>,
+}
+
+fn walks(doc: &Document, center: &dyn Fn(usize) -> Point) -> Walks {
+    let (shapes, next) = (&doc.shapes, neighbors(doc));
+    let mut tops: Vec<usize> = (0..shapes.len()).collect();
+    tops.sort_by_key(|&i| key(&shapes[i]));
+    let (mut chain, mut from) = (vec![usize::MAX; shapes.len()], vec![None; shapes.len()]);
+    let mut walks = Vec::new();
+    for top in tops {
+        if chain[top] == usize::MAX {
+            let c = walks.len();
+            walks.push(walk(top, c, &next, shapes, center, &mut chain, &mut from));
+        }
+    }
+    Walks { walks, chain, from }
 }
 
 /// Each shape's linked shapes (indices into `doc.shapes`).

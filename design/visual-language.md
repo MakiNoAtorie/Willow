@@ -63,6 +63,7 @@ Names are what the file format writes and never change. Pastel goes on shapes an
 ### Shapes
 
 - Default width 210 canvas units (shared by every theme). Padding 13 top/bottom, 16 left/right. Corner radius 14.
+- Creation gap 48 units, minimum gap 24 units, both edge to edge (spec Phases 3 and 4).
 - No border. Shadow: `0 1px 2px rgba(70,50,20,.07), 0 4px 14px rgba(70,50,20,.08)`.
 - **Selected** (and being edited): a 2 px canvas-colored gap, then a 2 px accent ring, with a slightly deeper shadow (`0 6px 18px rgba(70,50,20,.12)`). Editing adds the caret: 1.5 px wide, ink color, blinking.
 - **Hover**: four midpoint circles at the edge midpoints, 9 px, white fill, 1.5 px accent stroke.

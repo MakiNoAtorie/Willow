@@ -74,6 +74,8 @@ pub enum Input {
         button: Button,
         mods: Modifiers,
     },
+    /// The pointer left the window: Paste goes to the view center until it is back.
+    PointerLeft,
     /// Wheel or trackpad scroll at `pos`: how far the content should move, in screen pixels.
     Wheel {
         pos: Point,
@@ -124,14 +126,26 @@ pub enum Input {
     /// Shift+motion: moves the caret and keeps the selection's other end.
     Select(Motion),
     SelectAll,
-    /// Deletes the text selection; the app has put `Session::selected_text` on the clipboard.
+    /// Deletes the text selection, or with nothing being edited the selected shapes as
+    /// Delete does; the app has put `Session::clipboard_text` on the clipboard.
     Cut,
     /// Plain text from the clipboard, replacing the text selection. Line breaks (`\r\n`, `\r`
-    /// or `\n`) become paragraph breaks; other control characters are dropped.
+    /// or `\n`) become paragraph breaks; other control characters are dropped. Willow text
+    /// inserts its shapes' texts, one per line. With nothing being edited it pastes shapes
+    /// (`Session::clipboard_text`'s format) or one shape holding the text.
     Paste(String),
+    /// Ctrl/Cmd+D with nothing being edited: copies the selected shapes beside them.
+    Duplicate,
+    /// Delete or Backspace with nothing being edited: deletes the selected shapes, each
+    /// reconnecting its neighbors (`Session::delete`).
+    DeleteShapes,
     /// The window lost focus: Space no longer counts as held and a pan ends, since their
     /// key-up or release may never arrive.
     FocusLost,
+    /// Runs an item of the open context menu and closes it.
+    MenuChoose(crate::MenuAction),
+    /// Esc or a click outside: closes the context menu.
+    CloseMenu,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

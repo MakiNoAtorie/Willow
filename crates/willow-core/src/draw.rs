@@ -26,6 +26,31 @@ pub struct Frame<'a> {
     /// Shape shadows and the dot grid are drawn (dropped below `fade_end`).
     pub shadows: bool,
     pub grid: bool,
+    /// The hovered shape's edge midpoints, canvas units; paint them over every shape at the
+    /// theme's `midpoint` size, constant on screen.
+    pub midpoints: Vec<Point>,
+    /// The marquee being drawn: top-left and bottom-right in canvas units.
+    pub marquee: Option<(Point, Point)>,
+    /// A midpoint drag looking for a shape to link to; paint its band over every shape.
+    pub link_drag: Option<LinkDrag<'a>>,
+}
+
+/// A drag from a midpoint: a band from the midpoint to the pointer, canvas units, and the
+/// shape a drop there would link to (it shows the ring); refused shapes never show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinkDrag<'a> {
+    pub from: Point,
+    pub to: Point,
+    pub target: Option<&'a ShapeId>,
+}
+
+/// A shape fading in after its creation: paint it at `opacity`, `dy` canvas units off its
+/// place and scaled by `scale` around its center.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Appear {
+    pub opacity: f32,
+    pub dy: f32,
+    pub scale: f32,
 }
 
 /// A link's straight line, between the midpoints of the sides its shapes face each other with.
@@ -35,6 +60,8 @@ pub struct Connector {
     pub from_side: Side,
     pub to: Point,
     pub to_side: Side,
+    /// Under the pointer: paint it in the theme's hover style.
+    pub hovered: bool,
 }
 
 pub struct VisibleZone<'a> {
@@ -68,6 +95,10 @@ pub struct Visible<'a> {
     pub selection: Vec<(Point, Point)>,
     pub marked: Option<Range<usize>>,
     pub caret: Option<CaretView>,
+    /// Set while the shape's create animation runs.
+    pub appear: Option<Appear>,
+    /// Canvas units to paint the shape off `x`, `y` while it slides after a push; (0, 0) at rest.
+    pub slide: Point,
 }
 
 impl Session {
@@ -80,8 +111,9 @@ impl Session {
         let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker[c as usize], deepen));
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
-        let rings = self.selection_rings(now);
         let edited = self.editing().filter(|_| fade > 0.0);
+        let group = self.group_drag();
+        let moved: HashSet<&ShapeId> = group.iter().flat_map(|_| self.selection()).collect();
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and top-left.
         let placed = |s: &'a Shape| {
@@ -93,8 +125,15 @@ impl Session {
                 Some(p) if *p.id == s.id => (p.x, p.y),
                 _ => (s.x, s.y),
             };
+            let (x, y) = match group {
+                Some((dx, dy)) if moved.contains(&s.id) => (s.x + dx, s.y + dy),
+                _ => (x, y),
+            };
             (s, x, y)
         };
+        let creating = self.creating(now);
+        let link_drag = self.link_drag();
+        let target = link_drag.and_then(|l| l.target);
         let mut connectors = Vec::new();
         for &(p, q) in self.link_ends().iter() {
             let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
@@ -110,17 +149,32 @@ impl Session {
             if (py as f32 + ph).max(qy as f32 + qh) < a.y {
                 continue;
             }
-            let center = |x: i32, y: i32, w: u32, h: f32| Point {
-                x: x as f32 + w as f32 / 2.0,
-                y: y as f32 + h / 2.0,
+            // A sliding shape's connector end slides with it, a previewed one with the preview.
+            let center = |s: &Shape, x: i32, y: i32, h: f32| {
+                let (c, o) = (s.center(h), self.sliding(&s.id, now));
+                Point {
+                    x: c.x + (x - s.x) as f32 + o.x,
+                    y: c.y + (y - s.y) as f32 + o.y,
+                }
             };
-            let (pc, qc) = (center(px, py, p.width, ph), center(qx, qy, q.width, qh));
+            let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));
             let (from_side, to_side) = (side(pc, qc), side(qc, pc));
+            let (mut from, mut to) = (
+                midpoint(pc, p.width, ph, from_side),
+                midpoint(qc, q.width, qh, to_side),
+            );
+            // A new shape's connector draws out from the other end.
+            match creating {
+                Some((id, k)) if *id == q.id => to = lerp(from, to, k),
+                Some((id, k)) if *id == p.id => from = lerp(to, from, k),
+                _ => {}
+            }
             connectors.push(Connector {
-                from: midpoint(pc, p.width, ph, from_side),
+                from,
                 from_side,
-                to: midpoint(qc, q.width, qh, to_side),
+                to,
                 to_side,
+                hovered: self.connector_hovered(&p.id, &q.id),
             });
         }
         let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
@@ -167,10 +221,19 @@ impl Session {
                 if fy + height < a.y {
                     return None;
                 }
-                let ring = (rings.iter()).find(|r| *r.0 == s.id).map_or(0.0, |r| r.1);
+                let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
+                let ring = if target == Some(&s.id) { 1.0 } else { ring };
                 let e = edited.filter(|e| e.id == s.id);
+                let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
+                    opacity: k,
+                    dy: t.create.rise * (1.0 - k),
+                    scale: t.create.scale + (1.0 - t.create.scale) * k,
+                });
                 Some(Visible {
-                    fill: fills[s.color as usize],
+                    fill: match self.rippling(&s.id, now) {
+                        Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
+                        None => fills[s.color as usize],
+                    },
                     layout: self.layout(&s),
                     shape: s,
                     x,
@@ -180,6 +243,8 @@ impl Session {
                     selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
                     marked: e.and_then(|e| e.marked.clone()),
                     caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
+                    appear,
+                    slide,
                 })
             })
             .collect();
@@ -193,6 +258,9 @@ impl Session {
             deepen,
             shadows: full,
             grid: full,
+            midpoints: self.midpoints(),
+            marquee: self.marquee(),
+            link_drag,
         }
     }
 }
@@ -208,6 +276,14 @@ fn midpoint(c: Point, w: u32, h: f32, side: Side) -> Point {
     Point {
         x: c.x + dx,
         y: c.y + dy,
+    }
+}
+
+/// `a` moved `k` (0 to 1) of the way toward `b`.
+fn lerp(a: Point, b: Point, k: f32) -> Point {
+    Point {
+        x: a.x + (b.x - a.x) * k,
+        y: a.y + (b.y - a.y) * k,
     }
 }
 
