@@ -782,6 +782,11 @@ impl Session {
                 self.menu = None;
                 self.respond(true)
             }
+            // Esc: the one place that closes what is open first (menu; pickers hook in here).
+            Input::Escape if self.menu.is_some() => {
+                self.menu = None;
+                self.respond(true)
+            }
             Input::MenuChoose(action) => {
                 self.choose(action);
                 self.respond(true)
@@ -876,6 +881,9 @@ impl Session {
             | Input::Unmark
             | Input::StartEditing
             | Input::StopEditing
+            | Input::Enter
+            | Input::Escape
+            | Input::NewLine
             | Input::Select(_)
             | Input::Cut
             | Input::Paste(_)
