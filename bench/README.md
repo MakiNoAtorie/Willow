@@ -2,6 +2,8 @@
 
 `cargo run --release -p willow-app -- --bench --machine NAME` appends rows to `results.csv` (columns `machine,git_rev,scenario,metric,value,unit`; `git_rev` is `git rev-parse --short HEAD` of the Willow checkout, or `unknown`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`.
 
+Each `pan_zoom*_cold` row starts on a new session that has laid nothing out, with no idle `measure_ahead` running, so it times the first layout of every shape in view; the matching `_warm` row pans back over the same ground. No `measure_ahead` runs during any scenario after `open_first_frame`. Rows from `324dac2` to `4cf2ae8` ran their cold pans after `measure_ahead` had laid out much of the document, so those cold rows are not cold. `recovery_take` is the UI-thread part of an autosave (`Session::take_recovery`: clone the document, every shape's height).
+
 ## MacBook Air M4 (`mba-m4`, #16)
 
 All targets hold with no code changes: draw p95 ≤ 4.6 ms in every pan and zoom scenario, typing draw max 4.1 ms with no late frames, 0 renders while idle.
