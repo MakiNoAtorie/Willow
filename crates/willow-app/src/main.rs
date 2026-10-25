@@ -632,8 +632,10 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         y += s;
     }
 
-    // Zones and their titles, then connectors, under the shapes.
+    // Zones, then their titles (so a nested zone never covers its parent's), then
+    // connectors, under the shapes.
     let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
+    let zt = &t.zone;
     for v in &frame.zones {
         let zone = v.zone;
         let b = Bounds::new(
@@ -643,7 +645,6 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }),
             size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
         );
-        let zt = &t.zone;
         window.paint_quad(quad(
             b,
             px(zt.radius * z),
@@ -652,17 +653,17 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(v.edge),
             Default::default(),
         ));
-        if v.show_title {
-            let size = v.title_size * z;
-            text::paint_line(
-                window,
-                at(v.title_at),
-                &zone.title,
-                t,
-                zt.title_weight,
-                size,
-            );
-        }
+    }
+    for v in frame.zones.iter().filter(|v| v.show_title) {
+        let size = v.title_size * z;
+        text::paint_line(
+            window,
+            at(v.title_at),
+            &v.zone.title,
+            t,
+            zt.title_weight,
+            size,
+        );
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
