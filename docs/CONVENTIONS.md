@@ -36,7 +36,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Text
 - Offsets are UTF-8 bytes into `RichText::plain()`. The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
 - After any open, call `Session::measure_ahead(n)` from idle so saves don't stall.
-- Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
+- Layout is the pure `layout(..)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
 - New justification gap kinds go in the `stretch` closure.
 - Style toggles take `edit::Style`; with an empty selection they set `Editing.pending`. A toggle turns on unless the whole selection has it.
 - The app writes `Session::clipboard_text()` before Cut/Copy and sends `Input::Paste(text)`; the core never touches the clipboard.
@@ -58,9 +58,9 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 
 ## Chains
 - Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. The keyboard color picker is `MenuKind::Picker` (one `Colors` row); popup keys bind in the `picker` key context. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
-- Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape. Tests grab edges away from midpoints.
+- Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape.
 - `new_shape_at(c, push)` is the one New shape path (`push` for keyboard creation).
-- Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured (the layout cache keys on ID).
+- Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured.
 - Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap. Moves, drags and pastes never push.
 - A gesture that changes structure calls `stop_editing` first.
 - Animations are `Visible` fields computed in the core and counted in `animating`; screen-constant overlays are `Frame` fields painted after shapes.
@@ -68,6 +68,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: everything, including previews, culling and per-shape overlays. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
 - Paint multiplies canvas-unit values by `vp.zoom`.
+- Absolute overlay divs set insets (`top_0().left_0()`): without them they sit below the canvas and are clipped.
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.

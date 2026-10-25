@@ -60,8 +60,11 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
                     .into_any_element(),
             }
         }));
+    // Pinned to the corner: an absolute box with no insets sits below the canvas, clipped.
     let backdrop = div()
         .absolute()
+        .top_0()
+        .left_0()
         .size_full()
         .on_mouse_down(MouseButton::Left, cx.listener(Willow::mouse_down))
         .on_mouse_down(MouseButton::Middle, cx.listener(Willow::mouse_down))
