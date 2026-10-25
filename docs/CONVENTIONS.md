@@ -34,7 +34,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Timed animations take a `Transition { duration, easing: CubicBezier }`. Low-zoom values live in `ZoomStyle`.
 
 ## Text
-- Offsets are UTF-8 bytes into `RichText::plain()` (paragraphs joined by `\n`). The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
+- Offsets are UTF-8 bytes into `RichText::plain()`. The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
 - After any open, call `Session::measure_ahead(n)` from idle so saves don't stall.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
 - New justification gap kinds go in the `stretch` closure.
@@ -49,6 +49,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
+- Keyboard commands reuse the gesture commits (`move_selection`, `resize_shape`); `Session::least_growth` is the one min-width rule. Shortcuts sharing editing keys (Cmd/Ctrl+Arrows) bind in `!editing`.
 - Previews are queries; the mutation lands once on release through a named `Session` method.
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
