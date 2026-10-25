@@ -144,6 +144,12 @@ pub enum Input {
     FocusLost,
     /// Runs an item of the open context menu and closes it.
     MenuChoose(crate::MenuAction),
+    /// Ctrl/Cmd+Shift+C: opens the keyboard color picker over the selected shape.
+    OpenColorPicker,
+    /// Left (-1) or Right (1) in the picker: moves the ring, stopping at the ends.
+    PickerStep(i8),
+    /// Enter in the picker: recolors the chain and closes it.
+    PickerApply,
     /// Esc or a click outside: closes the context menu.
     CloseMenu,
 }

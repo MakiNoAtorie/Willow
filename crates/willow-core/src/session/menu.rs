@@ -19,6 +19,8 @@ pub enum MenuKind {
     Connector,
     /// A right-click inside a multi-selection.
     Multi,
+    /// The keyboard color picker: one color row over the selected shape.
+    Picker,
 }
 
 /// What an item does. One variant per item; `choose` runs it.

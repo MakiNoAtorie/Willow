@@ -38,6 +38,17 @@ actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 actions!(willow, [DeleteShapes]);
 // Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
 actions!(willow, [Duplicate]);
+// Keyboard color picker; the last four are bound in the `picker` key context.
+actions!(
+    willow,
+    [
+        OpenColorPicker,
+        PickerLeft,
+        PickerRight,
+        PickerApply,
+        PickerCancel
+    ]
+);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -372,6 +383,8 @@ impl Render for Willow {
             .bg(color(theme.canvas))
             .key_context(if self.session.editing().is_some() {
                 "Willow editing"
+            } else if self.session.color_picker_open() {
+                "Willow picker"
             } else {
                 "Willow"
             })
@@ -389,6 +402,13 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
+            .on_action(
+                cx.listener(|w, _: &OpenColorPicker, _, cx| w.input(Input::OpenColorPicker, cx)),
+            )
+            .on_action(cx.listener(|w, _: &PickerLeft, _, cx| w.input(Input::PickerStep(-1), cx)))
+            .on_action(cx.listener(|w, _: &PickerRight, _, cx| w.input(Input::PickerStep(1), cx)))
+            .on_action(cx.listener(|w, _: &PickerApply, _, cx| w.input(Input::PickerApply, cx)))
+            .on_action(cx.listener(|w, _: &PickerCancel, _, cx| w.input(Input::CloseMenu, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -872,6 +892,12 @@ fn main() {
             KeyBinding::new("delete", DeleteShapes, Some("!editing")),
             KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
             KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
+            KeyBinding::new("cmd-shift-c", OpenColorPicker, Some("!editing")),
+            KeyBinding::new("ctrl-shift-c", OpenColorPicker, Some("!editing")),
+            KeyBinding::new("left", PickerLeft, Some("picker")),
+            KeyBinding::new("right", PickerRight, Some("picker")),
+            KeyBinding::new("enter", PickerApply, Some("picker")),
+            KeyBinding::new("escape", PickerCancel, Some("picker")),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),

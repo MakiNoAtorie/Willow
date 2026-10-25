@@ -2,6 +2,7 @@
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
 mod clipboard;
+mod color_picker;
 mod delete;
 mod editing;
 mod file;
@@ -784,6 +785,18 @@ impl Session {
             }
             Input::MenuChoose(action) => {
                 self.choose(action);
+                self.respond(true)
+            }
+            Input::OpenColorPicker => {
+                self.open_color_picker();
+                self.respond(true)
+            }
+            Input::PickerStep(d) => {
+                self.picker_step(d as i32);
+                self.respond(true)
+            }
+            Input::PickerApply => {
+                self.picker_apply();
                 self.respond(true)
             }
             Input::CloseMenu => {
