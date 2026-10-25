@@ -8,9 +8,20 @@
 //!
 //! `file_10k` times, in milliseconds, saves of the generated document (serialize and write
 //! beside): `save_unwarmed` from a new session that has measured nothing (a save the moment a
-//! file opens), `save` the window's first (after the idle `measure_ahead`), `save_again` the
-//! next; then `load` of that file (read, parse, repair, auto-place, a new session). The loaded
-//! session replaces the window's, so `open_first_frame` and every later scenario run on it.
+//! file opens), `save` the window's first (after its `measure_ahead` has been through every
+//! shape; the bench finishes it first), `save_again` the next; then `load` of that file (read,
+//! parse, repair, auto-place, a new session). The loaded session replaces the window's, its
+//! `measure_ahead` cancelled, so `open_first_frame` is the first frame with nothing laid out.
+//!
+//! No `measure_ahead` runs during any later scenario. Each `pan_zoom*_cold` starts on a new
+//! session of the same document (empty layout and word caches; GPUI's glyph atlas stays), so
+//! its first frame lays out everything in view and later frames each shape that comes into
+//! view; `pan_zoom*_warm` then pans back over the same ground on that session. Before the zoom
+//! sweeps the bench lays out every shape, as the app's idle `measure_ahead` would, so the zoom
+//! sweeps, typing and `recovery_take` run on a fully laid-out document.
+//!
+//! `recovery_take` times, in milliseconds, `Session::take_recovery` once the typing has made a
+//! recovery write due: autosave's UI-thread part (clone the document, every shape's height).
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -65,10 +76,40 @@ impl Bench {
         }
         let rev = git_rev();
         for (s, m, v, u) in &self.rows {
-            writeln!(f, "{},{rev},{s},{m},{v:.3},{u}", self.machine).unwrap();
+            writeln!(
+                f,
+                "{}",
+                csv_row(&[&self.machine, &rev, s, m, &format!("{v:.3}"), u])
+            )
+            .unwrap();
         }
         println!("appended {} rows to {CSV}", self.rows.len());
     }
+}
+
+/// A new session on `w`'s document that has laid nothing out.
+fn unmeasured(w: &Willow, window: &Window) -> willow_core::Session {
+    let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
+    let doc = w.session.document().clone();
+    willow_core::Session::new(doc, w.session.theme(), measure)
+}
+
+/// Stops the window's idle `measure_ahead` and lays out every shape it had left.
+fn measure_all(w: &mut Willow) {
+    w.ahead = None;
+    while !w.session.measure_ahead(1000) {}
+}
+
+/// One CSV line; a field holding a comma, quote or newline is quoted, its quotes doubled.
+fn csv_row(fields: &[&str]) -> String {
+    let field = |f: &&str| {
+        if f.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", f.replace('"', "\"\""))
+        } else {
+            f.to_string()
+        }
+    };
+    fields.iter().map(field).collect::<Vec<_>>().join(",")
 }
 
 /// Called at the top of `render`: counts the render and applies one scripted input, asking
@@ -235,12 +276,11 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
             (w.session.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
             t.elapsed().as_secs_f64() * 1e3
         };
-        let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
-        let doc = w.session.document().clone();
-        let mut fresh = willow_core::Session::new(doc, w.session.theme(), measure);
+        let mut fresh = unmeasured(w, window);
         let t = Instant::now();
         (fresh.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
         let unwarmed = t.elapsed().as_secs_f64() * 1e3;
+        measure_all(w);
         let (first, again) = (save(w), save(w));
         let t = Instant::now();
         let bytes = std::fs::read(&path).expect("bench read");
@@ -249,6 +289,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let vp = w.session.viewport();
         w.show(content, window, cx);
         let load = t.elapsed().as_secs_f64() * 1e3;
+        w.ahead = None;
         w.session.set_viewport(vp);
         let b = w.bench.as_mut().unwrap();
         b.row("file_10k", "save_unwarmed", unwarmed, "ms");
@@ -279,10 +320,11 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         mods,
     };
     files(&this, cx).await;
-    // Each zoom pans right over new ground (cold: first layout of revealed shapes), then back
-    // over the same ground (warm).
+    // Each zoom pans right over new ground on a new session (cold: first layout of every shape
+    // in view), then back over the same ground (warm).
     let origin = Point { x: -40.0, y: -40.0 };
     for (name, zoom) in [("100", 1.0), ("40", 0.4), ("10", 0.1), ("2", 0.02)] {
+        (this.update_in(cx, |w, window, _| w.session = unmeasured(w, window))).unwrap();
         let cold = vec![pan(-PAN_PX); PAN_FRAMES];
         let s = format!("pan_zoom{name}_cold");
         scripted(&this, cx, &s, at(zoom, origin, size), cold).await;
@@ -290,6 +332,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         scripted(&this, cx, &format!("pan_zoom{name}_warm"), None, warm).await;
     }
     idle(&this, cx, "idle_after_pan").await;
+    this.update(cx, |w, _| measure_all(w)).unwrap();
 
     // 100% to 10% and back around the canvas center, twice: cold rasterizes glyphs at each
     // size, warm reuses the atlas.
@@ -356,6 +399,18 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     })
     .ok();
 
+    // Autosave's UI-thread part, as if 60 s had passed since the typing.
+    this.update(cx, |w, _| {
+        let due = w.start.elapsed() + Duration::from_secs(60);
+        let t = Instant::now();
+        let r = w.session.take_recovery(due);
+        let took = t.elapsed().as_secs_f64() * 1e3;
+        let write = matches!(r, Some(willow_core::Recovery::Write { .. }));
+        assert!(write, "bench: no recovery write due after typing");
+        (w.bench.as_mut().unwrap()).row("recovery_take", "take_recovery", took, "ms");
+    })
+    .ok();
+
     // Stop editing and show the zoom pill, so both the caret and the pill have to wind down.
     this.update(cx, |w, cx| {
         let now = w.start.elapsed();
@@ -371,4 +426,16 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         cx.quit();
     })
     .ok();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn csv_row_quotes_fields_with_commas_quotes_or_newlines() {
+        let row = super::csv_row(&["a,b", "4cf2ae8", "say \"hi\"", "two\nlines", "1.000", "ms"]);
+        assert_eq!(
+            row,
+            "\"a,b\",4cf2ae8,\"say \"\"hi\"\"\",\"two\nlines\",1.000,ms"
+        );
+    }
 }
