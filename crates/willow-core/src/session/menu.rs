@@ -166,7 +166,7 @@ impl Session {
             return;
         };
         match action {
-            MenuAction::NewShape => self.new_shape_at(menu.canvas),
+            MenuAction::NewShape => self.new_shape_at(menu.canvas, false),
             MenuAction::Cut | MenuAction::Delete => self.delete(&self.selected.clone()),
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
@@ -225,7 +225,7 @@ impl Session {
 
     /// An empty neutral shape centered on canvas point `c`, in the innermost zone under it,
     /// editing. One undo step together with its first editing session.
-    fn new_shape_at(&mut self, c: Point) {
+    pub(super) fn new_shape_at(&mut self, c: Point, push: bool) {
         let id = self.doc.next_id();
         let mut shape = Shape::new(id.clone(), 0, 0);
         shape.color = Color::Neutral;
@@ -236,6 +236,11 @@ impl Session {
         self.history.add(&mut self.doc, shape);
         if let Some(zone) = zone {
             self.history.join_zone(&mut self.doc, &zone, &id);
+        }
+        if push {
+            // Other chains it lands on are cleared, as midpoint creation does.
+            let new = self.doc.shapes.len() - 1;
+            self.clear_others(crate::Side::Right, vec![(new, None)]);
         }
         self.select([id.clone()]);
         // Its begin is a no-op; `stop_editing`'s end closes the step.

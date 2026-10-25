@@ -54,6 +54,8 @@ actions!(willow, [NudgeLeft, NudgeRight, NudgeUp, NudgeDown]);
 actions!(willow, [Narrower, Wider, Shorter, Taller]);
 // Bare arrows on the canvas, with nothing being edited: select the next shape that way.
 actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
+// Cmd/Ctrl+Shift+N: a new shape beside the selected chain.
+actions!(willow, [NewBeside]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -471,6 +473,7 @@ impl Render for Willow {
             SelectLineStart => Input::Select(Motion::LineStart),
             SelectLineEnd => Input::Select(Motion::LineEnd),
             SelectAll => Input::SelectAll,
+            NewBeside => Input::NewBeside,
             NavLeft => Input::Navigate(willow_core::Side::Left),
             NavRight => Input::Navigate(willow_core::Side::Right),
             NavUp => Input::Navigate(willow_core::Side::Top),
@@ -909,6 +912,7 @@ fn main() {
                 KeyBinding::new("cmd-shift-right", Wider, canvas),
                 KeyBinding::new("cmd-shift-up", Shorter, canvas),
                 KeyBinding::new("cmd-shift-down", Taller, canvas),
+                KeyBinding::new("cmd-shift-n", NewBeside, canvas),
             ]);
         } else {
             cx.bind_keys([
@@ -920,6 +924,7 @@ fn main() {
                 KeyBinding::new("ctrl-shift-right", Wider, canvas),
                 KeyBinding::new("ctrl-shift-up", Shorter, canvas),
                 KeyBinding::new("ctrl-shift-down", Taller, canvas),
+                KeyBinding::new("ctrl-shift-n", NewBeside, canvas),
             ]);
         }
         let ed = Some("editing");

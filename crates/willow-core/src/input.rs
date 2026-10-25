@@ -169,6 +169,8 @@ pub enum Input {
     /// An arrow key with nothing being edited: selects the next shape that way
     /// (`Session::navigate`).
     Navigate(crate::Side),
+    /// Ctrl/Cmd+Shift+N with nothing being edited: `Session::new_beside`.
+    NewBeside,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -1,6 +1,7 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod beside;
 mod clipboard;
 mod color_picker;
 mod delete;
@@ -859,6 +860,11 @@ impl Session {
             }
             Input::NudgeSize(side) => {
                 self.nudge_size(side);
+                self.respond(true)
+            }
+            Input::NewBeside if self.editing.is_some() => self.respond(false),
+            Input::NewBeside => {
+                self.new_beside();
                 self.respond(true)
             }
             Input::Navigate(side) => {
