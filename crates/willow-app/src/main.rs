@@ -6,10 +6,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
-    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent,
-    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*,
-    px, quad, size,
+    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode,
+    ScrollEvent, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point,
+    prelude::*, px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
@@ -439,6 +439,9 @@ impl Render for Willow {
                 if let Some(k) = key(&e.keystroke) {
                     w.input(Input::KeyUp(k), cx);
                 }
+            }))
+            .on_modifiers_changed(cx.listener(|w, _: &ModifiersChangedEvent, _, cx| {
+                w.input(Input::ModifiersChanged, cx)
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))

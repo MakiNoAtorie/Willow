@@ -217,3 +217,11 @@ fn edit_menu_inputs_close_the_picker_and_act_as_usual() {
     assert!(!s.tab_picker_open());
     assert_eq!(s.document().shapes.len(), 3);
 }
+
+#[test]
+fn a_modifier_change_leaves_the_picker_open() {
+    let mut s = session();
+    input(&mut s, Input::Tab);
+    input(&mut s, Input::ModifiersChanged);
+    assert!(s.tab_picker_open());
+}
