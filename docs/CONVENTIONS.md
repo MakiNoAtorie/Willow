@@ -68,7 +68,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: everything, including previews, culling and per-shape overlays. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
 - Paint multiplies canvas-unit values by `vp.zoom`.
-- Absolute overlay divs set insets (`top_0().left_0()`): without them they sit below the canvas and are clipped.
+- Absolute overlay divs set insets (`top_0().left_0()`), or they land below the canvas, clipped.
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
