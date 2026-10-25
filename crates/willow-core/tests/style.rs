@@ -118,7 +118,7 @@ fn formatting_is_part_of_the_sessions_single_undo_step() {
     typ(&mut s, "x");
     s.set_text_selection(0..2);
     s.handle(Input::ToggleBold, T);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(runs(&s), [r("abcd", false, false)]);
     assert!(!s.can_undo());

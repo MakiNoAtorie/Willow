@@ -73,7 +73,7 @@ fn each_side_creates_a_linked_shape_one_gap_away_in_the_chain_color_in_editing()
 fn a_side_already_linked_inserts_the_new_shape() {
     let mut s = session();
     click(&mut s, BOTTOM);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     click(&mut s, BOTTOM);
     let doc = s.document();
     assert_eq!(doc.shapes.len(), 3);
@@ -109,7 +109,7 @@ fn one_undo_removes_the_new_shape_and_its_text() {
     // Undo after editing ended.
     let mut s = session();
     typed(&mut s);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     input(&mut s, Input::Undo);
     assert_eq!(*s.document(), before);
     assert!(!s.can_undo());
@@ -119,7 +119,7 @@ fn one_undo_removes_the_new_shape_and_its_text() {
 fn a_new_shape_left_empty_is_kept_and_undoes_in_one_step() {
     let mut s = session();
     click(&mut s, BOTTOM);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     assert_eq!(s.document().shapes.len(), 2);
     input(&mut s, Input::Undo);
     assert_eq!(s.document().shapes.len(), 1);
@@ -224,4 +224,34 @@ fn the_create_animation_rises_scales_and_draws_the_connector_then_stops() {
             .midpoints
             .is_empty()
     );
+}
+
+#[test]
+fn a_linked_shape_is_centered_on_its_side_so_the_connector_runs_straight() {
+    // A source taller and wider than a new shape: the new one centers on the side's midpoint.
+    for side in [
+        willow_core::Side::Right,
+        willow_core::Side::Left,
+        willow_core::Side::Bottom,
+        willow_core::Side::Top,
+    ] {
+        let mut doc = Document::new();
+        (doc.shapes[0].width, doc.shapes[0].extra_height) = (330, 120);
+        let mut s = common::session_of(doc);
+        let id = s.document().shapes[0].id.clone();
+        s.select([id]);
+        input(&mut s, Input::Tab);
+        input(&mut s, Input::PickSide(side));
+        let (a, b) = (&s.document().shapes[0], &s.document().shapes[1]);
+        let (ah, bh) = (s.shape_height(a), s.shape_height(b));
+        let center =
+            |x: i32, y: i32, w: u32, h: f32| (x as f32 + w as f32 / 2.0, y as f32 + h / 2.0);
+        let (ca, cb) = (center(a.x, a.y, a.width, ah), center(b.x, b.y, b.width, bh));
+        match side {
+            willow_core::Side::Right | willow_core::Side::Left => {
+                assert!((ca.1 - cb.1).abs() <= 0.5, "{side:?}: {ca:?} vs {cb:?}")
+            }
+            _ => assert!((ca.0 - cb.0).abs() <= 0.5, "{side:?}: {ca:?} vs {cb:?}"),
+        }
+    }
 }

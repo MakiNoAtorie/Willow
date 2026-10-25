@@ -106,12 +106,7 @@ impl Session {
             self.shape_height(&new),
             self.theme.creation_gap,
         );
-        (new.x, new.y) = match side {
-            Side::Bottom => (a.x, (a.y as f32 + ah + gap).round() as i32),
-            Side::Top => (a.x, (a.y as f32 - nh - gap).round() as i32),
-            Side::Right => (a.x + a.width as i32 + gap as i32, a.y),
-            Side::Left => (a.x - new.width as i32 - gap as i32, a.y),
-        };
+        (new.x, new.y) = crate::chain::beside(a, ah, new.width, nh, side, gap);
         let new_id = new.id.clone();
         // Insert: the nearest shape already on that side links on from the new one instead,
         // its subtree pushed a creation gap clear of it.

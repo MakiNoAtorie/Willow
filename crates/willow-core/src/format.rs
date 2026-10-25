@@ -268,12 +268,7 @@ fn position(
             let (x, y) = match anchor[i] {
                 Some((j, side)) => {
                     let (a, s) = (&shapes[j], &shapes[i]);
-                    match side {
-                        Side::Bottom => (a.x, (a.y as f32 + height(a) + gap).round() as i32),
-                        Side::Top => (a.x, (a.y as f32 - height(s) - gap).round() as i32),
-                        Side::Right => (a.x + a.width as i32 + gap as i32, a.y),
-                        Side::Left => (a.x - s.width as i32 - gap as i32, a.y),
-                    }
+                    crate::chain::beside(a, height(a), s.width, height(s), side, gap)
                 }
                 None => below(lowest),
             };

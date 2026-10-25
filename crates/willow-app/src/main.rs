@@ -13,7 +13,7 @@ use gpui::{
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
-    Theme, ZoomPill,
+    Side, Theme, ZoomPill,
 };
 mod bench;
 mod file;
@@ -38,12 +38,36 @@ actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 actions!(willow, [DeleteShapes]);
 // Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
 actions!(willow, [Duplicate]);
+// Keyboard color picker; the last four are bound in the `picker` key context.
+actions!(
+    willow,
+    [
+        OpenColorPicker,
+        PickerLeft,
+        PickerRight,
+        PickerApply,
+        PickerCancel
+    ]
+);
+// Cmd/Ctrl+Arrows move the selection; with Shift they resize the selected shape.
+actions!(willow, [NudgeLeft, NudgeRight, NudgeUp, NudgeDown]);
+actions!(willow, [Narrower, Wider, Shorter, Taller]);
+// Tab, also while editing: the directional picker; `tab_picker_keys` takes keys while it is open.
+actions!(willow, [ShowTabPicker]);
+// Bare arrows on the canvas, with nothing being edited: select the next shape that way.
+actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
+// Cmd/Ctrl+Shift+N: a new shape beside the selected chain.
+actions!(willow, [NewBeside]);
+// Cmd/Ctrl+L: select the chains of the selection.
+actions!(willow, [SelectChain]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
     [
         StartEditing,
-        StopEditing,
+        Enter,
+        Escape,
+        NewLine,
         Left,
         Right,
         WordLeft,
@@ -70,8 +94,8 @@ actions!(
     ]
 );
 
-/// Registers one handler per editing action on `$d`, each sending its `Input`.
-macro_rules! editing_actions {
+/// Registers one handler per action on `$d`, each sending its `Input`.
+macro_rules! input_actions {
     ($d:expr, $cx:expr, $($action:ident => $input:expr),* $(,)?) => {
         $d $(.on_action($cx.listener(|w, _: &$action, _, cx| w.input($input, cx))))*
     };
@@ -102,8 +126,24 @@ fn button(b: MouseButton) -> Option<Button> {
     }
 }
 
+/// Raw key-down and key-up. An arrow's key-down comes as a `Nav*` action instead; its key-up,
+/// which no action reports, ends a keyboard pan.
 fn key(k: &gpui::Keystroke) -> Option<Key> {
-    (k.key == "space").then_some(Key::Space)
+    match k.key.as_str() {
+        "space" => Some(Key::Space),
+        key => arrow_side(key).map(Key::Arrow),
+    }
+}
+
+/// The side an arrow key's GPUI name points to.
+fn arrow_side(key: &str) -> Option<Side> {
+    match key {
+        "left" => Some(Side::Left),
+        "right" => Some(Side::Right),
+        "up" => Some(Side::Top),
+        "down" => Some(Side::Bottom),
+        _ => None,
+    }
 }
 
 struct Willow {
@@ -119,6 +159,8 @@ struct Willow {
     ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
+    /// Sends keys to the Tab picker while it is open (`tab_picker_keys`).
+    _tab_picker_keys: gpui::Subscription,
     /// Set by `--bench`.
     bench: Option<bench::Bench>,
     /// The document's file; `None` while untitled.
@@ -240,6 +282,14 @@ impl Willow {
     fn copy(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = self.session.clipboard_text() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        }
+    }
+
+    /// A click on an app menu item that skips the core (Copy, Save) closes the Tab picker, as
+    /// every click does; the core closes it for the items it handles.
+    fn close_tab_picker(&mut self, cx: &mut Context<Self>) {
+        if self.session.tab_picker_open() {
+            self.input(Input::CloseMenu, cx);
         }
     }
 
@@ -372,6 +422,8 @@ impl Render for Willow {
             .bg(color(theme.canvas))
             .key_context(if self.session.editing().is_some() {
                 "Willow editing"
+            } else if self.session.color_picker_open() {
+                "Willow picker"
             } else {
                 "Willow"
             })
@@ -389,6 +441,15 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
+            .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
+            .on_action(cx.listener(|w, _: &SelectChain, _, cx| w.input(Input::SelectChain, cx)))
+            .on_action(
+                cx.listener(|w, _: &OpenColorPicker, _, cx| w.input(Input::OpenColorPicker, cx)),
+            )
+            .on_action(cx.listener(|w, _: &PickerLeft, _, cx| w.input(Input::PickerStep(-1), cx)))
+            .on_action(cx.listener(|w, _: &PickerRight, _, cx| w.input(Input::PickerStep(1), cx)))
+            .on_action(cx.listener(|w, _: &PickerApply, _, cx| w.input(Input::PickerApply, cx)))
+            .on_action(cx.listener(|w, _: &PickerCancel, _, cx| w.input(Input::CloseMenu, cx)))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -400,7 +461,10 @@ impl Render for Willow {
                 d.on_action(cx.listener(|w, _: &Redo, _, cx| w.input(Input::Redo, cx)))
             })
             .when(self.session.can_copy(), |d| {
-                d.on_action(cx.listener(|w, _: &Copy, _, cx| w.copy(cx)))
+                d.on_action(cx.listener(|w, _: &Copy, _, cx| {
+                    w.close_tab_picker(cx);
+                    w.copy(cx)
+                }))
             })
             .when(self.session.can_cut(), |d| {
                 d.on_action(cx.listener(|w, _: &Cut, _, cx| {
@@ -416,9 +480,11 @@ impl Render for Willow {
                     }
                 }))
             });
-        let root = editing_actions!(root, cx,
+        let root = input_actions!(root, cx,
             StartEditing => Input::StartEditing,
-            StopEditing => Input::StopEditing,
+            Enter => Input::Enter,
+            Escape => Input::Escape,
+            NewLine => Input::NewLine,
             Left => Input::Move(Motion::Left),
             Right => Input::Move(Motion::Right),
             WordLeft => Input::Move(Motion::WordLeft),
@@ -442,6 +508,21 @@ impl Render for Willow {
             SelectLineStart => Input::Select(Motion::LineStart),
             SelectLineEnd => Input::Select(Motion::LineEnd),
             SelectAll => Input::SelectAll,
+            NewBeside => Input::NewBeside,
+            NavLeft => Input::Navigate(Side::Left),
+            NavRight => Input::Navigate(Side::Right),
+            NavUp => Input::Navigate(Side::Top),
+            NavDown => Input::Navigate(Side::Bottom),
+        );
+        let root = input_actions!(root, cx,
+            NudgeLeft => Input::Nudge(Side::Left),
+            NudgeRight => Input::Nudge(Side::Right),
+            NudgeUp => Input::Nudge(Side::Top),
+            NudgeDown => Input::Nudge(Side::Bottom),
+            Narrower => Input::NudgeSize(Side::Left),
+            Wider => Input::NudgeSize(Side::Right),
+            Shorter => Input::NudgeSize(Side::Top),
+            Taller => Input::NudgeSize(Side::Bottom),
         );
         let body = div()
             .flex_1()
@@ -705,6 +786,74 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             Default::default(),
         ));
     }
+    let picker: Vec<_> = (frame.tab_picker.iter())
+        .map(|&(s, p)| (s, at(p)))
+        .collect();
+    paint_tab_picker(window, &t.tab_picker, &picker);
+}
+
+/// While the Tab picker is open in `window`, every key goes to it before any binding or text
+/// input: a bare arrow picks that side, anything else closes it (as Esc).
+fn tab_picker_keys(cx: &mut Context<Willow>, window: &Window) -> gpui::Subscription {
+    let (this, handle) = (cx.entity().downgrade(), window.window_handle());
+    cx.intercept_keystrokes(move |e, window, cx| {
+        let Some(this) = this.upgrade().filter(|_| window.window_handle() == handle) else {
+            return;
+        };
+        if !this.read(cx).session.tab_picker_open() {
+            return;
+        }
+        let k = &e.keystroke;
+        let side = arrow_side(&k.key).filter(|_| !k.modifiers.modified());
+        let input = side.map_or(Input::Escape, Input::PickSide);
+        this.update(cx, |w, cx| w.input(input, cx));
+        cx.stop_propagation();
+    })
+}
+
+/// The Tab picker over every shape: a dashed stub out of each edge midpoint and a keycap with
+/// that side's arrow, constant on screen.
+fn paint_tab_picker(
+    window: &mut Window,
+    t: &willow_core::TabPickerStyle,
+    picker: &[(Side, gpui::Point<Pixels>)],
+) {
+    let shadow = t.shadow.map(|s| BoxShadow {
+        color: color(s.color),
+        offset: point(px(s.x), px(s.y)),
+        blur_radius: px(s.blur / 2.0),
+        spread_radius: px(s.spread),
+        inset: false,
+    });
+    for &(side, m) in picker {
+        let (dx, dy) = side.unit();
+        let (dx, dy) = (dx as f32, dy as f32);
+        let along = |d: f32| m + point(px(dx * d), px(dy * d));
+        let mut d = 0.0;
+        while d < t.stub_length {
+            let end = (d + t.dash).min(t.stub_length);
+            line(window, along(d), along(end), t.stub_width, color(t.stub));
+            d += 2.0 * t.dash;
+        }
+        let c = along(t.offset);
+        let half = point(px(t.size / 2.0), px(t.size / 2.0));
+        let b = Bounds::new(c - half, size(px(t.size), px(t.size)));
+        window.paint_drop_shadows(b, Corners::all(px(t.radius)), &shadow);
+        window.paint_quad(gpui::fill(b, color(t.fill)).corner_radii(px(t.radius)));
+        // The arrow: a shaft and two wings at its tip.
+        let (g, ink) = (t.glyph_size / 2.0, color(t.glyph));
+        let at = |a: f32, b: f32| c + point(px(dx * a - dy * b), px(dy * a + dx * b));
+        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink);
+        for w in [-1.0, 1.0] {
+            line(
+                window,
+                at(g * 0.2, w * g * 0.8),
+                at(g, 0.0),
+                t.glyph_width,
+                ink,
+            );
+        }
+    }
 }
 
 /// A straight line from `p` to `q`, `width` screen pixels wide.
@@ -854,12 +1003,44 @@ fn main() {
                 KeyBinding::new("ctrl-v", Paste, None),
             ]);
         }
+        // Canvas commands: outside editing, where these keys edit text or move the caret.
+        let canvas = Some("!editing");
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([
+                KeyBinding::new("cmd-left", NudgeLeft, canvas),
+                KeyBinding::new("cmd-right", NudgeRight, canvas),
+                KeyBinding::new("cmd-up", NudgeUp, canvas),
+                KeyBinding::new("cmd-down", NudgeDown, canvas),
+                KeyBinding::new("cmd-shift-left", Narrower, canvas),
+                KeyBinding::new("cmd-shift-right", Wider, canvas),
+                KeyBinding::new("cmd-shift-up", Shorter, canvas),
+                KeyBinding::new("cmd-shift-down", Taller, canvas),
+                KeyBinding::new("cmd-shift-n", NewBeside, canvas),
+            ]);
+        } else {
+            cx.bind_keys([
+                KeyBinding::new("ctrl-left", NudgeLeft, canvas),
+                KeyBinding::new("ctrl-right", NudgeRight, canvas),
+                KeyBinding::new("ctrl-up", NudgeUp, canvas),
+                KeyBinding::new("ctrl-down", NudgeDown, canvas),
+                KeyBinding::new("ctrl-shift-left", Narrower, canvas),
+                KeyBinding::new("ctrl-shift-right", Wider, canvas),
+                KeyBinding::new("ctrl-shift-up", Shorter, canvas),
+                KeyBinding::new("ctrl-shift-down", Taller, canvas),
+                KeyBinding::new("ctrl-shift-n", NewBeside, canvas),
+            ]);
+        }
         let ed = Some("editing");
+        // Bare arrows navigate unless the text or the color picker takes them.
+        let nav = Some("!editing && !picker");
+        let picker = Some("picker");
         // Enter and Esc everywhere, so they never reach a selected shape as typed text.
         cx.bind_keys([
             KeyBinding::new("f2", StartEditing, None),
-            KeyBinding::new("enter", StopEditing, None),
-            KeyBinding::new("escape", StopEditing, None),
+            KeyBinding::new("tab", ShowTabPicker, None),
+            KeyBinding::new("enter", Enter, None),
+            KeyBinding::new("shift-enter", NewLine, ed),
+            KeyBinding::new("escape", Escape, None),
             KeyBinding::new("left", Left, ed),
             KeyBinding::new("right", Right, ed),
             KeyBinding::new("up", Up, ed),
@@ -868,10 +1049,22 @@ fn main() {
             KeyBinding::new("end", LineEnd, ed),
             KeyBinding::new("backspace", Backspace, ed),
             KeyBinding::new("delete", Delete, ed),
-            KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
-            KeyBinding::new("delete", DeleteShapes, Some("!editing")),
-            KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
-            KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
+            KeyBinding::new("backspace", DeleteShapes, canvas),
+            KeyBinding::new("delete", DeleteShapes, canvas),
+            KeyBinding::new("cmd-d", Duplicate, canvas),
+            KeyBinding::new("ctrl-d", Duplicate, canvas),
+            KeyBinding::new("cmd-l", SelectChain, canvas),
+            KeyBinding::new("ctrl-l", SelectChain, canvas),
+            KeyBinding::new("cmd-shift-c", OpenColorPicker, canvas),
+            KeyBinding::new("ctrl-shift-c", OpenColorPicker, canvas),
+            KeyBinding::new("left", PickerLeft, picker),
+            KeyBinding::new("right", PickerRight, picker),
+            KeyBinding::new("enter", PickerApply, picker),
+            KeyBinding::new("escape", PickerCancel, picker),
+            KeyBinding::new("left", NavLeft, nav),
+            KeyBinding::new("right", NavRight, nav),
+            KeyBinding::new("up", NavUp, nav),
+            KeyBinding::new("down", NavDown, nav),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),
@@ -972,6 +1165,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                         w.check_disk(cx);
                     }
                 });
+                let _tab_picker_keys = tab_picker_keys(cx, window);
                 let recovery = content.recovery.clone();
                 let (session, path) = content.session(window);
                 let mut w = Willow {
@@ -983,6 +1177,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     wake: None,
                     ahead: None,
                     _activation,
+                    _tab_picker_keys,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
                     bench: bench.map(bench::Bench::new),
                     path,

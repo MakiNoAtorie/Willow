@@ -19,6 +19,8 @@ pub enum MenuKind {
     Connector,
     /// A right-click inside a multi-selection.
     Multi,
+    /// The keyboard color picker: one color row over the selected shape.
+    Picker,
 }
 
 /// What an item does. One variant per item; `choose` runs it.
@@ -35,6 +37,7 @@ pub enum MenuAction {
     Paste,
     Duplicate,
     Delete,
+    SelectChain,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -72,7 +75,7 @@ pub enum MenuEntry {
     Item(MenuItem),
     Separator,
     /// A small label over the entries after it.
-    Heading(&'static str),
+    Heading(&'static str, Option<Shortcut>),
     /// The seven picker colors in a row; `current` is ringed.
     Colors {
         current: Option<Color>,
@@ -141,6 +144,7 @@ impl Session {
             item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
             item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
             item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+            item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
             item(MenuAction::Delete, "Delete", Shortcut::DELETE),
         ];
         self.menu = Some(self.menu_at(MenuKind::Multi, at, entries));
@@ -164,10 +168,11 @@ impl Session {
             return;
         };
         match action {
-            MenuAction::NewShape => self.new_shape_at(menu.canvas),
+            MenuAction::NewShape => self.new_shape_at(menu.canvas, false),
             MenuAction::Cut | MenuAction::Delete => self.delete(&self.selected.clone()),
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
+            MenuAction::SelectChain => self.select_chain(),
             MenuAction::Recolor(color) => {
                 if let Some(id) = menu.shape {
                     self.ripple_recolor(&id, color);
@@ -223,7 +228,7 @@ impl Session {
 
     /// An empty neutral shape centered on canvas point `c`, in the innermost zone under it,
     /// editing. One undo step together with its first editing session.
-    fn new_shape_at(&mut self, c: Point) {
+    pub(super) fn new_shape_at(&mut self, c: Point, push: bool) {
         let id = self.doc.next_id();
         let mut shape = Shape::new(id.clone(), 0, 0);
         shape.color = Color::Neutral;
@@ -234,6 +239,11 @@ impl Session {
         self.history.add(&mut self.doc, shape);
         if let Some(zone) = zone {
             self.history.join_zone(&mut self.doc, &zone, &id);
+        }
+        if push {
+            // Other chains it lands on are cleared, as midpoint creation does.
+            let new = self.doc.shapes.len() - 1;
+            self.clear_others(crate::Side::Right, vec![(new, None)]);
         }
         self.select([id.clone()]);
         // Its begin is a no-op; `stop_editing`'s end closes the step.
@@ -270,8 +280,15 @@ fn shape_items(current: Color) -> Vec<MenuEntry> {
         item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
         item(MenuAction::Paste, "Paste", Shortcut::cmd("V")),
         item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+        item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
         MenuEntry::Separator,
-        MenuEntry::Heading("Color"),
+        MenuEntry::Heading(
+            "Color",
+            Some(Shortcut {
+                shift: true,
+                key: "C",
+            }),
+        ),
         MenuEntry::Colors {
             current: Some(current),
         },

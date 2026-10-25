@@ -80,6 +80,7 @@ fn alert(window: &mut Window, message: &str, detail: &str, cx: &mut App) {
 impl Willow {
     /// Saves to the document's file, or asks for one first (always, with `choose`).
     pub(crate) fn save(&mut self, choose: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_tab_picker(cx);
         self.save_task(choose, window, cx).detach();
     }
 

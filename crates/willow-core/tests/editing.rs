@@ -128,7 +128,7 @@ fn enter_and_esc_leave_editing_and_keep_the_shape_selected() {
     edit_at(&mut s, TEXT);
     let sel = s.selection().to_vec();
 
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert_eq!(caret(&s), None);
     assert_eq!(s.selection().to_vec(), sel);
 }
@@ -259,7 +259,7 @@ fn one_editing_session_is_one_undo_step() {
     typ(&mut s, "x");
     typ(&mut s, "y");
     s.handle(Input::Delete(Motion::Left), T);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert_eq!(plain(&s), "xab");
 
     s.handle(Input::Undo, T);
@@ -273,13 +273,13 @@ fn one_editing_session_is_one_undo_step() {
 fn a_session_that_changes_nothing_adds_no_undo_step() {
     let mut s = session("ab");
     edit_at(&mut s, TEXT);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert!(!s.can_undo());
 
     s.handle(Input::StartEditing, T);
     typ(&mut s, "x");
     s.handle(Input::Delete(Motion::Left), T);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert_eq!(plain(&s), "ab");
     assert!(!s.can_undo());
 }
@@ -340,7 +340,7 @@ fn a_blinking_caret_asks_for_a_wake_at_each_blink_edge_not_for_frames() {
     assert_eq!(s.next_wake(ms(1000 + 4800)), Some(ms(200)));
     assert_eq!(s.next_wake(ms(1000 + 5000)), None);
 
-    s.handle(Input::StopEditing, ms(1200));
+    s.handle(Input::Escape, ms(1200));
     assert_eq!(s.next_wake(ms(1200)), None);
 }
 
@@ -350,7 +350,7 @@ fn redo_while_editing_leaves_editing_like_undo() {
     click(&mut s, TEXT);
     s.handle(Input::StartEditing, T);
     s.handle(Input::Delete(Motion::WordLeft), T);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(plain(&s), "ab cd");
 
@@ -367,7 +367,7 @@ fn undo_in_a_session_that_changed_nothing_only_leaves_editing() {
     let mut s = session("ab");
     edit_at(&mut s, TEXT);
     typ(&mut s, "x");
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
 
     s.handle(Input::StartEditing, T);
     s.handle(Input::Undo, T);

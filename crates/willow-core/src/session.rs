@@ -1,16 +1,22 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod beside;
 mod clipboard;
+mod color_picker;
 mod delete;
 mod editing;
 mod file;
+mod keypan;
 mod menu;
 use menu::Ripple;
 mod link;
 mod midpoints;
+mod nav;
+mod nudge;
 mod push;
 mod select;
+mod tab_picker;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -39,6 +45,14 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    /// The canvas point at the view's center.
+    pub fn center(&self) -> Point {
+        self.to_canvas(Point {
+            x: self.size.x / 2.0,
+            y: self.size.y / 2.0,
+        })
+    }
+
     pub fn to_screen(&self, p: Point) -> Point {
         Point {
             x: (p.x - self.origin.x) * self.zoom,
@@ -199,6 +213,12 @@ pub struct Session {
     unrecovered: Option<(Duration, Duration)>,
     /// A recovery write was taken since the last save.
     recovery_written: bool,
+    /// The view easing to show a shape the keyboard moved to (`reveal`).
+    follow: Option<nav::Follow>,
+    /// The Tab directional picker is open over the selected shape.
+    tab_picker: bool,
+    /// Arrow presses still panning the view (keyboard pan).
+    key_pan: Vec<keypan::Press>,
 }
 
 impl Session {
@@ -209,6 +229,9 @@ impl Session {
             bytes: Vec::new(),
             unrecovered: None,
             recovery_written: false,
+            follow: None,
+            tab_picker: false,
+            key_pan: Vec::new(),
             doc,
             history: History::default(),
             theme,
@@ -363,6 +386,8 @@ impl Session {
             || self.zoom.running(self.theme, now)
             || self.creating(now).is_some()
             || self.slides_running(now)
+            || self.following(now)
+            || self.key_pan_running(now)
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -481,6 +506,11 @@ impl Session {
         (2.0 * t.shape.pad_x + content).ceil() as u32
     }
 
+    /// The most each side of `shape` may move in (negative) and keep `min_width`.
+    pub(super) fn least_growth(&self, shape: &Shape) -> i32 {
+        (self.min_width(shape) as i32 - shape.width as i32 + 1).div_euclid(2)
+    }
+
     /// Moves a shape's top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
         self.history
@@ -561,7 +591,28 @@ impl Session {
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
             self.pointer = Some(pos);
         }
-        match input {
+        // The Tab picker closes first: it takes every key, and a click closes it and acts.
+        if self.tab_picker
+            && let Some(r) = self.tab_picker_input(&input)
+        {
+            return r;
+        }
+        // Keyboard commands act on the selection, while menu items act on what the menu was
+        // opened on: they close it first. The color picker keeps Ctrl/Cmd+Arrows to itself.
+        let closed = match input {
+            Input::Nudge(_) | Input::NudgeSize(_) if self.color_picker_open() => {
+                return self.respond(false);
+            }
+            Input::Navigate(_)
+            | Input::Nudge(_)
+            | Input::NudgeSize(_)
+            | Input::SelectChain
+            | Input::Enter
+            | Input::Cut
+            | Input::Duplicate => self.menu.take().is_some(),
+            _ => false,
+        };
+        let mut r = match input {
             Input::PointerDown { pos, button, mods } => {
                 // A press outside the menu closes it; a right press goes on to open another.
                 if self.menu.take().is_some() && button != Button::Right {
@@ -778,12 +829,37 @@ impl Session {
                 }
                 self.respond(true)
             }
-            Input::StopEditing if self.menu.is_some() => {
+            // Esc closes an open menu first; the Tab picker has closed before this `match`.
+            Input::Escape if self.menu.is_some() => {
                 self.menu = None;
                 self.respond(true)
             }
+            // Canvas commands never act on a shape being edited.
+            Input::Nudge(_)
+            | Input::NudgeSize(_)
+            | Input::NewBeside
+            | Input::SelectChain
+            | Input::DeleteShapes
+            | Input::Navigate(_)
+            | Input::OpenColorPicker
+                if self.editing.is_some() =>
+            {
+                self.respond(false)
+            }
             Input::MenuChoose(action) => {
                 self.choose(action);
+                self.respond(true)
+            }
+            Input::OpenColorPicker => {
+                self.open_color_picker();
+                self.respond(true)
+            }
+            Input::PickerStep(d) => {
+                self.picker_step(d as i32);
+                self.respond(true)
+            }
+            Input::PickerApply => {
+                self.picker_apply();
                 self.respond(true)
             }
             Input::CloseMenu => {
@@ -800,12 +876,18 @@ impl Session {
                 self.space_held = false;
                 self.respond(true)
             }
+            Input::KeyDown(Key::Arrow(_)) => self.respond(false),
+            Input::KeyUp(Key::Arrow(side)) => {
+                self.key_pan_up(Some(side));
+                self.respond(false)
+            }
             Input::PointerLeft => {
                 self.pointer = None;
                 self.respond(false)
             }
             Input::FocusLost => {
                 self.space_held = false;
+                self.key_pan_up(None);
                 if matches!(self.gesture, Some(Gesture::Pan { .. })) {
                     self.gesture = None;
                 }
@@ -823,18 +905,40 @@ impl Session {
                 self.slides.clear();
                 self.respond(true)
             }
-            Input::DeleteShapes if self.editing.is_some() => self.respond(false),
+            Input::Nudge(side) => {
+                self.nudge(side);
+                self.respond(true)
+            }
+            Input::NudgeSize(side) => {
+                self.nudge_size(side);
+                self.respond(true)
+            }
+            Input::NewBeside => {
+                self.new_beside();
+                self.respond(true)
+            }
+            Input::Tab => {
+                self.open_tab_picker();
+                self.respond(true)
+            }
+            Input::PickSide(_) => self.respond(false),
+            Input::SelectChain => {
+                self.select_chain();
+                self.respond(true)
+            }
+            Input::Navigate(side) => {
+                let moved = self.navigate(side);
+                self.respond(moved)
+            }
             Input::Paste(text) if self.editing.is_none() => {
                 self.paste_shapes(&text);
                 self.respond(true)
             }
             Input::Cut if self.editing.is_none() => {
-                self.menu = None;
                 self.delete(&self.selected.clone());
                 self.respond(true)
             }
             Input::Duplicate => {
-                self.menu = None;
                 self.duplicate();
                 self.respond(true)
             }
@@ -875,7 +979,9 @@ impl Session {
             | Input::Mark { .. }
             | Input::Unmark
             | Input::StartEditing
-            | Input::StopEditing
+            | Input::Enter
+            | Input::Escape
+            | Input::NewLine
             | Input::Select(_)
             | Input::Cut
             | Input::Paste(_)
@@ -884,13 +990,18 @@ impl Session {
             | Input::ToggleItalic
             | Input::Move(_)
             | Input::Delete(_) => self.handle_text(input),
-        }
+        };
+        r.redraw |= closed;
+        r
     }
 
     /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
     pub fn tick(&mut self, now: Duration) -> Response {
         self.now = now;
+        let followed = self.advance_follow(now);
         let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
+        let panned = self.advance_key_pan(now);
+        let redraw = redraw || followed || panned;
         self.respond(redraw)
     }
 
@@ -916,13 +1027,9 @@ impl Session {
         }
         let (index, edge) = (*index, *edge);
         let s = &self.doc.shapes[index];
-        let min = self.min_width(s) as i32;
-        let grown = |dx: f32| {
-            // Whole units each side; the width stays at least `min`.
-            let d = (dx / z).round() as i32;
-            let low = (min - s.width as i32 + 1).div_euclid(2);
-            d.max(low)
-        };
+        let low = self.least_growth(s);
+        // Whole units each side; the width stays at least the minimum.
+        let grown = |dx: f32| ((dx / z).round() as i32).max(low);
         let r = match edge {
             Edge::Right | Edge::Left => {
                 let d = grown(if edge == Edge::Right { d.x } else { -d.x });

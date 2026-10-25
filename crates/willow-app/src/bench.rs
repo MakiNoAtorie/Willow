@@ -359,7 +359,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     // Stop editing and show the zoom pill, so both the caret and the pill have to wind down.
     this.update(cx, |w, cx| {
         let now = w.start.elapsed();
-        w.session.handle(Input::StopEditing, now);
+        w.session.handle(Input::Escape, now);
         let pos = center;
         w.session.handle(Input::Pinch { pos, delta: 0.0 }, now);
         cx.notify();

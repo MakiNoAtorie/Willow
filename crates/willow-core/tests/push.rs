@@ -125,7 +125,7 @@ fn one_undo_restores_links_and_positions_and_zones_stay() {
     // The push moved c out of the zone's rectangle; membership is unchanged.
     assert_eq!(at(&s, "c"), (0, 291));
     assert_eq!(s.document().zones[0].members, [id("b"), id("c")]);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(*s.document(), doc);
     assert!(!s.can_undo());

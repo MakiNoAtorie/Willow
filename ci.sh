@@ -21,13 +21,13 @@ fi
 for m in crates/*core*/Cargo.toml; do
   [ -f "$m" ] || continue
   if cargo tree --manifest-path "$m" --prefix none | grep -qi '^gpui'; then
-    echo "GPUI dependency in the core crate ($m)"
+    echo "error: GPUI dependency in the core crate ($m)"
     exit 1
   fi
 done
 # CONVENTIONS.md stays small enough to read in full.
 if [ "$(wc -c < docs/CONVENTIONS.md)" -gt 8192 ]; then
-  echo "docs/CONVENTIONS.md is over 8 KB: prune it"
+  echo "error: docs/CONVENTIONS.md is over 8 KB: prune it"
   exit 1
 fi
 echo "CI checks passed."

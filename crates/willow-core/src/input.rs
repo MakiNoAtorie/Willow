@@ -40,6 +40,8 @@ pub struct Modifiers {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
     Space,
+    /// An arrow key. Its key-down comes as `Input::Navigate`; its key-up ends a keyboard pan.
+    Arrow(crate::Side),
 }
 
 /// Where a caret motion goes. The app maps platform keys to these (word jumps are Alt+arrow
@@ -103,8 +105,13 @@ pub enum Input {
     },
     /// F2: edit the selected shape, caret at the end.
     StartEditing,
-    /// Enter or Esc: stop editing, keep the shape selected.
-    StopEditing,
+    /// Enter: selects the shape nearest the view center when nothing is selected, edits the
+    /// selected shape, or leaves editing.
+    Enter,
+    /// Esc: closes a menu, else leaves editing, else deselects.
+    Escape,
+    /// Shift+Enter: a line break while editing.
+    NewLine,
     /// Ctrl/Cmd+B: toggles bold on the text selection, or for the next typed text.
     ToggleBold,
     /// Ctrl/Cmd+I: the same for italic.
@@ -139,13 +146,39 @@ pub enum Input {
     /// Delete or Backspace with nothing being edited: deletes the selected shapes, each
     /// reconnecting its neighbors (`Session::delete`).
     DeleteShapes,
-    /// The window lost focus: Space no longer counts as held and a pan ends, since their
-    /// key-up or release may never arrive.
+    /// The window lost focus: Space and arrows no longer count as held and a pan ends, since
+    /// their key-up or release may never arrive.
     FocusLost,
     /// Runs an item of the open context menu and closes it.
     MenuChoose(crate::MenuAction),
+    /// Ctrl/Cmd+Shift+C: opens the keyboard color picker over the selected shape.
+    OpenColorPicker,
+    /// Left (-1) or Right (1) in the picker: moves the ring, stopping at the ends.
+    PickerStep(i8),
+    /// Enter in the picker: recolors the chain and closes it.
+    PickerApply,
     /// Esc or a click outside: closes the context menu.
     CloseMenu,
+    /// Ctrl/Cmd+Arrow with nothing being edited: moves the selected shapes `Theme.nudge`
+    /// toward the side as one undo step, pushing nothing.
+    Nudge(crate::Side),
+    /// Ctrl/Cmd+Shift+Arrow with nothing being edited and one shape selected: Right widens
+    /// and Left narrows it by `Theme.nudge` (half per side), Bottom grows and Top shrinks its
+    /// extra height by it, as one undo step. Growth pushes as a mouse resize does.
+    NudgeSize(crate::Side),
+    /// An arrow key with nothing being edited: selects the next shape that way
+    /// (`Session::navigate`).
+    Navigate(crate::Side),
+    /// Ctrl/Cmd+Shift+N with nothing being edited: `Session::new_beside`.
+    NewBeside,
+    /// Tab: shows the directional picker over the one selected shape, ending its editing
+    /// first; closes the picker when it is open.
+    Tab,
+    /// An arrow in the directional picker: creates a linked shape on that side, as a
+    /// midpoint click does.
+    PickSide(crate::Side),
+    /// Ctrl/Cmd+L with nothing being edited: `Session::select_chain`.
+    SelectChain,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

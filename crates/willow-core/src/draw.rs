@@ -33,6 +33,9 @@ pub struct Frame<'a> {
     pub marquee: Option<(Point, Point)>,
     /// A midpoint drag looking for a shape to link to; paint its band over every shape.
     pub link_drag: Option<LinkDrag<'a>>,
+    /// The Tab picker: each side's keycap hangs off this edge midpoint of the selected
+    /// shape, canvas units; paint it over everything, constant on screen (`Theme.tab_picker`).
+    pub tab_picker: Vec<(Side, Point)>,
 }
 
 /// A drag from a midpoint: a band from the midpoint to the pointer, canvas units, and the
@@ -261,6 +264,7 @@ impl Session {
             midpoints: self.midpoints(),
             marquee: self.marquee(),
             link_drag,
+            tab_picker: self.tab_picker(),
         }
     }
 }

@@ -25,9 +25,9 @@ pub use session::{
     Session, Shortcut, Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, ConnectorStyle, CreateStyle, CubicBezier, MenuStyle, MidpointStyle,
-    PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle, Theme, Transition, ZoneStyle,
-    ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle, MenuStyle,
+    MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle, TabPickerStyle,
+    Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
@@ -93,6 +93,13 @@ fn id_for(mut n: usize) -> String {
 /// and zones share one namespace.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShapeId(pub String);
+
+impl ShapeId {
+    /// The sort key for ID tie-breaks: generation order, shorter first, then alphabetical.
+    pub(crate) fn generation_order(&self) -> (usize, &str) {
+        (self.0.len(), &self.0)
+    }
+}
 
 /// A rounded rectangle holding rich text. Positions and sizes are whole canvas units.
 /// Its drawn height is text height + vertical padding + `extra_height`; text height is never stored.

@@ -1,0 +1,3 @@
+# The future-incompat note for block v0.1.6 (a GPUI dependency) matches the CI filter on every run.
+[future-incompat-report]
+frequency = "never"

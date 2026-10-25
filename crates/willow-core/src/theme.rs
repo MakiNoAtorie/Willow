@@ -282,6 +282,36 @@ pub struct MidpointStyle {
     pub shadow: Shadow,
 }
 
+/// The Tab directional picker, screen pixels: `size` keycaps centered `offset` out from each
+/// edge midpoint, an arrow glyph `glyph_size` long in each, and a dashed stub (`dash` on, `dash`
+/// off) `stub_length` out from the midpoint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabPickerStyle {
+    pub size: f32,
+    pub offset: f32,
+    pub radius: f32,
+    pub fill: Rgba,
+    pub shadow: [Shadow; 3],
+    pub glyph: Rgba,
+    pub glyph_size: f32,
+    pub glyph_width: f32,
+    pub stub: Rgba,
+    pub stub_length: f32,
+    pub stub_width: f32,
+    pub dash: f32,
+}
+
+/// Keyboard pan, in screen pixels: a held arrow's speed ramps linearly up to `speed` (px/s)
+/// over `ease_in` and back to 0 over `ease_out` after key-up; a press that would pan less
+/// than `step` pans `step`, finishing `ease_out` after key-up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KeyPanStyle {
+    pub step: f32,
+    pub speed: f32,
+    pub ease_in: Duration,
+    pub ease_out: Duration,
+}
+
 /// A shape created from a midpoint fades in from `rise` canvas units off (negative is up)
 /// and `scale`, while its connector draws from the source, over `motion`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -329,9 +359,17 @@ pub struct Theme {
     /// A chain's color change rippling out from the shape that started it.
     pub ripple: RippleStyle,
     pub midpoint: MidpointStyle,
+    pub tab_picker: TabPickerStyle,
     pub create: CreateStyle,
     /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
     pub push: Transition,
+    /// The view panning to show a shape the keyboard moved to, and the screen pixels it then
+    /// keeps between the shape and the screen's edge.
+    pub follow: Transition,
+    pub follow_margin: f32,
+    pub key_pan: KeyPanStyle,
+    /// Canvas units one Ctrl/Cmd+Arrow press moves the selection, or resizes a shape, by.
+    pub nudge: i32,
 }
 
 impl Theme {
@@ -564,6 +602,42 @@ pub const PAPER: Theme = Theme {
             color: rgba(0, 0, 0, 0.12),
         },
     },
+    tab_picker: TabPickerStyle {
+        size: 28.0,
+        offset: 30.0,
+        radius: 8.0,
+        fill: hex(0xfffdf8),
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 0.0,
+                spread: 1.0,
+                color: rgba(70, 50, 20, 0.10),
+            },
+            Shadow {
+                x: 0.0,
+                y: 2.0,
+                blur: 0.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.12),
+            },
+            Shadow {
+                x: 0.0,
+                y: 6.0,
+                blur: 14.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.14),
+            },
+        ],
+        glyph: hex(0x3b342c),
+        glyph_size: 10.0,
+        glyph_width: 1.5,
+        stub: rgba(139, 119, 96, 0.55),
+        stub_length: 18.0,
+        stub_width: 2.0,
+        dash: 3.0,
+    },
     create: CreateStyle {
         motion: Transition {
             duration: Duration::from_millis(160),
@@ -576,4 +650,16 @@ pub const PAPER: Theme = Theme {
         duration: Duration::from_millis(220),
         easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
+    follow: Transition {
+        duration: Duration::from_millis(120),
+        easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+    },
+    follow_margin: 48.0,
+    key_pan: KeyPanStyle {
+        step: 80.0,
+        speed: 900.0,
+        ease_in: Duration::from_millis(120),
+        ease_out: Duration::from_millis(120),
+    },
+    nudge: 24,
 };
