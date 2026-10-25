@@ -22,14 +22,14 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
 ## Files
-- Format: `format.rs`; heights for `save` come from `Session::heights()` on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`; tests compare models order-free.
+- Format: `format.rs`; heights for `save` come from `Session::heights()` on the UI thread. Golden files `tests/golden/*.willow` (git `-text`), repairs as `repair-<case>.willow`.
 - Loaded files go through `Session::open` / `disk_changed`. `Theme.creation_gap` is the one creation gap.
 - File state and recovery timing live in `session/file.rs`; the app only does I/O (`file.rs`, `recovery.rs` off the UI thread).
 - `file::settle` is the one Save / Don't Save / Cancel routine and never deletes; `file::close` / `quit` delete recovery via `discard_recovery(cx)`.
 - Every `History` method that changes the document bumps `revision`. Call `arm_recovery` after anything that may change the session; recovery I/O runs through `Autosave::run`, never locking the UI thread.
 
 ## Theme
-- Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
+- Every visual value is a `Theme` field in the core; the app holds no visual constants.
 - Shadows keep `themes.js` CSS values; the app passes `blur / 2` as GPUI's `blur_radius`.
 - Timed animations take a `Transition { duration, easing: CubicBezier }`.
 
@@ -44,7 +44,8 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 
 ## Input and redraw
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
-- Positions given to the core are canvas-relative. Wheel and pinch carry the pointer position; wheel deltas are content movement in screen px.
+- Positions given to the core are canvas-relative; wheel deltas are content movement in screen px.
+- Arrow key-down is `Input::Navigate`, key-up raw `Input::KeyUp(Key::Arrow)`; held-key animations compute position from key timestamps, never summed frames.
 - Pointer move/up listen window-wide (`window.on_mouse_event`); down and scroll on the canvas div. `Input::FocusLost` resets held keys and pans.
 - Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
