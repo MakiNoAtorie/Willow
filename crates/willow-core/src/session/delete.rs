@@ -9,8 +9,12 @@ use crate::{Document, Link, Point, ShapeId, Side, side};
 impl Session {
     /// Deletes the shapes `ids` (missing ones are skipped) as one undo step: one at a time in
     /// story order, each reconnecting its own neighbors, so a run of deleted shapes in a chain
-    /// closes into one link. Nothing moves. What Delete, Backspace and Cut do to the selection.
+    /// closes into one link. Nothing moves; deleting the edited shape ends editing first. What
+    /// Delete, Backspace and Cut do to the selection.
     pub fn delete(&mut self, ids: &[ShapeId]) {
+        if self.editing.as_ref().is_some_and(|e| ids.contains(&e.id)) {
+            self.stop_editing();
+        }
         let doomed: HashSet<&ShapeId> = ids.iter().collect();
         let heights = self.heights();
         let shapes = &self.doc.shapes;

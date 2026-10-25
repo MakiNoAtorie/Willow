@@ -65,8 +65,9 @@ impl Session {
 
     /// The file on disk as read when the window gains focus; `None` when it is missing.
     /// Bytes equal to the last read or write change nothing. Otherwise, with nothing unsaved,
-    /// the document reloads as one undoable step; with unsaved changes, unreadable bytes or
-    /// a missing file, the document stays and is marked unsaved, with a recovery due.
+    /// the document reloads as one undoable step (none if it loads unchanged); with unsaved
+    /// changes, unreadable bytes or a missing file, the document stays and is marked unsaved,
+    /// with a recovery due.
     pub fn disk_changed(&mut self, bytes: Option<&[u8]>) {
         let Some(bytes) = bytes else {
             self.saved = None;
@@ -82,10 +83,15 @@ impl Session {
         match load(bytes) {
             Ok(mut loaded) if self.is_saved() => {
                 self.place(&mut loaded);
-                self.stop_editing();
-                self.saved = (!loaded.repaired).then(|| loaded.document.clone());
-                self.history.replace(&mut self.doc, loaded.document);
-                self.drop_missing_selection();
+                let saved = (!loaded.repaired).then(|| loaded.document.clone());
+                // The same document in other bytes (line endings, indent) is no new step.
+                if loaded.document != self.doc {
+                    self.stop_editing();
+                    self.end_gesture();
+                    self.history.replace(&mut self.doc, loaded.document);
+                    self.drop_missing_selection();
+                }
+                self.saved = saved;
             }
             _ => self.saved = None,
         }

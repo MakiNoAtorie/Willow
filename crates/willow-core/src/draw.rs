@@ -7,7 +7,12 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::{CaretView, Color, Layout, Point, Rgba, Session, Shape, ShapeId, Side, Zone, side};
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::{
+    CaretView, Color, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId, Side, Zone,
+    side,
+};
 
 /// One frame's worth of drawing: zones, then connectors, then shapes.
 pub struct Frame<'a> {
@@ -77,6 +82,8 @@ pub struct VisibleZone<'a> {
     /// Title text's top-left and size in canvas units: never under the theme's minimum on screen.
     pub title_at: Point,
     pub title_size: f32,
+    /// The title fits inside the zone on screen, `title_x` in on both sides; else paint none.
+    pub show_title: bool,
 }
 
 pub struct Visible<'a> {
@@ -187,6 +194,24 @@ impl Session {
             .collect();
         let zt = &t.zone;
         let k = 1.0 / vp.zoom.min(1.0);
+        let title_size = zt.title_size.max(zt.title_min_screen / vp.zoom);
+        // Measured on every draw: the app's word cache makes a known title a few lookups.
+        // Shaped at the shape font's size and regular weight, then scaled to the title's
+        // size; the `title_x` margin absorbs the title weight's extra width.
+        let title_width = |title: &str| {
+            let text = title.into();
+            let para = Paragraph {
+                runs: vec![Run {
+                    text,
+                    ..Run::default()
+                }],
+            };
+            let clusters: Vec<_> = (title.grapheme_indices(true))
+                .map(|(i, g)| i..i + g.len())
+                .collect();
+            let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
+            w * title_size / t.font_size
+        };
         let zones = (doc.zones.iter())
             .filter(|z| {
                 let (x, y) = (z.x as f32, z.y as f32);
@@ -208,7 +233,9 @@ impl Session {
                         x: zone.x as f32 + zt.title_x * k,
                         y: zone.y as f32 + zt.title_y * k,
                     },
-                    title_size: zt.title_size.max(zt.title_min_screen / vp.zoom),
+                    title_size,
+                    show_title: title_width(&zone.title) + 2.0 * zt.title_x * k
+                        <= zone.width as f32,
                 }
             })
             .collect();

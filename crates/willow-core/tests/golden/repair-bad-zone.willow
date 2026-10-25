@@ -1,0 +1,12 @@
+willow 1
+
+zone p "P" {
+  zone q "Q" color purple {
+    a: "A"
+  }
+  b: "B"
+}
+
+@layout a 0,0 w210
+@layout b 0,140 w210
+@layout p -40,-40 300x300

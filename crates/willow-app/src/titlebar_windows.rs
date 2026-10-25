@@ -1,7 +1,10 @@
 //! Windows: custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
 //! The menu button opens the app menu in the theme's menu style, with the Edit menu cascaded.
 
-use crate::{Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, Save, SaveAs, Undo, color, shadows};
+use crate::{
+    CloseWindow, Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, Save, SaveAs, Undo, color,
+    shadows,
+};
 use gpui::{
     Action, AnyElement, App, Entity, MouseButton, Window, WindowControlArea, anchored, deferred,
     div, point, prelude::*, px, relative,
@@ -121,25 +124,27 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
             })
         }
     };
-    let (show_edit, hide_edit, close) = (set(true, true), set(true, false), set(false, false));
+    let (show_edit, close) = (set(true, true), set(false, false));
     let file_items: [Item; 4] = [
         ("New", "Ctrl+N", Box::new(NewFile)),
         ("Open…", "Ctrl+O", Box::new(OpenFile)),
         ("Save", "Ctrl+S", Box::new(Save)),
         ("Save As…", "Ctrl+Shift+S", Box::new(SaveAs)),
     ];
-    let mut top = panel(m);
-    for it in file_items {
+    // Alt+F4 closes the window (the OS sends it through `on_window_should_close`), so Exit has no key.
+    let window_items: [Item; 2] = [
+        ("Close", "Ctrl+W", Box::new(CloseWindow)),
+        ("Exit", "", Box::new(Quit)),
+    ];
+    let command = |it: Item| {
         let hide_edit = set(true, false);
-        top = top.child(
-            item(m, it, true, set(false, false)).on_hover(move |&h, _, cx| {
-                if h {
-                    hide_edit(cx)
-                }
-            }),
-        );
-    }
-    let top = top
+        item(m, it, true, set(false, false)).on_hover(move |&h, _, cx| {
+            if h {
+                hide_edit(cx)
+            }
+        })
+    };
+    let top = (panel(m).children(file_items.map(command)))
         .child(separator(m))
         .child(
             row(m, "edit", "Edit", "\u{203a}", true)
@@ -151,19 +156,7 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
                 }),
         )
         .child(separator(m))
-        .child(
-            item(
-                m,
-                ("Exit", "Alt+F4", Box::new(Quit)),
-                true,
-                set(false, false),
-            )
-            .on_hover(move |&h, _, cx| {
-                if h {
-                    hide_edit(cx)
-                }
-            }),
-        );
+        .children(window_items.map(command));
     let edit_items: [Item; 5] = [
         ("Undo", "Ctrl+Z", Box::new(Undo)),
         ("Redo", "Ctrl+Y", Box::new(Redo)),
@@ -177,12 +170,14 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
             if i == 2 {
                 p = p.child(separator(m));
             }
-            // As on macOS: Undo and Redo follow the core; Cut, Copy and Paste wait for text selection.
-            let enabled = match i {
-                0 => session.can_undo(),
-                1 => session.can_redo(),
-                _ => false,
-            };
+            // As on macOS, each item follows the core.
+            let enabled = [
+                session.can_undo(),
+                session.can_redo(),
+                session.can_cut(),
+                session.can_copy(),
+                session.can_paste(),
+            ][i];
             p = p.child(item(m, it, enabled, set(false, false)));
         }
         p

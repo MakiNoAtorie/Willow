@@ -155,7 +155,8 @@ impl History {
         }
     }
 
-    /// Removes shape `id` and its links, as one step. Nothing else changes: no reconnecting.
+    /// Removes shape `id`, its links and its zone memberships, as one step. Nothing else
+    /// changes: no reconnecting.
     pub fn remove(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Shape> {
         let i = doc.shapes.iter().position(|s| &s.id == id)?;
         let shape = doc.shapes[i].clone();
@@ -163,6 +164,11 @@ impl History {
             while let Some(j) = (doc.links.iter()).rposition(|Link(a, b)| a == id || b == id) {
                 let l = doc.links.remove(j);
                 h.record(Some(Op::Link(j, l)));
+            }
+            for z in doc.zones.iter_mut().filter(|z| z.members.contains(id)) {
+                let old = z.members.clone();
+                z.members.retain(|m| m != id);
+                h.record(Some(Op::Members(z.id.clone(), old)));
             }
             let shape = doc.shapes.remove(i);
             h.record(Some(Op::Insert(i, shape)));

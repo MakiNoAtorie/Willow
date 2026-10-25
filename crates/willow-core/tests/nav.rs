@@ -126,3 +126,22 @@ fn an_on_screen_target_does_not_pan() {
     s.tick(Duration::from_millis(500));
     assert_eq!(s.viewport(), before);
 }
+
+#[test]
+fn an_arrow_toward_empty_space_does_not_pan_back_to_an_off_screen_selection() {
+    let mut s = shapes(&[("a", 0, 0), ("b", 0, 300)], &[]);
+    s.handle(
+        Input::Wheel {
+            pos: willow_core::Point::default(),
+            delta: willow_core::Point { x: 0.0, y: -3000.0 },
+            mods: Default::default(),
+        },
+        T,
+    );
+    let before = s.viewport();
+    let r = s.handle(Input::Navigate(Side::Top), T);
+    s.tick(Duration::from_millis(500));
+    assert_eq!(s.viewport(), before);
+    assert_eq!(s.selection(), [id("a")]);
+    assert!(!r.redraw);
+}

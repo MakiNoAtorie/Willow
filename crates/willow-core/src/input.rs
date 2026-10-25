@@ -149,6 +149,9 @@ pub enum Input {
     /// The window lost focus: Space and arrows no longer count as held and a pan ends, since
     /// their key-up or release may never arrive.
     FocusLost,
+    /// A modifier key went down or up: arrows no longer count as held, since macOS sends no
+    /// key-up for one released while Cmd is held.
+    ModifiersChanged,
     /// Runs an item of the open context menu and closes it.
     MenuChoose(crate::MenuAction),
     /// Ctrl/Cmd+Shift+C: opens the keyboard color picker over the selected shape.

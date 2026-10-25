@@ -172,7 +172,7 @@ pub struct Session {
     doc: Document,
     history: History,
     theme: &'static Theme,
-    measure: Box<dyn Measure>,
+    pub(crate) measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
     /// Where `measure_ahead` goes on: a shape index.
     ahead: Cell<usize>,
@@ -571,21 +571,43 @@ impl Session {
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         let revision = self.history.revision();
-        let r = self.dispatch(input, now);
+        let pointer = matches!(
+            input,
+            Input::PointerDown { .. } | Input::PointerMove { .. } | Input::PointerUp { .. }
+        );
+        let mut r = self.dispatch(input, now);
         if self.history.revision() != revision {
             self.changed(now);
+            // A gesture holds shape indices: a keyboard or menu change ends it. A pan holds none.
+            if !pointer && !matches!(self.gesture, Some(Gesture::Pan { .. })) {
+                self.end_gesture();
+                r.cursor = self.respond(false).cursor;
+            }
         }
         r
     }
 
+    /// Drops the pointer gesture and its link drag.
+    fn end_gesture(&mut self) {
+        self.gesture = None;
+        self.links.drag = None;
+    }
+
     fn dispatch(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
+        // macOS sends no key-up for an arrow released while Cmd is held: end held arrows.
+        if matches!(
+            input,
+            Input::Nudge(_) | Input::NudgeSize(_) | Input::ModifiersChanged
+        ) {
+            self.key_pan_up(None);
+        }
         // Anything that may edit, undo or end the session commits the marked text first, so
         // no undo step ever holds it. Space keys come while the IME converts: leave it alone.
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom | Input::PointerLeft => {}
+            Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
             _ => self.unmark(),
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
@@ -609,7 +631,11 @@ impl Session {
             | Input::SelectChain
             | Input::Enter
             | Input::Cut
-            | Input::Duplicate => self.menu.take().is_some(),
+            | Input::Duplicate
+            | Input::DeleteShapes
+            | Input::NewBeside
+            | Input::Undo
+            | Input::Redo => self.menu.take().is_some(),
             _ => false,
         };
         let mut r = match input {
@@ -885,12 +911,11 @@ impl Session {
                 self.pointer = None;
                 self.respond(false)
             }
+            Input::ModifiersChanged => self.respond(false),
             Input::FocusLost => {
                 self.space_held = false;
                 self.key_pan_up(None);
-                if matches!(self.gesture, Some(Gesture::Pan { .. })) {
-                    self.gesture = None;
-                }
+                self.end_gesture();
                 self.respond(true)
             }
             Input::Undo | Input::Redo => {

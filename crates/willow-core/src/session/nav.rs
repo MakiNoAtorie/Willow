@@ -110,7 +110,8 @@ impl Session {
 
     /// Moves the selection one shape toward `dir` (an arrow key); with nothing selected it
     /// starts a keyboard pan. A multi-selection first collapses to its first shape in story
-    /// order. Not an undo step. True if the selection changed or a pan started.
+    /// order; with nothing that way, nothing else happens. Not an undo step. True if the
+    /// selection changed or a pan started.
     pub(crate) fn navigate(&mut self, dir: Side) -> bool {
         let old = self.selected.clone();
         let heights = self.heights();
@@ -118,7 +119,11 @@ impl Session {
             self.key_pan_down(dir);
             return true;
         };
-        let to = next_shape(&self.doc, &heights, from, dir).unwrap_or(from);
+        let Some(to) = next_shape(&self.doc, &heights, from, dir) else {
+            // Nothing that way: a multi-selection still collapses, the view stays.
+            self.select([self.doc.shapes[from].id.clone()]);
+            return self.selected != old;
+        };
         let id = self.doc.shapes[to].id.clone();
         self.reveal(&id);
         self.select([id]);

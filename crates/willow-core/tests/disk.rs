@@ -89,3 +89,35 @@ fn unreadable_bytes_keep_this_version_unsaved() {
     assert_eq!(text(&s), "Gates");
     assert!(!s.is_saved());
 }
+
+#[test]
+fn a_reload_with_the_same_document_in_other_bytes_adds_no_undo_step_and_keeps_editing() {
+    let mut s = open(FILE);
+    let a = s.document().shapes[0].id.clone();
+    s.select([a]);
+    s.handle(Input::Enter, Duration::ZERO);
+    assert!(s.editing().is_some());
+    let crlf = b"willow 1\r\n\r\na: \"Gates\"\r\n\r\n@layout a 0,0 w210\r\n";
+    s.disk_changed(Some(crlf));
+    assert!(s.editing().is_some());
+    assert!(!s.can_undo());
+    assert!(s.is_saved());
+    assert_eq!(s.bytes(), crlf);
+}
+
+#[test]
+fn a_reload_ends_a_held_gesture() {
+    use willow_core::{Button, Modifiers, Point};
+    let mut s = open(
+        b"willow 1\n\na: \"Gates\"\nb: \"Walls\"\n\n@layout a 0,0 w210\n@layout b 0,140 w210\n",
+    );
+    let (button, mods) = (Button::Left, Modifiers::default());
+    let pos = s.viewport().to_screen(Point { x: 100.0, y: 160.0 });
+    s.handle(Input::PointerDown { pos, button, mods }, Duration::ZERO);
+    s.disk_changed(Some(THEIRS));
+    let pos = s.viewport().to_screen(Point { x: 300.0, y: 300.0 });
+    s.handle(Input::PointerMove { pos, mods }, Duration::ZERO);
+    s.handle(Input::PointerUp { pos, button, mods }, Duration::ZERO);
+    assert_eq!(s.document().shapes.len(), 1);
+    assert_eq!((s.document().shapes[0].x, s.document().shapes[0].y), (0, 0));
+}

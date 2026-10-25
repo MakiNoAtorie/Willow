@@ -13,15 +13,15 @@ use crate::{Link, ShapeId, side};
 /// A link drag in progress and the hovered connector.
 #[derive(Debug, Default)]
 pub(super) struct Links {
-    drag: Option<Drag>,
+    pub(super) drag: Option<Drag>,
     /// The link whose connector the pointer is over (or whose menu is open).
     hover: Option<Link>,
 }
 
 /// A midpoint drag past `DRAG_START`: the pointer in screen pixels, and the source's chain
-/// (refused targets), taken once since the document can't change mid-drag.
+/// (refused targets), taken once: a document change ends the drag (`Session::handle`).
 #[derive(Debug)]
-struct Drag {
+pub(super) struct Drag {
     to: Point,
     chain: HashSet<ShapeId>,
 }

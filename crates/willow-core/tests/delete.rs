@@ -316,3 +316,95 @@ fn deleting_random_sets_keeps_chains_one_color_trees_joined_only_across_deleted_
         assert_eq!(*s.document(), before, "case {case}: undo");
     }
 }
+
+/// Shapes a and b, b inside zone c (its only member).
+fn zoned() -> Document {
+    let mut d = doc(&[("a", 0, 0), ("b", 0, 300)], &[]);
+    d.zones.push(willow_core::Zone {
+        id: id("c"),
+        title: String::new(),
+        color: Color::Neutral,
+        x: -40,
+        y: 260,
+        width: 290,
+        height: 200,
+        members: vec![id("b")],
+    });
+    d
+}
+
+#[test]
+fn deleting_a_zone_member_takes_it_out_of_the_zone_and_undo_puts_it_back() {
+    let before = zoned();
+    let mut s = session_of(before.clone());
+    delete(&mut s, &["b"]);
+    assert!(s.document().zones[0].members.is_empty());
+    s.handle(Input::Undo, T);
+    assert_eq!(*s.document(), before);
+    s.handle(Input::Redo, T);
+    assert!(s.document().zones[0].members.is_empty());
+}
+
+#[test]
+fn a_new_shape_reusing_a_deleted_members_id_outside_every_zone_is_in_none() {
+    use willow_core::{Button, MenuAction, Modifiers, Point};
+    let mut s = session_of(zoned());
+    delete(&mut s, &["b"]);
+    let (mods, button) = (Modifiers::default(), Button::Right);
+    let pos = s.viewport().to_screen(Point { x: 600.0, y: 50.0 });
+    s.handle(Input::PointerDown { pos, button, mods }, T);
+    s.handle(Input::PointerUp { pos, button, mods }, T);
+    s.handle(Input::MenuChoose(MenuAction::NewShape), T);
+    s.handle(Input::Escape, T);
+    assert_eq!(ids(&s), ["a", "b"]);
+    assert!(s.document().zones[0].members.is_empty());
+
+    let saved = willow_core::save(s.document(), &s.heights());
+    let loaded = willow_core::load(saved.as_bytes()).expect("loads").document;
+    assert_eq!(loaded.zones.len(), 1);
+    assert!(loaded.zones[0].members.is_empty(), "{saved}");
+}
+
+#[test]
+fn after_random_deletes_every_zone_member_exists_and_undo_restores_membership() {
+    use std::collections::HashSet;
+    let mut r = Rng(0x2545_F491_4F6C_DD1D);
+    for case in 0..1000 {
+        let mut before = generated(&mut r);
+        // Up to three zones; each shape joins one of them (or none) at random.
+        for _ in 0..1 + r.below(3) {
+            before.zones.push(willow_core::Zone {
+                id: before.next_id(),
+                title: String::new(),
+                color: Color::Neutral,
+                x: -2000,
+                y: -2000,
+                width: 10,
+                height: 10,
+                members: Vec::new(),
+            });
+        }
+        for i in 0..before.shapes.len() {
+            let n = before.zones.len() as u64;
+            if let Some(z) = before.zones.get_mut(r.below(n + 1) as usize) {
+                z.members.push(before.shapes[i].id.clone());
+            }
+        }
+        let gone: HashSet<ShapeId> = (before.shapes.iter())
+            .filter(|_| r.below(3) == 0)
+            .map(|s| s.id.clone())
+            .collect();
+        let mut s = session_of(before.clone());
+        s.select(gone.iter().cloned());
+        s.handle(Input::DeleteShapes, T);
+        let after = s.document();
+        let exists: HashSet<&ShapeId> = after.shapes.iter().map(|s| &s.id).collect();
+        for z in &after.zones {
+            for m in &z.members {
+                assert!(exists.contains(m), "case {case}: {m:?} left in {:?}", z.id);
+            }
+        }
+        s.handle(Input::Undo, T);
+        assert_eq!(*s.document(), before, "case {case}: undo");
+    }
+}

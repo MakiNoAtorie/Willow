@@ -6,10 +6,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
     App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
-    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent,
-    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point, prelude::*,
-    px, quad, size,
+    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode,
+    ScrollEvent, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point,
+    prelude::*, px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
@@ -30,8 +30,8 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
-// File menu: New and Open are app-wide; Save and Save As belong to the focused window.
-actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
+// File menu: New and Open are app-wide; Close, Save and Save As belong to the focused window.
+actions!(willow, [NewFile, OpenFile, CloseWindow, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Delete or Backspace on the canvas, with nothing being edited.
@@ -169,6 +169,8 @@ struct Willow {
     mtime: Option<SystemTime>,
     /// Crash recovery; off in `--bench`.
     recovery: Option<recovery::Autosave>,
+    /// A close is settling this window (`file::close`).
+    settling: bool,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -438,6 +440,9 @@ impl Render for Willow {
                     w.input(Input::KeyUp(k), cx);
                 }
             }))
+            .on_modifiers_changed(cx.listener(|w, _: &ModifiersChangedEvent, _, cx| {
+                w.input(Input::ModifiersChanged, cx)
+            }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
@@ -450,6 +455,11 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &PickerRight, _, cx| w.input(Input::PickerStep(1), cx)))
             .on_action(cx.listener(|w, _: &PickerApply, _, cx| w.input(Input::PickerApply, cx)))
             .on_action(cx.listener(|w, _: &PickerCancel, _, cx| w.input(Input::CloseMenu, cx)))
+            .on_action(cx.listener(|_, _: &CloseWindow, window, cx| {
+                if let Some(w) = window.window_handle().downcast::<Willow>() {
+                    file::close(w, cx);
+                }
+            }))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -622,8 +632,10 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         y += s;
     }
 
-    // Zones and their titles, then connectors, under the shapes.
+    // Zones, then their titles (so a nested zone never covers its parent's), then
+    // connectors, under the shapes.
     let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
+    let zt = &t.zone;
     for v in &frame.zones {
         let zone = v.zone;
         let b = Bounds::new(
@@ -633,7 +645,6 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }),
             size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
         );
-        let zt = &t.zone;
         window.paint_quad(quad(
             b,
             px(zt.radius * z),
@@ -642,11 +653,13 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(v.edge),
             Default::default(),
         ));
+    }
+    for v in frame.zones.iter().filter(|v| v.show_title) {
         let size = v.title_size * z;
         text::paint_line(
             window,
             at(v.title_at),
-            &zone.title,
+            &v.zone.title,
             t,
             zt.title_weight,
             size,
@@ -920,6 +933,7 @@ fn set_menus(cx: &mut App) {
             MenuItem::action("New", NewFile),
             MenuItem::action("Open…", OpenFile),
             MenuItem::separator(),
+            MenuItem::action("Close", CloseWindow),
             MenuItem::action("Save", Save),
             MenuItem::action("Save As…", SaveAs),
         ]),
@@ -956,22 +970,18 @@ fn main() {
         None => Document::new(),
     };
     gpui_platform::application().run(move |cx: &mut App| {
-        let quit = if cfg!(target_os = "macos") {
-            "cmd-q"
-        } else {
-            "alt-f4"
-        };
         let reset_zoom = if cfg!(target_os = "macos") {
             "cmd-0"
         } else {
             "ctrl-0"
         };
-        cx.bind_keys([
-            KeyBinding::new(quit, Quit, None),
-            KeyBinding::new(reset_zoom, ResetZoom, None),
-        ]);
+        cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
+        // Windows has no Quit key: Alt+F4 reaches the OS, which closes the window through
+        // `on_window_should_close`.
         if cfg!(target_os = "macos") {
             cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-w", CloseWindow, None),
                 KeyBinding::new("cmd-n", NewFile, None),
                 KeyBinding::new("cmd-o", OpenFile, None),
                 KeyBinding::new("cmd-s", Save, None),
@@ -979,6 +989,7 @@ fn main() {
             ]);
         } else {
             cx.bind_keys([
+                KeyBinding::new("ctrl-w", CloseWindow, None),
                 KeyBinding::new("ctrl-n", NewFile, None),
                 KeyBinding::new("ctrl-o", OpenFile, None),
                 KeyBinding::new("ctrl-s", Save, None),
@@ -1147,7 +1158,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 // Close only once the user has settled unsaved changes and the recovery
                 // file is gone.
                 window.on_window_should_close(cx, move |_, cx| {
-                    cx.spawn(async move |cx| file::close(w, cx).await).detach();
+                    file::close(w, cx);
                     false
                 });
             }
@@ -1182,6 +1193,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     bench: bench.map(bench::Bench::new),
                     path,
                     mtime: None,
+                    settling: false,
                 };
                 w.measure_ahead(cx);
                 w

@@ -34,7 +34,8 @@ impl Session {
             | Input::Wheel { .. }
             | Input::Pinch { .. }
             | Input::KeyUp(_)
-            | Input::FocusLost => None,
+            | Input::FocusLost
+            | Input::ModifiersChanged => None,
             // Keys never get here as these (the app takes every key while it is open), so they
             // come from clicks on the app's Edit menu.
             Input::PointerDown { .. }

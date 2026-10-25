@@ -119,3 +119,33 @@ fn the_pan_reports_done_once_settled() {
     assert!(!s.tick(ms(600)).redraw, "idle: no redraws once settled");
     assert_eq!(s.next_wake(ms(600)), None);
 }
+
+/// macOS sends no key-up for an arrow released while Cmd is held: hold Down, press Cmd,
+/// release Down, release Cmd. A Ctrl/Cmd+Arrow ends every held press instead.
+#[test]
+fn a_nudge_ends_a_held_pan() {
+    for nudge in [Input::Nudge(Side::Bottom), Input::NudgeSize(Side::Bottom)] {
+        let mut s = session_of(Document::default());
+        down(&mut s, Side::Bottom, 0);
+        run(&mut s, 0, 500);
+        s.handle(nudge.clone(), ms(500));
+        run(&mut s, 500, 2000);
+        assert!(!s.animating(ms(2000)), "{nudge:?}: no key-up needed");
+        let stopped = moved(&s);
+        run(&mut s, 2000, 3000);
+        assert_eq!(moved(&s), stopped, "{nudge:?}");
+    }
+}
+
+#[test]
+fn a_modifier_change_ends_a_held_pan() {
+    let mut s = session_of(Document::default());
+    down(&mut s, Side::Bottom, 0);
+    run(&mut s, 0, 500);
+    s.handle(Input::ModifiersChanged, ms(500));
+    run(&mut s, 500, 2000);
+    assert!(!s.animating(ms(2000)), "no key-up needed");
+    let stopped = moved(&s);
+    run(&mut s, 2000, 3000);
+    assert_eq!(moved(&s), stopped);
+}
