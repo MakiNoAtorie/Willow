@@ -571,11 +571,26 @@ impl Session {
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         let revision = self.history.revision();
-        let r = self.dispatch(input, now);
+        let pointer = matches!(
+            input,
+            Input::PointerDown { .. } | Input::PointerMove { .. } | Input::PointerUp { .. }
+        );
+        let mut r = self.dispatch(input, now);
         if self.history.revision() != revision {
             self.changed(now);
+            // A gesture holds shape indices: a keyboard or menu change ends it. A pan holds none.
+            if !pointer && !matches!(self.gesture, Some(Gesture::Pan { .. })) {
+                self.end_gesture();
+                r.cursor = self.respond(false).cursor;
+            }
         }
         r
+    }
+
+    /// Drops the pointer gesture and its link drag.
+    fn end_gesture(&mut self) {
+        self.gesture = None;
+        self.links.drag = None;
     }
 
     fn dispatch(&mut self, input: Input, now: Duration) -> Response {
@@ -609,7 +624,11 @@ impl Session {
             | Input::SelectChain
             | Input::Enter
             | Input::Cut
-            | Input::Duplicate => self.menu.take().is_some(),
+            | Input::Duplicate
+            | Input::DeleteShapes
+            | Input::NewBeside
+            | Input::Undo
+            | Input::Redo => self.menu.take().is_some(),
             _ => false,
         };
         let mut r = match input {
@@ -888,9 +907,7 @@ impl Session {
             Input::FocusLost => {
                 self.space_held = false;
                 self.key_pan_up(None);
-                if matches!(self.gesture, Some(Gesture::Pan { .. })) {
-                    self.gesture = None;
-                }
+                self.end_gesture();
                 self.respond(true)
             }
             Input::Undo | Input::Redo => {

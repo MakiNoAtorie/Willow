@@ -277,8 +277,8 @@ fn colors_go_to_the_shape_the_menu_was_opened_on_even_once_it_moved() {
     let mut s = chain_of_three();
     s.move_shape(&ShapeId("c".into()), 600, 300);
     right_click(&mut s, pt(650.0, 320.0));
-    // Undo while the menu is open takes c back from under the menu's point.
-    s.handle(Input::Undo, T);
+    // c moves back from under the menu's point while the menu is open.
+    s.move_shape(&ShapeId("c".into()), 600, 0);
     s.handle(Input::MenuChoose(MenuAction::Recolor(Color::Rose)), T);
     assert!(s.document().shapes.iter().all(|x| x.color == Color::Rose));
 }
@@ -290,7 +290,48 @@ fn remove_link_goes_to_the_link_the_menu_was_opened_on() {
     // The b-c connector runs from b's right middle (510, 24.25) to c's left middle (600, 324.25).
     right_click(&mut s, pt(555.0, 174.25));
     assert_eq!(s.menu().map(|m| m.kind), Some(MenuKind::Connector));
-    s.handle(Input::Undo, T);
+    s.move_shape(&ShapeId("c".into()), 600, 0);
     s.handle(Input::MenuChoose(MenuAction::RemoveLink), T);
     assert_eq!(s.document().links.len(), 1);
+}
+
+#[test]
+fn delete_new_beside_undo_and_redo_close_an_open_menu() {
+    for input in [
+        Input::DeleteShapes,
+        Input::NewBeside,
+        Input::Undo,
+        Input::Redo,
+    ] {
+        let mut s = session_of(doc_with("a"));
+        right_click(&mut s, pt(100.0, 20.0));
+        assert!(s.menu().is_some());
+        let r = s.handle(input.clone(), T);
+        assert!(s.menu().is_none(), "{input:?}");
+        assert!(r.redraw, "{input:?}");
+    }
+}
+
+#[test]
+fn deleting_the_edited_shape_ends_editing() {
+    let mut s = session_of(doc_with("a"));
+    let a = s.document().shapes[0].id.clone();
+    s.select([a.clone()]);
+    s.handle(Input::StartEditing, T);
+    s.delete(&[a]);
+    assert!(s.editing().is_none());
+    assert!(s.document().shapes.is_empty());
+}
+
+#[test]
+fn menu_cut_never_leaves_editing_on_a_missing_shape() {
+    let mut s = session_of(doc_with("a"));
+    right_click(&mut s, pt(100.0, 20.0));
+    s.handle(Input::NewBeside, T);
+    s.handle(Input::MenuChoose(MenuAction::Cut), T);
+    let e = s.editing().map(|e| e.id.clone());
+    assert!(
+        e.is_none_or(|id| s.document().shapes.iter().any(|x| x.id == id)),
+        "editing a missing shape"
+    );
 }

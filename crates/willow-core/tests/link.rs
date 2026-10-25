@@ -208,3 +208,18 @@ fn a_connector_highlights_within_8_px_and_remove_link_keeps_both_colors_undoably
     s.handle(Input::Undo, T);
     assert_eq!(s.document().links, vec![Link(id("a"), id("b"))]);
 }
+
+#[test]
+fn losing_focus_ends_a_link_drag() {
+    let mut s = two_chains();
+    drag_to(&mut s, A_RIGHT, B);
+    s.handle(Input::FocusLost, T);
+    assert!(
+        s.draw(pt(0.0, 0.0), pt(1000.0, 800.0), T)
+            .link_drag
+            .is_none()
+    );
+    // A new drag from c takes c's own chain: a is a valid target.
+    drag(&mut s, pt(400.0, 224.25), pt(100.0, 20.0));
+    assert!(s.document().links.contains(&Link(id("c"), id("a"))));
+}

@@ -366,3 +366,107 @@ fn a_new_move_after_undo_clears_redo() {
     assert_eq!(pos(&s), (0, 0));
     assert!(!s.can_undo());
 }
+
+/// Empty shapes a, b, c stacked 300 apart, a selected.
+fn three() -> Session {
+    let at = [("a", 0), ("b", 300), ("c", 600)];
+    let mut s = common::session_of(Document {
+        shapes: (at.iter())
+            .map(|&(n, y)| willow_core::Shape::new(id(n), 0, y))
+            .collect(),
+        ..Document::default()
+    });
+    s.select([id("a")]);
+    s
+}
+
+fn at(s: &Session, of: &str) -> (i32, i32) {
+    let sh = (s.document().shapes.iter())
+        .find(|x| x.id == id(of))
+        .unwrap();
+    (sh.x, sh.y)
+}
+
+fn press(s: &mut Session, canvas: Point) {
+    let (pos, mods) = (s.viewport().to_screen(canvas), Modifiers::default());
+    s.handle(
+        Input::PointerDown {
+            pos,
+            button: Button::Left,
+            mods,
+        },
+        T,
+    );
+}
+
+/// Moves to canvas point `canvas` and releases the left button there.
+fn release_at(s: &mut Session, canvas: Point) {
+    let (pos, mods) = (s.viewport().to_screen(canvas), Modifiers::default());
+    s.handle(Input::PointerMove { pos, mods }, T);
+    s.handle(
+        Input::PointerUp {
+            pos,
+            button: Button::Left,
+            mods,
+        },
+        T,
+    );
+}
+
+#[test]
+fn deleting_during_a_press_ends_it_and_moves_nothing() {
+    let mut s = three();
+    press(&mut s, pt(100.0, 620.0));
+    s.handle(Input::DeleteShapes, T);
+    assert!(s.drag_preview().is_none());
+    release_at(&mut s, pt(100.0, 700.0));
+    assert_eq!((at(&s, "b"), at(&s, "c")), ((0, 300), (0, 600)));
+    assert!(s.selection().is_empty());
+}
+
+#[test]
+fn undo_during_a_press_ends_it_and_moves_no_other_shape() {
+    let mut s = three();
+    s.handle(Input::DeleteShapes, T);
+    press(&mut s, pt(100.0, 620.0));
+    s.handle(Input::Undo, T);
+    release_at(&mut s, pt(100.0, 700.0));
+    assert_eq!((at(&s, "b"), at(&s, "c")), ((0, 300), (0, 600)));
+}
+
+#[test]
+fn cut_during_a_resize_ends_it() {
+    let mut s = three();
+    // c's right edge, away from its midpoint; the press selects c.
+    press(&mut s, pt(210.0, 604.0));
+    assert_eq!(s.selection(), [id("c")]);
+    let r = s.handle(Input::Cut, T);
+    assert_eq!(r.cursor, Cursor::Arrow);
+    assert!(s.resize_preview().is_none());
+    release_at(&mut s, pt(300.0, 604.0));
+    assert_eq!(s.document().shapes.len(), 2);
+    assert_eq!(at(&s, "b"), (0, 300));
+}
+
+#[test]
+fn deleting_during_a_midpoint_press_creates_nothing() {
+    let mut s = three();
+    // c's right midpoint.
+    press(&mut s, pt(210.0, 624.25));
+    s.handle(Input::DeleteShapes, T);
+    release_at(&mut s, pt(210.0, 624.25));
+    assert_eq!(s.document().shapes.len(), 2);
+    assert!(s.document().links.is_empty());
+}
+
+#[test]
+fn losing_focus_ends_every_gesture() {
+    let mut s = three();
+    press(&mut s, pt(100.0, 620.0));
+    s.handle(Input::FocusLost, T);
+    // The press is gone: a new one on b starts afresh and its release selects b.
+    press(&mut s, pt(100.0, 320.0));
+    release_at(&mut s, pt(100.0, 320.0));
+    assert_eq!(s.selection(), [id("b")]);
+    assert_eq!(at(&s, "c"), (0, 600));
+}
