@@ -30,8 +30,8 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 
 ## Theme
 - Every visual value is a `Theme` field in the core (window chrome: `Theme.chrome`, menus: `Theme.menu`); the app holds no visual constants.
-- Colors are `Rgba(0xRRGGBBAA)` (`gpui::rgba(c.0).into()`). Shadows keep `themes.js` CSS values; the app passes `blur / 2` as GPUI's `blur_radius`.
-- Timed animations take a `Transition { duration, easing: CubicBezier }`. Low-zoom values live in `ZoomStyle`.
+- Shadows keep `themes.js` CSS values; the app passes `blur / 2` as GPUI's `blur_radius`.
+- Timed animations take a `Transition { duration, easing: CubicBezier }`.
 
 ## Text
 - Offsets are UTF-8 bytes into `RichText::plain()`. The selection is `Editing.anchor..caret.offset`, set publicly only through `Session::set_text_selection`.
@@ -49,6 +49,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
+- A popup taking every key (Tab picker) uses `cx.intercept_keystrokes` gated on a core query; the core closes it before `dispatch`'s `match`, letting view-only input through.
 - Keyboard commands reuse the gesture commits (`move_selection`, `resize_shape`); `Session::least_growth` is the one min-width rule. Shortcuts sharing editing keys (Cmd/Ctrl+Arrows) bind in `!editing`, bare keys the picker uses in `!editing && !picker`. Keyboard selection moves call `Session::reveal(id)` before `select`; multi-selections collapse via `first_in_story_order`.
 - Previews are queries; the mutation lands once on release through a named `Session` method.
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
