@@ -75,6 +75,10 @@ The neighbor of a deleted shape that its opposite-side neighbors relink to.
 The overlay Tab shows over a shape, from which an arrow key creates a linked shape on that side.
 _Avoid_: Directional indicator
 
+**Keyboard pan**:
+Panning the view with the arrow keys while nothing is selected.
+_Avoid_: Scroll
+
 ### Zones
 
 **Zone**:

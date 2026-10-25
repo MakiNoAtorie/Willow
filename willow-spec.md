@@ -268,17 +268,36 @@ Until Phase 8's spacing pass, a few changes push shapes out of the way. Pushes a
 
 ## Phase 5 — Keyboard flow
 
-Goal: everything from Phases 2–4 (except multi-select) is fast to do without the mouse. Canvas shortcuts never fire while editing text. Canvas shortcuts use Ctrl/Cmd and Shift only, never Alt/Option: Ctrl+Alt is AltGr on some layouts, and Ctrl+Alt+Arrows rotates the screen on many Windows machines.
+Goal: everything from Phases 2–4 (except multi-select) is fast to do without the mouse. Canvas shortcuts never fire while editing text; Tab is the one exception. Canvas shortcuts use Ctrl/Cmd and Shift only, never Alt/Option: Ctrl+Alt is AltGr on some layouts, and Ctrl+Alt+Arrows rotates the screen on many Windows machines.
 
-- Arrow keys move the selection: follow a link in that direction if one exists, otherwise jump to the nearest shape in that direction.
-- Shift+Enter inserts a new line while editing. Esc while not editing deselects.
-- Ctrl/Cmd+Arrows move the shape.
-- Ctrl/Cmd+Shift+Left/Right change width (symmetric). Ctrl/Cmd+Shift+Up/Down move the bottom edge. Same minimum-size rule as the mouse.
+### Moving around
+
+- Arrow keys move the selection. A shape is in direction d by the link-side rule (core model), comparing centers: below when |dy| ≥ |dx| and dy > 0, and so on. Follow a link on that side if one exists (several: nearest by center, ties by ID); otherwise jump to the nearest shape of any chain in that direction; with none, nothing happens. With a multi-selection, the selection first collapses to its first shape in story order. Picking the next shape is a core function, tested there.
+- When the newly selected shape is off screen, the view pans just enough to show it with a margin, eased over 120 ms. It never zooms.
+- With nothing selected, arrow keys pan the view (**keyboard pan**): a tap pans 80 screen px, eased over 120 ms; a held arrow pans continuously at about 900 screen px/s at any zoom, easing in on key-down and out on key-up (tracked by key-down and key-up, not the OS repeat rate); two held arrows pan diagonally. The redraw loop stops when the pan settles.
+- Enter with nothing selected selects the shape nearest the view center (ties by ID), without editing. Enter on a selected shape starts editing with the caret at the end; Enter or Esc leaves editing. Shift+Enter inserts a new line while editing. Esc while not editing deselects.
+
+### Moving and resizing
+
+- Ctrl/Cmd+Arrows move the selection (multi-selection too) by 24 units. Like a mouse drag they never push and never change zone membership. With nothing selected they do nothing.
+- Ctrl/Cmd+Shift+Left/Right narrow or widen the selected shape by 24 units in total (12 per side, symmetric). Ctrl/Cmd+Shift+Up/Down shrink or grow its extra height by 24. Same minimum-size rule as the mouse; growth pushes as in Phase 4. With a multi-selection they do nothing.
+- Each press is one undo step; a held key repeats at the OS rate, each repeat a step. Keyboard moves and resizes are instant, not animated.
+
+### Creating
+
+- **Tab** shows the directional picker over the selected shape, also while editing it (editing ends first). Pressing an arrow immediately creates the linked shape there and enters editing; inserting and pushing work exactly as in Phase 4. Esc or Tab closes the picker; a click closes it and acts as usual; any other key closes it and is consumed. With nothing selected or a multi-selection, Tab does nothing. The keycaps are not clickable.
+- Ctrl/Cmd+Shift+N creates an unlinked neutral shape in editing, one creation gap right of the selected shape's chain bounding box, top-aligned with the selected shape (a new branch beside it); with nothing selected, centered in the view; with a multi-selection, placed from its first shape in story order. It joins the innermost zone under its center and pushes what it lands on, like midpoint creation.
+
+### Clipboard, color and chains
+
 - Ctrl/Cmd+X/C/V cut, copy, paste. Ctrl/Cmd+D duplicates.
-- Ctrl/Cmd+Shift+C opens the color picker, navigable by keyboard.
-- **Tab** shows the directional picker over the current shape. Pressing an arrow immediately creates the linked shape there and enters editing. Inserting and pushing work exactly as in Phase 4.
-- Ctrl/Cmd+Shift+N creates an unlinked shape.
-- **Select chain** (Ctrl/Cmd+L): selects every shape in the chains of the selected shapes. With nothing selected it does nothing. It is also an item in the shape menu and the multi-selection menu (shortcut shown). Not an undo step, like any selection change.
+- Ctrl/Cmd+Shift+C shows the seven color circles as a popup over the selected shape, the focus ring on its current color. Left/Right move the ring (stopping at the ends, no wrap), Enter applies (one undo step, with the ripple), Esc cancels; no live preview. With a multi-selection it does nothing.
+- **Select chain** (Ctrl/Cmd+L): selects every shape in the chains of the selected shapes. With nothing selected it does nothing. It is also an item in the shape menu and the multi-selection menu. Not an undo step, like any selection change.
+- Every menu item with a shortcut shows it: New shape, Change color, Select chain and the clipboard items.
+
+### Windows check
+
+- A "Phase 5 check on Windows" issue covers the Ctrl+Shift+Arrows feel, key-down and key-up tracking for the held pan, and Tab focus.
 
 ## Phase 6 — Zones
 
