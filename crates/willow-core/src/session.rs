@@ -15,6 +15,7 @@ mod nav;
 mod nudge;
 mod push;
 mod select;
+mod tab_picker;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
@@ -205,6 +206,8 @@ pub struct Session {
     recovery_written: bool,
     /// The view easing to show a shape the keyboard moved to (`reveal`).
     follow: Option<nav::Follow>,
+    /// The Tab directional picker is open over the selected shape.
+    tab_picker: bool,
 }
 
 impl Session {
@@ -216,6 +219,7 @@ impl Session {
             unrecovered: None,
             recovery_written: false,
             follow: None,
+            tab_picker: false,
             doc,
             history: History::default(),
             theme,
@@ -574,6 +578,12 @@ impl Session {
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
             self.pointer = Some(pos);
         }
+        // The Tab picker closes first: it takes every key, and a click closes it and acts.
+        if self.tab_picker
+            && let Some(r) = self.tab_picker_input(&input)
+        {
+            return r;
+        }
         match input {
             Input::PointerDown { pos, button, mods } => {
                 // A press outside the menu closes it; a right press goes on to open another.
@@ -867,6 +877,11 @@ impl Session {
                 self.new_beside();
                 self.respond(true)
             }
+            Input::Tab => {
+                self.open_tab_picker();
+                self.respond(true)
+            }
+            Input::PickSide(_) => self.respond(false),
             Input::Navigate(side) => {
                 let moved = self.navigate(side);
                 self.respond(moved)

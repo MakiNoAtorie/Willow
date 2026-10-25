@@ -13,7 +13,7 @@ use gpui::{
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
-    Theme, ZoomPill,
+    Side, Theme, ZoomPill,
 };
 mod bench;
 mod file;
@@ -52,6 +52,8 @@ actions!(
 // Cmd/Ctrl+Arrows move the selection; with Shift they resize the selected shape.
 actions!(willow, [NudgeLeft, NudgeRight, NudgeUp, NudgeDown]);
 actions!(willow, [Narrower, Wider, Shorter, Taller]);
+// Tab, also while editing: the directional picker; `tab_picker_keys` takes keys while it is open.
+actions!(willow, [ShowTabPicker]);
 // Bare arrows on the canvas, with nothing being edited: select the next shape that way.
 actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
 // Cmd/Ctrl+Shift+N: a new shape beside the selected chain.
@@ -139,6 +141,8 @@ struct Willow {
     ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
+    /// Sends keys to the Tab picker while it is open (`tab_picker_keys`).
+    _tab_picker_keys: gpui::Subscription,
     /// Set by `--bench`.
     bench: Option<bench::Bench>,
     /// The document's file; `None` while untitled.
@@ -411,6 +415,7 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
+            .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
             .on_action(
                 cx.listener(|w, _: &OpenColorPicker, _, cx| w.input(Input::OpenColorPicker, cx)),
             )
@@ -751,6 +756,84 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             Default::default(),
         ));
     }
+    let picker: Vec<_> = (frame.tab_picker.iter())
+        .map(|&(s, p)| (s, at(p)))
+        .collect();
+    paint_tab_picker(window, &t.tab_picker, &picker);
+}
+
+/// While the Tab picker is open in `window`, every key goes to it before any binding or text
+/// input: a bare arrow picks that side, anything else closes it (as Esc).
+fn tab_picker_keys(cx: &mut Context<Willow>, window: &Window) -> gpui::Subscription {
+    let (this, handle) = (cx.entity().downgrade(), window.window_handle());
+    cx.intercept_keystrokes(move |e, window, cx| {
+        let Some(this) = this.upgrade().filter(|_| window.window_handle() == handle) else {
+            return;
+        };
+        if !this.read(cx).session.tab_picker_open() {
+            return;
+        }
+        let k = &e.keystroke;
+        let input = match k.key.as_str() {
+            _ if k.modifiers.modified() => Input::Escape,
+            "up" => Input::PickSide(Side::Top),
+            "right" => Input::PickSide(Side::Right),
+            "down" => Input::PickSide(Side::Bottom),
+            "left" => Input::PickSide(Side::Left),
+            _ => Input::Escape,
+        };
+        this.update(cx, |w, cx| w.input(input, cx));
+        cx.stop_propagation();
+    })
+}
+
+/// The Tab picker over every shape: a dashed stub out of each edge midpoint and a keycap with
+/// that side's arrow, constant on screen.
+fn paint_tab_picker(
+    window: &mut Window,
+    t: &willow_core::TabPickerStyle,
+    picker: &[(Side, gpui::Point<Pixels>)],
+) {
+    let shadow = t.shadow.map(|s| BoxShadow {
+        color: color(s.color),
+        offset: point(px(s.x), px(s.y)),
+        blur_radius: px(s.blur / 2.0),
+        spread_radius: px(s.spread),
+        inset: false,
+    });
+    for &(side, m) in picker {
+        let (dx, dy) = match side {
+            Side::Top => (0.0, -1.0),
+            Side::Right => (1.0, 0.0),
+            Side::Bottom => (0.0, 1.0),
+            Side::Left => (-1.0, 0.0),
+        };
+        let along = |d: f32| m + point(px(dx * d), px(dy * d));
+        let mut d = 0.0;
+        while d < t.stub_length {
+            let end = (d + t.dash).min(t.stub_length);
+            line(window, along(d), along(end), t.stub_width, color(t.stub));
+            d += 2.0 * t.dash;
+        }
+        let c = along(t.offset);
+        let half = point(px(t.size / 2.0), px(t.size / 2.0));
+        let b = Bounds::new(c - half, size(px(t.size), px(t.size)));
+        window.paint_drop_shadows(b, Corners::all(px(t.radius)), &shadow);
+        window.paint_quad(gpui::fill(b, color(t.fill)).corner_radii(px(t.radius)));
+        // The arrow: a shaft and two wings at its tip.
+        let (g, ink) = (t.glyph_size / 2.0, color(t.glyph));
+        let at = |a: f32, b: f32| c + point(px(dx * a - dy * b), px(dy * a + dx * b));
+        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink);
+        for w in [-1.0, 1.0] {
+            line(
+                window,
+                at(g * 0.2, w * g * 0.8),
+                at(g, 0.0),
+                t.glyph_width,
+                ink,
+            );
+        }
+    }
 }
 
 /// A straight line from `p` to `q`, `width` screen pixels wide.
@@ -933,6 +1016,7 @@ fn main() {
         // Enter and Esc everywhere, so they never reach a selected shape as typed text.
         cx.bind_keys([
             KeyBinding::new("f2", StartEditing, None),
+            KeyBinding::new("tab", ShowTabPicker, None),
             KeyBinding::new("enter", Enter, None),
             KeyBinding::new("shift-enter", NewLine, ed),
             KeyBinding::new("escape", Escape, None),
@@ -1058,6 +1142,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                         w.check_disk(cx);
                     }
                 });
+                let _tab_picker_keys = tab_picker_keys(cx, window);
                 let recovery = content.recovery.clone();
                 let (session, path) = content.session(window);
                 let mut w = Willow {
@@ -1069,6 +1154,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     wake: None,
                     ahead: None,
                     _activation,
+                    _tab_picker_keys,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
                     bench: bench.map(bench::Bench::new),
                     path,

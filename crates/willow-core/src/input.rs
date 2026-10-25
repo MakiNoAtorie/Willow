@@ -171,6 +171,12 @@ pub enum Input {
     Navigate(crate::Side),
     /// Ctrl/Cmd+Shift+N with nothing being edited: `Session::new_beside`.
     NewBeside,
+    /// Tab: shows the directional picker over the one selected shape, ending its editing
+    /// first; closes the picker when it is open.
+    Tab,
+    /// An arrow in the directional picker: creates a linked shape on that side, as a
+    /// midpoint click does.
+    PickSide(crate::Side),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
