@@ -17,7 +17,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Model
 - Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
 - Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor`/`join_zone`; `Document::link`/`unlink`/`recolor` are for loaders and generators.
-- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `willow_core::side`, `Shape::center`, `Document::next_ids` and `format::walks`.
+- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `side`, `Shape::center`, `next_ids`, `format::walks`.
 - Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use generation order (shorter first, then alphabetical).
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
@@ -56,6 +56,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Chains
 - Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. The keyboard color picker is `MenuKind::Picker` (one `Colors` row); popup keys bind in the `picker` key context. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
 - Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape. Tests grab edges away from midpoints.
+- `new_shape_at(c, push)` is the one New shape path (`push` for keyboard creation).
 - Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured (the layout cache keys on ID).
 - Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap. Moves, drags and pastes never push.
 - A gesture that changes structure calls `stop_editing` first.
