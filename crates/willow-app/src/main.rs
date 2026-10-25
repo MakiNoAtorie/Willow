@@ -38,6 +38,9 @@ actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 actions!(willow, [DeleteShapes]);
 // Cmd/Ctrl+D on the canvas: duplicates the selected shapes.
 actions!(willow, [Duplicate]);
+// Cmd/Ctrl+Arrows move the selection; with Shift they resize the selected shape.
+actions!(willow, [NudgeLeft, NudgeRight, NudgeUp, NudgeDown]);
+actions!(willow, [Narrower, Wider, Shorter, Taller]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -442,6 +445,16 @@ impl Render for Willow {
             SelectLineStart => Input::Select(Motion::LineStart),
             SelectLineEnd => Input::Select(Motion::LineEnd),
             SelectAll => Input::SelectAll,
+        );
+        let root = editing_actions!(root, cx,
+            NudgeLeft => Input::Nudge(willow_core::Side::Left),
+            NudgeRight => Input::Nudge(willow_core::Side::Right),
+            NudgeUp => Input::Nudge(willow_core::Side::Top),
+            NudgeDown => Input::Nudge(willow_core::Side::Bottom),
+            Narrower => Input::NudgeSize(willow_core::Side::Left),
+            Wider => Input::NudgeSize(willow_core::Side::Right),
+            Shorter => Input::NudgeSize(willow_core::Side::Top),
+            Taller => Input::NudgeSize(willow_core::Side::Bottom),
         );
         let body = div()
             .flex_1()
@@ -852,6 +865,31 @@ fn main() {
                 KeyBinding::new("ctrl-x", Cut, None),
                 KeyBinding::new("ctrl-c", Copy, None),
                 KeyBinding::new("ctrl-v", Paste, None),
+            ]);
+        }
+        // Canvas moves and resizes, outside editing, where these keys move the caret.
+        let canvas = Some("!editing");
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([
+                KeyBinding::new("cmd-left", NudgeLeft, canvas),
+                KeyBinding::new("cmd-right", NudgeRight, canvas),
+                KeyBinding::new("cmd-up", NudgeUp, canvas),
+                KeyBinding::new("cmd-down", NudgeDown, canvas),
+                KeyBinding::new("cmd-shift-left", Narrower, canvas),
+                KeyBinding::new("cmd-shift-right", Wider, canvas),
+                KeyBinding::new("cmd-shift-up", Shorter, canvas),
+                KeyBinding::new("cmd-shift-down", Taller, canvas),
+            ]);
+        } else {
+            cx.bind_keys([
+                KeyBinding::new("ctrl-left", NudgeLeft, canvas),
+                KeyBinding::new("ctrl-right", NudgeRight, canvas),
+                KeyBinding::new("ctrl-up", NudgeUp, canvas),
+                KeyBinding::new("ctrl-down", NudgeDown, canvas),
+                KeyBinding::new("ctrl-shift-left", Narrower, canvas),
+                KeyBinding::new("ctrl-shift-right", Wider, canvas),
+                KeyBinding::new("ctrl-shift-up", Shorter, canvas),
+                KeyBinding::new("ctrl-shift-down", Taller, canvas),
             ]);
         }
         let ed = Some("editing");
