@@ -159,6 +159,13 @@ pub enum Input {
     PickerApply,
     /// Esc or a click outside: closes the context menu.
     CloseMenu,
+    /// Ctrl/Cmd+Arrow with nothing being edited: moves the selected shapes 24 units toward
+    /// the side as one undo step, pushing nothing.
+    Nudge(crate::Side),
+    /// Ctrl/Cmd+Shift+Arrow with nothing being edited and one shape selected: Right widens
+    /// and Left narrows it by 24 (12 per side), Bottom grows and Top shrinks its extra height
+    /// by 24, as one undo step. Growth pushes as a mouse resize does.
+    NudgeSize(crate::Side),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

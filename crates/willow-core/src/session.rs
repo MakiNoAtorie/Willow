@@ -10,6 +10,7 @@ mod menu;
 use menu::Ripple;
 mod link;
 mod midpoints;
+mod nudge;
 mod push;
 mod select;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
@@ -482,6 +483,11 @@ impl Session {
         (2.0 * t.shape.pad_x + content).ceil() as u32
     }
 
+    /// The most each side of `shape` may move in (negative) and keep `min_width`.
+    pub(super) fn least_growth(&self, shape: &Shape) -> i32 {
+        (self.min_width(shape) as i32 - shape.width as i32 + 1).div_euclid(2)
+    }
+
     /// Moves a shape's top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
         self.history
@@ -841,6 +847,15 @@ impl Session {
                 self.slides.clear();
                 self.respond(true)
             }
+            Input::Nudge(_) | Input::NudgeSize(_) if self.editing.is_some() => self.respond(false),
+            Input::Nudge(side) => {
+                self.nudge(side);
+                self.respond(true)
+            }
+            Input::NudgeSize(side) => {
+                self.nudge_size(side);
+                self.respond(true)
+            }
             Input::DeleteShapes if self.editing.is_some() => self.respond(false),
             Input::Paste(text) if self.editing.is_none() => {
                 self.paste_shapes(&text);
@@ -937,13 +952,9 @@ impl Session {
         }
         let (index, edge) = (*index, *edge);
         let s = &self.doc.shapes[index];
-        let min = self.min_width(s) as i32;
-        let grown = |dx: f32| {
-            // Whole units each side; the width stays at least `min`.
-            let d = (dx / z).round() as i32;
-            let low = (min - s.width as i32 + 1).div_euclid(2);
-            d.max(low)
-        };
+        let low = self.least_growth(s);
+        // Whole units each side; the width stays at least the minimum.
+        let grown = |dx: f32| ((dx / z).round() as i32).max(low);
         let r = match edge {
             Edge::Right | Edge::Left => {
                 let d = grown(if edge == Edge::Right { d.x } else { -d.x });
