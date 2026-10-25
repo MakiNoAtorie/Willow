@@ -184,6 +184,18 @@ fn select_all_selects_the_whole_edited_text() {
     assert_eq!(s.selected_text().as_deref(), Some("ab\ncd"));
 }
 
+#[test]
+fn a_selection_past_the_end_or_inside_a_character_is_clamped() {
+    let mut s = editing("aか");
+    s.set_text_selection(3..99);
+    assert_eq!(sel(&s), (1, 4));
+    s.handle(Input::Move(Motion::Left), T);
+    assert_eq!(sel(&s), (1, 1));
+    let (anchor, caret) = (7, 2);
+    s.set_text_selection(anchor..caret);
+    assert_eq!(sel(&s), (4, 1), "caret before the anchor");
+}
+
 fn plain(s: &Session) -> String {
     s.document().shapes[0].text.plain()
 }

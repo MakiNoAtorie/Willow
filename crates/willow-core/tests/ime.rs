@@ -195,3 +195,24 @@ fn a_recovery_leaves_out_the_marked_text_and_keeps_composing() {
     assert_eq!(document.shapes[0].text.plain(), "abx");
     assert_eq!(state(&s), (Some(3..4), 4, 4));
 }
+
+#[test]
+fn ranges_past_the_end_or_inside_a_character_are_clamped() {
+    let mut s = editing("ab");
+    s.handle(
+        Input::Mark {
+            text: "x".into(),
+            replace: Some(10..20),
+            selected: Some(5..9),
+        },
+        T,
+    );
+    assert_eq!((plain(&s), state(&s)), ("abx".into(), (Some(2..3), 3, 3)));
+
+    // Inside "か" (bytes 3..6) the selection falls back to its start.
+    mark(&mut s, "かな", Some(1..4));
+    assert_eq!(state(&s), (Some(2..8), 5, 2));
+    s.handle(Input::Move(willow_core::Motion::Left), T);
+    s.handle(Input::Unmark, T);
+    assert_eq!(plain(&s), "abかな");
+}

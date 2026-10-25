@@ -65,7 +65,7 @@ impl Session {
                 let start = range.start;
                 self.replace_outside_history(start..start, &text);
                 let sel = selected.unwrap_or(text.len()..text.len());
-                let at = |i: usize| start + i.min(text.len());
+                let at = |i: usize| start + text.floor_char_boundary(i);
                 self.set_caret(Caret {
                     offset: at(sel.end),
                     upstream: false,
@@ -198,6 +198,8 @@ impl Session {
             replace = None;
         }
         let marked = self.editing.as_ref().and_then(|e| e.marked.clone());
+        let s = self.edited().map(|(_, s)| s).unwrap_or_default();
+        let replace = replace.map(|r| s.floor_char_boundary(r.start)..s.floor_char_boundary(r.end));
         let range = (replace.or(marked)).unwrap_or_else(|| self.text_selection());
         Some((text, self.drop_marked(range)))
     }
@@ -493,14 +495,16 @@ impl Session {
         }
     }
 
-    /// Selects `range` of the edited text, caret at its end.
+    /// Selects `range` of the edited text, caret at its end; ends past the text or inside a
+    /// character move back to the nearest boundary.
     pub fn set_text_selection(&mut self, range: Range<usize>) {
+        let s = self.edited().map(|(_, s)| s).unwrap_or_default();
         self.set_caret(Caret {
-            offset: range.start,
+            offset: s.floor_char_boundary(range.start),
             upstream: false,
         });
         if let Some(e) = &mut self.editing {
-            e.caret.offset = range.end;
+            e.caret.offset = s.floor_char_boundary(range.end);
         }
     }
 }

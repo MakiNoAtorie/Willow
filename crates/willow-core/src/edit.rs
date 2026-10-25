@@ -63,10 +63,12 @@ impl RichText {
             .map_or_else(Default::default, |j| styles[j])
     }
 
-    /// Whether all of `r` has `style`.
+    /// Whether all of `r` but its paragraph breaks has `style`.
     pub(crate) fn all_styled(&self, r: Range<usize>, style: Style) -> bool {
-        let mut styles = self.flatten().1;
-        (styles.get_mut(r)).is_some_and(|b| b.iter_mut().all(|f| *style.of(f)))
+        let (s, mut styles) = self.flatten();
+        (styles.get_mut(r.clone())).is_some_and(|b| {
+            (b.iter_mut().zip(&s.as_bytes()[r])).all(|(f, &c)| c == b'\n' || *style.of(f))
+        })
     }
 
     /// Turns `style` on or off on `r` and merges runs.
