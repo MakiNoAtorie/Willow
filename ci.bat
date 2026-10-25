@@ -11,8 +11,8 @@ cargo clippy -j %J% --workspace --all-targets -- -D warnings || exit /b 1
 :rules
 rem ADR 0001: the core crate stays GPUI-free, directly or through any dependency.
 for /d %%d in (crates\*core*) do if exist "%%d\Cargo.toml" (
-  cargo tree --manifest-path "%%d\Cargo.toml" --prefix none | findstr /b /i "gpui" >nul && (echo GPUI dependency in the core crate ^(%%d^) & exit /b 1)
+  cargo tree --manifest-path "%%d\Cargo.toml" --prefix none | findstr /b /i "gpui" >nul && (echo error: GPUI dependency in the core crate ^(%%d^) & exit /b 1)
 )
 rem CONVENTIONS.md stays small enough to read in full.
-for %%A in (docs\CONVENTIONS.md) do if %%~zA GTR 8192 (echo docs\CONVENTIONS.md is over 8 KB: prune it & exit /b 1)
+for %%A in (docs\CONVENTIONS.md) do if %%~zA GTR 8192 (echo error: docs\CONVENTIONS.md is over 8 KB: prune it & exit /b 1)
 echo CI checks passed.
