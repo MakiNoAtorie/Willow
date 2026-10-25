@@ -105,6 +105,13 @@ pub enum Input {
     StartEditing,
     /// Enter or Esc: stop editing, keep the shape selected.
     StopEditing,
+    /// Enter: selects the shape nearest the view center when nothing is selected, edits the
+    /// selected shape, or leaves editing.
+    Enter,
+    /// Esc: closes a menu, else leaves editing, else deselects.
+    Escape,
+    /// Shift+Enter: a line break while editing.
+    NewLine,
     /// Ctrl/Cmd+B: toggles bold on the text selection, or for the next typed text.
     ToggleBold,
     /// Ctrl/Cmd+I: the same for italic.

@@ -89,6 +89,36 @@ impl Session {
                 self.stop_editing();
                 self.respond(was)
             }
+            Input::Enter => {
+                if self.editing.is_some() {
+                    self.stop_editing();
+                } else if let Some(id) = self.only_selected() {
+                    self.start_editing(id);
+                } else if self.selected.is_empty() {
+                    let Some(id) = self.nearest_view_center() else {
+                        return self.respond(false);
+                    };
+                    self.select([id]);
+                } else {
+                    return self.respond(false);
+                }
+                self.respond(true)
+            }
+            Input::Escape => {
+                if self.editing.is_some() {
+                    self.stop_editing();
+                } else if self.selected.is_empty() {
+                    return self.respond(false);
+                } else {
+                    self.select([]);
+                }
+                self.respond(true)
+            }
+            Input::NewLine if self.editing.is_some() => {
+                self.replace(self.text_selection(), "\n");
+                self.respond(true)
+            }
+            Input::NewLine => self.respond(false),
             Input::Select(m) => {
                 let Some((caret, goal)) = self.motion(m, true) else {
                     return self.respond(false);
@@ -244,6 +274,25 @@ impl Session {
     /// Whether Paste has somewhere to go: always, into the edited shape or onto the canvas.
     pub fn can_paste(&self) -> bool {
         true
+    }
+
+    /// The shape whose center is nearest the view center; ties go in generation order.
+    fn nearest_view_center(&self) -> Option<ShapeId> {
+        let v = self.viewport;
+        let c = v.to_canvas(Point {
+            x: v.size.x / 2.0,
+            y: v.size.y / 2.0,
+        });
+        let dist = |s: &Shape| {
+            let p = s.center(self.shape_height(s));
+            (p.x - c.x).hypot(p.y - c.y)
+        };
+        (self.doc.shapes.iter())
+            .min_by(|a, b| {
+                (dist(a).total_cmp(&dist(b)))
+                    .then_with(|| (a.id.0.len(), &a.id.0).cmp(&(b.id.0.len(), &b.id.0)))
+            })
+            .map(|s| s.id.clone())
     }
 
     /// Opens an editing session on `id` with the caret at the end of its text.

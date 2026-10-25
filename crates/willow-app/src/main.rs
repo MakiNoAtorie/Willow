@@ -54,7 +54,9 @@ actions!(
     willow,
     [
         StartEditing,
-        StopEditing,
+        Enter,
+        Escape,
+        NewLine,
         Left,
         Right,
         WordLeft,
@@ -438,7 +440,9 @@ impl Render for Willow {
             });
         let root = editing_actions!(root, cx,
             StartEditing => Input::StartEditing,
-            StopEditing => Input::StopEditing,
+            Enter => Input::Enter,
+            Escape => Input::Escape,
+            NewLine => Input::NewLine,
             Left => Input::Move(Motion::Left),
             Right => Input::Move(Motion::Right),
             WordLeft => Input::Move(Motion::WordLeft),
@@ -878,8 +882,9 @@ fn main() {
         // Enter and Esc everywhere, so they never reach a selected shape as typed text.
         cx.bind_keys([
             KeyBinding::new("f2", StartEditing, None),
-            KeyBinding::new("enter", StopEditing, None),
-            KeyBinding::new("escape", StopEditing, None),
+            KeyBinding::new("enter", Enter, None),
+            KeyBinding::new("shift-enter", NewLine, ed),
+            KeyBinding::new("escape", Escape, None),
             KeyBinding::new("left", Left, ed),
             KeyBinding::new("right", Right, ed),
             KeyBinding::new("up", Up, ed),
