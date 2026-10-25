@@ -49,6 +49,8 @@ actions!(
         PickerCancel
     ]
 );
+// Bare arrows on the canvas, with nothing being edited: select the next shape that way.
+actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -466,6 +468,10 @@ impl Render for Willow {
             SelectLineStart => Input::Select(Motion::LineStart),
             SelectLineEnd => Input::Select(Motion::LineEnd),
             SelectAll => Input::SelectAll,
+            NavLeft => Input::Navigate(willow_core::Side::Left),
+            NavRight => Input::Navigate(willow_core::Side::Right),
+            NavUp => Input::Navigate(willow_core::Side::Top),
+            NavDown => Input::Navigate(willow_core::Side::Bottom),
         );
         let body = div()
             .flex_1()
@@ -879,6 +885,8 @@ fn main() {
             ]);
         }
         let ed = Some("editing");
+        // Bare arrows navigate unless the text or the color picker takes them.
+        let nav = Some("!editing && !picker");
         // Enter and Esc everywhere, so they never reach a selected shape as typed text.
         cx.bind_keys([
             KeyBinding::new("f2", StartEditing, None),
@@ -903,6 +911,10 @@ fn main() {
             KeyBinding::new("right", PickerRight, Some("picker")),
             KeyBinding::new("enter", PickerApply, Some("picker")),
             KeyBinding::new("escape", PickerCancel, Some("picker")),
+            KeyBinding::new("left", NavLeft, nav),
+            KeyBinding::new("right", NavRight, nav),
+            KeyBinding::new("up", NavUp, nav),
+            KeyBinding::new("down", NavDown, nav),
             KeyBinding::new("shift-left", SelectLeft, ed),
             KeyBinding::new("shift-right", SelectRight, ed),
             KeyBinding::new("shift-up", SelectUp, ed),

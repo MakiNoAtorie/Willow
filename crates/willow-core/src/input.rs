@@ -159,6 +159,9 @@ pub enum Input {
     PickerApply,
     /// Esc or a click outside: closes the context menu.
     CloseMenu,
+    /// An arrow key with nothing being edited: selects the next shape that way
+    /// (`Session::navigate`).
+    Navigate(crate::Side),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

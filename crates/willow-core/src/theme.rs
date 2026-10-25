@@ -332,6 +332,10 @@ pub struct Theme {
     pub create: CreateStyle,
     /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
     pub push: Transition,
+    /// The view panning to show a shape the keyboard moved to, and the screen pixels it then
+    /// keeps between the shape and the screen's edge.
+    pub follow: Transition,
+    pub follow_margin: f32,
 }
 
 impl Theme {
@@ -576,4 +580,9 @@ pub const PAPER: Theme = Theme {
         duration: Duration::from_millis(220),
         easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
+    follow: Transition {
+        duration: Duration::from_millis(120),
+        easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+    },
+    follow_margin: 48.0,
 };

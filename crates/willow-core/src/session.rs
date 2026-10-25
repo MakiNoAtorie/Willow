@@ -10,6 +10,7 @@ mod menu;
 use menu::Ripple;
 mod link;
 mod midpoints;
+mod nav;
 mod push;
 mod select;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
@@ -200,6 +201,8 @@ pub struct Session {
     unrecovered: Option<(Duration, Duration)>,
     /// A recovery write was taken since the last save.
     recovery_written: bool,
+    /// The view easing to show a shape the keyboard moved to (`reveal`).
+    follow: Option<nav::Follow>,
 }
 
 impl Session {
@@ -210,6 +213,7 @@ impl Session {
             bytes: Vec::new(),
             unrecovered: None,
             recovery_written: false,
+            follow: None,
             doc,
             history: History::default(),
             theme,
@@ -364,6 +368,7 @@ impl Session {
             || self.zoom.running(self.theme, now)
             || self.creating(now).is_some()
             || self.slides_running(now)
+            || self.following(now)
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -841,6 +846,10 @@ impl Session {
                 self.slides.clear();
                 self.respond(true)
             }
+            Input::Navigate(side) => {
+                let moved = self.navigate(side);
+                self.respond(moved)
+            }
             Input::DeleteShapes if self.editing.is_some() => self.respond(false),
             Input::Paste(text) if self.editing.is_none() => {
                 self.paste_shapes(&text);
@@ -911,7 +920,9 @@ impl Session {
     /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
     pub fn tick(&mut self, now: Duration) -> Response {
         self.now = now;
+        let followed = self.advance_follow(now);
         let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
+        let redraw = redraw || followed;
         self.respond(redraw)
     }
 
