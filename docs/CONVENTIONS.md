@@ -17,8 +17,8 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Model
 - Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
 - Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor`/`join_zone`; `Document::link`/`unlink`/`recolor` are for loaders and generators.
-- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `side`, `Shape::center`, `next_ids`, `format::walks`.
-- Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use generation order (shorter first, then alphabetical).
+- A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `side`, `Side::unit`, `Shape::center`, `next_ids`, `Viewport::center`, `format::walks`.
+- Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use `generation_order`.
 - Derived indexes cached in `Session` are validated against the document on read; no mutation path invalidates them.
 
 ## Files
@@ -46,12 +46,13 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
 - Positions given to the core are canvas-relative; wheel deltas are content movement in screen px.
 - Arrow key-down is `Input::Navigate`, key-up raw `Input::KeyUp(Key::Arrow)`; held-key animations compute position from key timestamps, never summed frames.
+- In `dispatch`, keyboard commands on the selection close an open menu in the check before the `match`; canvas commands ignored while editing join its one guard arm. App key contexts are named (`canvas` = `!editing`, `nav` = `!editing && !picker`, `ed`, `picker`), never inline.
 - Pointer move/up listen window-wide (`window.on_mouse_event`); down and scroll on the canvas div. `Input::FocusLost` resets held keys and pans.
 - Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
-- A popup taking every key (Tab picker) uses `cx.intercept_keystrokes` gated on a core query; the core closes it before `dispatch`'s `match`, letting view-only input through.
-- Keyboard commands reuse the gesture commits (`move_selection`, `resize_shape`); `Session::least_growth` is the one min-width rule. Shortcuts sharing editing keys (Cmd/Ctrl+Arrows) bind in `!editing`, bare keys the picker uses in `!editing && !picker`. Keyboard selection moves call `Session::reveal(id)` before `select`; multi-selections collapse via `first_in_story_order`.
+- The Tab picker takes every key via `cx.intercept_keystrokes`; the core closes it before `dispatch`'s `match`.
+- Keyboard commands reuse gesture commits (`move_selection`, `resize_shape`, `least_growth`); selection moves call `reveal(id)` before `select`; multi-selections collapse via `first_in_story_order`.
 - Previews are queries; the mutation lands once on release through a named `Session` method.
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
