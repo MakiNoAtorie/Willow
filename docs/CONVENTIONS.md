@@ -49,7 +49,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
-- Keyboard commands reuse the gesture commits (`move_selection`, `resize_shape`); `Session::least_growth` is the one min-width rule. Shortcuts sharing editing keys (Cmd/Ctrl+Arrows) bind in `!editing`.
+- Keyboard commands reuse the gesture commits (`move_selection`, `resize_shape`); `Session::least_growth` is the one min-width rule. Shortcuts sharing editing keys (Cmd/Ctrl+Arrows) bind in `!editing`, bare keys the picker uses in `!editing && !picker`. Keyboard selection moves call `Session::reveal(id)` before `select`; multi-selections collapse via `first_in_story_order`.
 - Previews are queries; the mutation lands once on release through a named `Session` method.
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
@@ -63,10 +63,10 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
-- Paint multiplies canvas-unit values by `vp.zoom`. The screen position of canvas (0,0) is rounded to whole pixels.
+- Paint multiplies canvas-unit values by `vp.zoom`.
 
 ## Tests
-- Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
+- Drive the core's public API. Core tests use `tests/common::Fake` with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
 - Property tests use the built-in fixed-seed xorshift and print the case number in each assertion.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1).
-- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`. gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`. Bench rows go in their own commit after the code they measure.
