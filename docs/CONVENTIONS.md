@@ -13,7 +13,6 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Layout
 - Crates: `crates/willow-core` (GPUI-free) and `crates/willow-app` (binary `willow`).
 - Core session: input vocabulary in `input.rs`, text editing in `session/editing.rs`. New editing inputs go in `Session::handle_text` and are listed in `handle`'s dispatch arm.
-- Platform chrome: `titlebar_<os>.rs` (`title_bar(name, session, window, cx)`); on macOS it is the canvas's last child.
 
 ## Model
 - Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
@@ -42,12 +41,12 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Style toggles take `edit::Style`; with an empty selection they set `Editing.pending` (cleared by `set_caret`, applied by `Session::replace`). A toggle turns on unless the whole selection has it.
 - The app writes `Session::clipboard_text()` before Cut/Copy and sends `Input::Paste(text)`; the core never touches the clipboard.
 - IME marked text (`Editing.marked`) sits outside `History`; `handle` commits it before every input except Mark/Text, Space up/down, pointer move, wheel, pinch, reset zoom. Only the app converts UTF-16 (`text.rs`).
-- Caret width is screen px at any zoom.
 
 ## Input and redraw
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
 - Positions given to the core are canvas-relative. Wheel and pinch carry the pointer position; wheel deltas are content movement in screen px.
 - Pointer move/up listen window-wide (`window.on_mouse_event`); down and scroll on the canvas div. `Input::FocusLost` resets held keys and pans.
+- Enter, Esc, Shift+Enter send `Input::Enter`/`Escape`/`NewLine`; the core picks the action by state. Esc's close-first chain is in `Session::dispatch`: new popups go before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
 - Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries; the mutation lands once on release through a named `Session` method.
@@ -68,5 +67,5 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
 - Property tests use the built-in fixed-seed xorshift and print the case number in each assertion.
-- Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1). Tool output is CSV.
+- Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1).
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
