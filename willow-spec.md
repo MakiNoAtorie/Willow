@@ -286,12 +286,12 @@ Goal: everything from Phases 2–4 (except multi-select) is fast to do without t
 ### Creating
 
 - **Tab** shows the directional picker over the selected shape, also while editing it (editing ends first). Pressing an arrow immediately creates the linked shape there and enters editing; inserting and pushing work exactly as in Phase 4. Esc or Tab closes the picker; a click closes it and acts as usual; any other key closes it and is consumed. With nothing selected or a multi-selection, Tab does nothing. The keycaps are not clickable.
-- Ctrl/Cmd+Shift+N creates an unlinked neutral shape in editing, one creation gap right of the selected shape's chain bounding box, top-aligned with the selected shape (a new branch beside it); with nothing selected, centered in the view. It joins the innermost zone under its center and pushes what it lands on, like midpoint creation.
+- Ctrl/Cmd+Shift+N creates an unlinked neutral shape in editing, one creation gap right of the selected shape's chain bounding box, top-aligned with the selected shape (a new branch beside it); with nothing selected, centered in the view; with a multi-selection, placed from its first shape in story order. It joins the innermost zone under its center and pushes what it lands on, like midpoint creation.
 
 ### Clipboard, color and chains
 
 - Ctrl/Cmd+X/C/V cut, copy, paste. Ctrl/Cmd+D duplicates.
-- Ctrl/Cmd+Shift+C shows the seven color circles as a popup over the selected shape, the focus ring on its current color. Left/Right move the ring, Enter applies (one undo step, with the ripple), Esc cancels; no live preview. With a multi-selection it does nothing.
+- Ctrl/Cmd+Shift+C shows the seven color circles as a popup over the selected shape, the focus ring on its current color. Left/Right move the ring (stopping at the ends, no wrap), Enter applies (one undo step, with the ripple), Esc cancels; no live preview. With a multi-selection it does nothing.
 - **Select chain** (Ctrl/Cmd+L): selects every shape in the chains of the selected shapes. With nothing selected it does nothing. It is also an item in the shape menu and the multi-selection menu. Not an undo step, like any selection change.
 - Every menu item with a shortcut shows it: New shape, Change color, Select chain and the clipboard items.
 
