@@ -107,9 +107,9 @@ impl Session {
         (self.follow).is_some_and(|f| now < f.start + self.theme.follow.duration)
     }
 
-    /// Moves the selection one shape toward `dir` (an arrow key). Nothing while editing or with
-    /// nothing selected. A multi-selection first collapses to its first shape in story order.
-    /// Not an undo step. True if the selection changed.
+    /// Moves the selection one shape toward `dir` (an arrow key). Nothing while editing; with
+    /// nothing selected it starts a keyboard pan. A multi-selection first collapses to its first
+    /// shape in story order. Not an undo step. True if the selection changed or a pan started.
     pub(crate) fn navigate(&mut self, dir: Side) -> bool {
         if self.editing.is_some() {
             return false;
@@ -117,7 +117,8 @@ impl Session {
         let old = self.selected.clone();
         let heights = self.heights();
         let Some(from) = self.first_in_story_order(&heights) else {
-            return false;
+            self.key_pan_down(dir);
+            return true;
         };
         let to = next_shape(&self.doc, &heights, from, dir).unwrap_or(from);
         let id = self.doc.shapes[to].id.clone();

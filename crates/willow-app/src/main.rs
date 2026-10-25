@@ -124,8 +124,18 @@ fn button(b: MouseButton) -> Option<Button> {
     }
 }
 
+/// Raw key-down and key-up. An arrow's key-down comes as a `Nav*` action instead; its key-up,
+/// which no action reports, ends a keyboard pan.
 fn key(k: &gpui::Keystroke) -> Option<Key> {
-    (k.key == "space").then_some(Key::Space)
+    use willow_core::Side;
+    match k.key.as_str() {
+        "space" => Some(Key::Space),
+        "left" => Some(Key::Arrow(Side::Left)),
+        "right" => Some(Key::Arrow(Side::Right)),
+        "up" => Some(Key::Arrow(Side::Top)),
+        "down" => Some(Key::Arrow(Side::Bottom)),
+        _ => None,
+    }
 }
 
 struct Willow {

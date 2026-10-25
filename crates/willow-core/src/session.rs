@@ -7,6 +7,7 @@ mod color_picker;
 mod delete;
 mod editing;
 mod file;
+mod keypan;
 mod menu;
 use menu::Ripple;
 mod link;
@@ -208,6 +209,8 @@ pub struct Session {
     follow: Option<nav::Follow>,
     /// The Tab directional picker is open over the selected shape.
     tab_picker: bool,
+    /// Arrow presses still panning the view (keyboard pan).
+    key_pan: Vec<keypan::Press>,
 }
 
 impl Session {
@@ -220,6 +223,7 @@ impl Session {
             recovery_written: false,
             follow: None,
             tab_picker: false,
+            key_pan: Vec::new(),
             doc,
             history: History::default(),
             theme,
@@ -375,6 +379,7 @@ impl Session {
             || self.creating(now).is_some()
             || self.slides_running(now)
             || self.following(now)
+            || self.key_pan_running(now)
     }
 
     /// Deselects shapes the document no longer has (after undo, redo or a reload).
@@ -840,12 +845,18 @@ impl Session {
                 self.space_held = false;
                 self.respond(true)
             }
+            Input::KeyDown(Key::Arrow(_)) => self.respond(false),
+            Input::KeyUp(Key::Arrow(side)) => {
+                self.key_pan_up(Some(side));
+                self.respond(false)
+            }
             Input::PointerLeft => {
                 self.pointer = None;
                 self.respond(false)
             }
             Input::FocusLost => {
                 self.space_held = false;
+                self.key_pan_up(None);
                 if matches!(self.gesture, Some(Gesture::Pan { .. })) {
                     self.gesture = None;
                 }
@@ -958,7 +969,8 @@ impl Session {
         self.now = now;
         let followed = self.advance_follow(now);
         let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
-        let redraw = redraw || followed;
+        let panned = self.advance_key_pan(now);
+        let redraw = redraw || followed || panned;
         self.respond(redraw)
     }
 
