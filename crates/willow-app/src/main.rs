@@ -30,8 +30,8 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
-// File menu: New and Open are app-wide; Save and Save As belong to the focused window.
-actions!(willow, [NewFile, OpenFile, Save, SaveAs]);
+// File menu: New and Open are app-wide; Close, Save and Save As belong to the focused window.
+actions!(willow, [NewFile, OpenFile, CloseWindow, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
 actions!(willow, [Undo, Redo, Cut, Copy, Paste]);
 // Delete or Backspace on the canvas, with nothing being edited.
@@ -169,6 +169,8 @@ struct Willow {
     mtime: Option<SystemTime>,
     /// Crash recovery; off in `--bench`.
     recovery: Option<recovery::Autosave>,
+    /// A close is settling this window (`file::close`).
+    settling: bool,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -450,6 +452,11 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &PickerRight, _, cx| w.input(Input::PickerStep(1), cx)))
             .on_action(cx.listener(|w, _: &PickerApply, _, cx| w.input(Input::PickerApply, cx)))
             .on_action(cx.listener(|w, _: &PickerCancel, _, cx| w.input(Input::CloseMenu, cx)))
+            .on_action(cx.listener(|_, _: &CloseWindow, window, cx| {
+                if let Some(w) = window.window_handle().downcast::<Willow>() {
+                    file::close(w, cx);
+                }
+            }))
             .on_action(cx.listener(|w, _: &Save, window, cx| w.save(false, window, cx)))
             .on_action(cx.listener(|w, _: &SaveAs, window, cx| w.save(true, window, cx)))
             // A menu item is enabled only while its action has a handler, so register these only
@@ -920,6 +927,7 @@ fn set_menus(cx: &mut App) {
             MenuItem::action("New", NewFile),
             MenuItem::action("Open…", OpenFile),
             MenuItem::separator(),
+            MenuItem::action("Close", CloseWindow),
             MenuItem::action("Save", Save),
             MenuItem::action("Save As…", SaveAs),
         ]),
@@ -956,22 +964,18 @@ fn main() {
         None => Document::new(),
     };
     gpui_platform::application().run(move |cx: &mut App| {
-        let quit = if cfg!(target_os = "macos") {
-            "cmd-q"
-        } else {
-            "alt-f4"
-        };
         let reset_zoom = if cfg!(target_os = "macos") {
             "cmd-0"
         } else {
             "ctrl-0"
         };
-        cx.bind_keys([
-            KeyBinding::new(quit, Quit, None),
-            KeyBinding::new(reset_zoom, ResetZoom, None),
-        ]);
+        cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
+        // Windows has no Quit key: Alt+F4 reaches the OS, which closes the window through
+        // `on_window_should_close`.
         if cfg!(target_os = "macos") {
             cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-w", CloseWindow, None),
                 KeyBinding::new("cmd-n", NewFile, None),
                 KeyBinding::new("cmd-o", OpenFile, None),
                 KeyBinding::new("cmd-s", Save, None),
@@ -979,6 +983,7 @@ fn main() {
             ]);
         } else {
             cx.bind_keys([
+                KeyBinding::new("ctrl-w", CloseWindow, None),
                 KeyBinding::new("ctrl-n", NewFile, None),
                 KeyBinding::new("ctrl-o", OpenFile, None),
                 KeyBinding::new("ctrl-s", Save, None),
@@ -1147,7 +1152,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 // Close only once the user has settled unsaved changes and the recovery
                 // file is gone.
                 window.on_window_should_close(cx, move |_, cx| {
-                    cx.spawn(async move |cx| file::close(w, cx).await).detach();
+                    file::close(w, cx);
                     false
                 });
             }
@@ -1182,6 +1187,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     bench: bench.map(bench::Bench::new),
                     path,
                     mtime: None,
+                    settling: false,
                 };
                 w.measure_ahead(cx);
                 w
