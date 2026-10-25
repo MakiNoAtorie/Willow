@@ -282,6 +282,17 @@ pub struct MidpointStyle {
     pub shadow: Shadow,
 }
 
+/// Keyboard pan, in screen pixels: a held arrow's speed ramps linearly up to `speed` (px/s)
+/// over `ease_in` and back to 0 over `ease_out` after key-up; a press that would pan less
+/// than `step` pans `step`, finishing `ease_out` after key-up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KeyPanStyle {
+    pub step: f32,
+    pub speed: f32,
+    pub ease_in: Duration,
+    pub ease_out: Duration,
+}
+
 /// A shape created from a midpoint fades in from `rise` canvas units off (negative is up)
 /// and `scale`, while its connector draws from the source, over `motion`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -336,6 +347,7 @@ pub struct Theme {
     /// keeps between the shape and the screen's edge.
     pub follow: Transition,
     pub follow_margin: f32,
+    pub key_pan: KeyPanStyle,
 }
 
 impl Theme {
@@ -585,4 +597,10 @@ pub const PAPER: Theme = Theme {
         easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
     },
     follow_margin: 48.0,
+    key_pan: KeyPanStyle {
+        step: 80.0,
+        speed: 900.0,
+        ease_in: Duration::from_millis(120),
+        ease_out: Duration::from_millis(120),
+    },
 };

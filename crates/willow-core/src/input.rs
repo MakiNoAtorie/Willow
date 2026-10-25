@@ -40,6 +40,8 @@ pub struct Modifiers {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
     Space,
+    /// An arrow key. Its key-down comes as `Input::Navigate`; its key-up ends a keyboard pan.
+    Arrow(crate::Side),
 }
 
 /// Where a caret motion goes. The app maps platform keys to these (word jumps are Alt+arrow
@@ -146,8 +148,8 @@ pub enum Input {
     /// Delete or Backspace with nothing being edited: deletes the selected shapes, each
     /// reconnecting its neighbors (`Session::delete`).
     DeleteShapes,
-    /// The window lost focus: Space no longer counts as held and a pan ends, since their
-    /// key-up or release may never arrive.
+    /// The window lost focus: Space and arrows no longer count as held and a pan ends, since
+    /// their key-up or release may never arrive.
     FocusLost,
     /// Runs an item of the open context menu and closes it.
     MenuChoose(crate::MenuAction),
