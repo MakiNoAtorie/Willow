@@ -1,7 +1,9 @@
 mod common;
 
 use common::{doc_with, session_of};
-use willow_core::{Color, Document, Point, Rgba, Session, Shape, ShapeId, Side, Viewport, Zone};
+use willow_core::{
+    Color, Document, Point, Rgba, Session, Shape, ShapeId, Side, Viewport, VisibleZone, Zone,
+};
 
 const T: std::time::Duration = std::time::Duration::ZERO;
 
@@ -279,4 +281,33 @@ fn a_generated_document_draws_its_connectors_and_zones() {
         Side::Right => Side::Left,
     };
     assert!((f.connectors.iter()).all(|c| c.to_side == opposite(c.from_side)));
+    // At 10% no drawn title, 120 canvas units tall, is wider than its zone: the fake's
+    // 10 a letter and 4 a space at 15, plus the 160 inset on both sides.
+    look_at(&mut s, 0.1);
+    let f = s.draw(SCREEN.0, pt(10000.0, 8000.0), T);
+    let wide = |v: &VisibleZone| {
+        let w: f32 = (v.zone.title.chars())
+            .map(|c| if c == ' ' { 4.0 } else { 10.0 })
+            .sum();
+        w * 120.0 / 15.0 + 320.0 > v.zone.width as f32
+    };
+    assert!(f.zones.iter().any(wide), "some titles must not fit");
+    assert!(f.zones.iter().all(|v| v.show_title != wide(v)));
+}
+
+#[test]
+fn a_zone_draws_its_title_only_while_the_title_fits_inside_it_on_screen() {
+    let mut doc = Document::default();
+    doc.zones.push(Zone {
+        width: 100,
+        ..zone("y", 0, 0, Color::Sky, &[])
+    });
+    let mut s = session_of(doc);
+    // "Zone y" is 54 wide in the fake's 15-unit font: 46.8 at the title's 13, plus the 16
+    // inset on both sides is 78.8, which fits in 100.
+    look_at(&mut s, 1.0);
+    assert!(s.draw(SCREEN.0, SCREEN.1, T).zones[0].show_title);
+    // At 50% the title is 24 canvas units (86.4 wide) and the inset 32: 150.4 does not fit.
+    look_at(&mut s, 0.5);
+    assert!(!s.draw(SCREEN.0, SCREEN.1, T).zones[0].show_title);
 }

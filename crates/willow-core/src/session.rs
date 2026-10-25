@@ -172,7 +172,7 @@ pub struct Session {
     doc: Document,
     history: History,
     theme: &'static Theme,
-    measure: Box<dyn Measure>,
+    pub(crate) measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
     /// Where `measure_ahead` goes on: a shape index.
     ahead: Cell<usize>,

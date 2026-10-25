@@ -652,15 +652,17 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(v.edge),
             Default::default(),
         ));
-        let size = v.title_size * z;
-        text::paint_line(
-            window,
-            at(v.title_at),
-            &zone.title,
-            t,
-            zt.title_weight,
-            size,
-        );
+        if v.show_title {
+            let size = v.title_size * z;
+            text::paint_line(
+                window,
+                at(v.title_at),
+                &zone.title,
+                t,
+                zt.title_weight,
+                size,
+            );
+        }
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
