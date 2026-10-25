@@ -166,6 +166,9 @@ pub enum Input {
     /// and Left narrows it by 24 (12 per side), Bottom grows and Top shrinks its extra height
     /// by 24, as one undo step. Growth pushes as a mouse resize does.
     NudgeSize(crate::Side),
+    /// An arrow key with nothing being edited: selects the next shape that way
+    /// (`Session::navigate`).
+    Navigate(crate::Side),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
