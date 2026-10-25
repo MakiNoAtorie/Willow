@@ -893,6 +893,11 @@ impl Session {
                 self.respond(true)
             }
             Input::PickSide(_) => self.respond(false),
+            Input::SelectChain if self.editing.is_some() => self.respond(false),
+            Input::SelectChain => {
+                self.select_chain();
+                self.respond(true)
+            }
             Input::Navigate(side) => {
                 let moved = self.navigate(side);
                 self.respond(moved)

@@ -46,13 +46,17 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
                             .bg(color(m.separator)),
                     )
                     .into_any_element(),
-                MenuEntry::Heading(label) => div()
+                MenuEntry::Heading(label, key) => div()
+                    .flex()
+                    .justify_between()
+                    .gap(px(m.item_gap))
                     .pt(px(m.heading_pad_top))
                     .pb(px(m.heading_pad_bottom))
                     .px(px(m.item_pad_x))
                     .text_size(px(m.heading_size))
                     .opacity(m.heading_opacity)
                     .child(*label)
+                    .children(key.map(shortcut))
                     .into_any_element(),
             }
         }));
@@ -168,7 +172,7 @@ fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
         .map(|e| match e {
             MenuEntry::Item(_) => row,
             MenuEntry::Separator => 2.0 * m.separator_pad_y + m.separator_width,
-            MenuEntry::Heading(_) => {
+            MenuEntry::Heading(..) => {
                 m.heading_size * m.line_height + m.heading_pad_top + m.heading_pad_bottom
             }
             MenuEntry::Colors { .. } => m.swatch + 2.0 * m.item_pad_y,

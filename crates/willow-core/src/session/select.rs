@@ -84,3 +84,16 @@ impl Session {
         self.select(ids);
     }
 }
+
+impl Session {
+    /// Selects every shape in the chains of the selected shapes; nothing selected, nothing happens.
+    pub(super) fn select_chain(&mut self) {
+        let all: Vec<ShapeId> = (self.selected.iter())
+            .flat_map(|id| self.doc.chain(id))
+            .cloned()
+            .collect();
+        if !all.is_empty() {
+            self.select(all);
+        }
+    }
+}
