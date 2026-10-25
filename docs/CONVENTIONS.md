@@ -38,9 +38,9 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - After any open, call `Session::measure_ahead(n)` from idle so saves don't stall.
 - Layout is the pure `layout(text, width, theme, &dyn Measure)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edits go through `RichText::replace`, which keeps text normalized.
 - New justification gap kinds go in the `stretch` closure.
-- Style toggles take `edit::Style`; with an empty selection they set `Editing.pending` (cleared by `set_caret`, applied by `Session::replace`). A toggle turns on unless the whole selection has it.
+- Style toggles take `edit::Style`; with an empty selection they set `Editing.pending`. A toggle turns on unless the whole selection has it.
 - The app writes `Session::clipboard_text()` before Cut/Copy and sends `Input::Paste(text)`; the core never touches the clipboard.
-- IME marked text (`Editing.marked`) sits outside `History`; `handle` commits it before every input except Mark/Text, Space up/down, pointer move, wheel, pinch, reset zoom. Only the app converts UTF-16 (`text.rs`).
+- IME marked text (`Editing.marked`) sits outside `History`; `handle` commits it before every input except Mark/Text and view-only inputs. Only the app converts UTF-16 (`text.rs`).
 
 ## Input and redraw
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
@@ -63,11 +63,11 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Animations are `Visible` fields computed in the core and counted in `animating`; screen-constant overlays are `Frame` fields painted after shapes.
 
 ## Drawing
-- Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
+- Paint reads only `Session::draw(from, to, now)`: everything, including previews, culling and per-shape overlays. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
 - Paint multiplies canvas-unit values by `vp.zoom`.
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
 - Property tests use the built-in fixed-seed xorshift and print the case number in each assertion.
-- Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1).
+- Large inputs come from `willow_core::generate(n, seed)`.
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`. Bench rows go in their own commit after the code they measure.
