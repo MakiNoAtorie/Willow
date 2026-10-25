@@ -157,3 +157,33 @@ fn dragging_a_selected_shape_moves_the_selection_as_one_step_pushing_nothing() {
     assert_eq!(s.document(), &before);
     assert!(!s.can_undo());
 }
+
+#[test]
+fn deleting_or_undoing_mid_marquee_never_brings_deleted_shapes_back() {
+    let mut s = four();
+    click(&mut s, 10.0, 10.0, false);
+    let from = at(&s, -50.0, 350.0);
+    down(&mut s, from, true);
+    s.handle(Input::DeleteShapes, T);
+    assert!(s.selection().is_empty());
+    let p = at(&s, 20.0, 410.0);
+    mv(&mut s, p, true);
+    assert!(s.selection().is_empty(), "{:?}", selected(&s));
+    up(&mut s, p, true);
+
+    // Undo mid-marquee: a duplicate of b goes away and stays away.
+    click(&mut s, 410.0, 10.0, false);
+    s.handle(Input::Duplicate, T);
+    let copy = s.selection().to_vec();
+    let from = at(&s, -50.0, 350.0);
+    down(&mut s, from, true);
+    s.handle(Input::Undo, T);
+    mv(&mut s, p, true);
+    let ids: Vec<&ShapeId> = s.document().shapes.iter().map(|x| &x.id).collect();
+    assert!(
+        s.selection().iter().all(|i| ids.contains(&i)),
+        "{:?}",
+        selected(&s)
+    );
+    assert!(!copy.iter().any(|c| s.selection().contains(c)));
+}
