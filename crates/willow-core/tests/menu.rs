@@ -92,7 +92,7 @@ fn new_shape_is_centered_neutral_and_editing_and_one_undo_removes_it() {
         },
         T,
     );
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(s.document().shapes.len(), 1);
 }
@@ -112,7 +112,7 @@ fn new_shape_joins_the_innermost_zone_and_undo_leaves_it() {
     let id = s.document().shapes[1].id.clone();
     assert_eq!(s.document().zones[1].members, [id]);
     assert_eq!(s.document().zones[0].members.len(), 1);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert!(s.document().zones[1].members.is_empty());
 }
@@ -232,9 +232,44 @@ fn the_shape_menu_ends_with_a_color_heading_over_the_colors() {
 fn esc_closes_an_open_menu() {
     let mut s = chain_of_three();
     right_click(&mut s, pt(350.0, 20.0));
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert!(s.menu().is_none());
     assert_eq!(s.selection(), [ShapeId("b".into())]);
+}
+
+#[test]
+fn keyboard_commands_on_the_selection_close_an_open_menu() {
+    use willow_core::Side;
+    for input in [
+        Input::Navigate(Side::Right),
+        // Nothing above b: the selection stays, but the closed menu still redraws.
+        Input::Navigate(Side::Top),
+        Input::Nudge(Side::Right),
+        Input::NudgeSize(Side::Right),
+        Input::SelectChain,
+        Input::Enter,
+    ] {
+        let mut s = chain_of_three();
+        right_click(&mut s, pt(350.0, 20.0));
+        assert!(s.handle(input.clone(), T).redraw, "{input:?}");
+        assert!(s.menu().is_none(), "{input:?}");
+        // So a Cut chosen next cuts nothing the menu wasn't opened on.
+        s.handle(Input::MenuChoose(MenuAction::Cut), T);
+        assert_eq!(s.document().shapes.len(), 3, "{input:?}");
+    }
+}
+
+#[test]
+fn ctrl_arrows_do_nothing_while_the_color_picker_is_open() {
+    use willow_core::Side;
+    for input in [Input::Nudge(Side::Right), Input::NudgeSize(Side::Right)] {
+        let mut s = chain_of_three();
+        s.select([ShapeId("b".into())]);
+        s.handle(Input::OpenColorPicker, T);
+        s.handle(input.clone(), T);
+        assert!(s.color_picker_open(), "{input:?}");
+        assert_eq!(s.document(), chain_of_three().document(), "{input:?}");
+    }
 }
 
 #[test]

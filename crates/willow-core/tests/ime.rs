@@ -79,7 +79,7 @@ fn marked_text_is_shown_replaced_and_committed_and_only_the_commit_is_undoable()
     commit(&mut s, "漢字");
     assert_eq!((plain(&s), state(&s)), ("ab漢字".into(), (None, 8, 8)));
     assert!(s.can_undo());
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(plain(&s), "ab");
     s.handle(Input::Redo, T);
@@ -95,7 +95,7 @@ fn a_cancelled_composition_leaves_the_text_and_adds_no_undo_step() {
     mark(&mut s, "か", None);
     commit(&mut s, "");
     assert_eq!(plain(&s), "ab");
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert!(!s.can_undo());
 }
 
@@ -127,7 +127,7 @@ fn leaving_editing_or_unmarking_commits_the_marked_text_as_it_is() {
     assert_eq!((plain(&s), state(&s)), ("abか".into(), (None, 5, 5)));
 
     mark(&mut s, "な", None);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert_eq!(plain(&s), "abかな");
     s.handle(Input::Undo, T);
     assert_eq!(plain(&s), "ab");

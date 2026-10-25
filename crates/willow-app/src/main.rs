@@ -94,8 +94,8 @@ actions!(
     ]
 );
 
-/// Registers one handler per editing action on `$d`, each sending its `Input`.
-macro_rules! editing_actions {
+/// Registers one handler per action on `$d`, each sending its `Input`.
+macro_rules! input_actions {
     ($d:expr, $cx:expr, $($action:ident => $input:expr),* $(,)?) => {
         $d $(.on_action($cx.listener(|w, _: &$action, _, cx| w.input($input, cx))))*
     };
@@ -129,13 +129,19 @@ fn button(b: MouseButton) -> Option<Button> {
 /// Raw key-down and key-up. An arrow's key-down comes as a `Nav*` action instead; its key-up,
 /// which no action reports, ends a keyboard pan.
 fn key(k: &gpui::Keystroke) -> Option<Key> {
-    use willow_core::Side;
     match k.key.as_str() {
         "space" => Some(Key::Space),
-        "left" => Some(Key::Arrow(Side::Left)),
-        "right" => Some(Key::Arrow(Side::Right)),
-        "up" => Some(Key::Arrow(Side::Top)),
-        "down" => Some(Key::Arrow(Side::Bottom)),
+        key => arrow_side(key).map(Key::Arrow),
+    }
+}
+
+/// The side an arrow key's GPUI name points to.
+fn arrow_side(key: &str) -> Option<Side> {
+    match key {
+        "left" => Some(Side::Left),
+        "right" => Some(Side::Right),
+        "up" => Some(Side::Top),
+        "down" => Some(Side::Bottom),
         _ => None,
     }
 }
@@ -276,6 +282,14 @@ impl Willow {
     fn copy(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = self.session.clipboard_text() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        }
+    }
+
+    /// A click on an app menu item that skips the core (Copy, Save) closes the Tab picker, as
+    /// every click does; the core closes it for the items it handles.
+    fn close_tab_picker(&mut self, cx: &mut Context<Self>) {
+        if self.session.tab_picker_open() {
+            self.input(Input::CloseMenu, cx);
         }
     }
 
@@ -447,7 +461,10 @@ impl Render for Willow {
                 d.on_action(cx.listener(|w, _: &Redo, _, cx| w.input(Input::Redo, cx)))
             })
             .when(self.session.can_copy(), |d| {
-                d.on_action(cx.listener(|w, _: &Copy, _, cx| w.copy(cx)))
+                d.on_action(cx.listener(|w, _: &Copy, _, cx| {
+                    w.close_tab_picker(cx);
+                    w.copy(cx)
+                }))
             })
             .when(self.session.can_cut(), |d| {
                 d.on_action(cx.listener(|w, _: &Cut, _, cx| {
@@ -463,7 +480,7 @@ impl Render for Willow {
                     }
                 }))
             });
-        let root = editing_actions!(root, cx,
+        let root = input_actions!(root, cx,
             StartEditing => Input::StartEditing,
             Enter => Input::Enter,
             Escape => Input::Escape,
@@ -492,20 +509,20 @@ impl Render for Willow {
             SelectLineEnd => Input::Select(Motion::LineEnd),
             SelectAll => Input::SelectAll,
             NewBeside => Input::NewBeside,
-            NavLeft => Input::Navigate(willow_core::Side::Left),
-            NavRight => Input::Navigate(willow_core::Side::Right),
-            NavUp => Input::Navigate(willow_core::Side::Top),
-            NavDown => Input::Navigate(willow_core::Side::Bottom),
+            NavLeft => Input::Navigate(Side::Left),
+            NavRight => Input::Navigate(Side::Right),
+            NavUp => Input::Navigate(Side::Top),
+            NavDown => Input::Navigate(Side::Bottom),
         );
-        let root = editing_actions!(root, cx,
-            NudgeLeft => Input::Nudge(willow_core::Side::Left),
-            NudgeRight => Input::Nudge(willow_core::Side::Right),
-            NudgeUp => Input::Nudge(willow_core::Side::Top),
-            NudgeDown => Input::Nudge(willow_core::Side::Bottom),
-            Narrower => Input::NudgeSize(willow_core::Side::Left),
-            Wider => Input::NudgeSize(willow_core::Side::Right),
-            Shorter => Input::NudgeSize(willow_core::Side::Top),
-            Taller => Input::NudgeSize(willow_core::Side::Bottom),
+        let root = input_actions!(root, cx,
+            NudgeLeft => Input::Nudge(Side::Left),
+            NudgeRight => Input::Nudge(Side::Right),
+            NudgeUp => Input::Nudge(Side::Top),
+            NudgeDown => Input::Nudge(Side::Bottom),
+            Narrower => Input::NudgeSize(Side::Left),
+            Wider => Input::NudgeSize(Side::Right),
+            Shorter => Input::NudgeSize(Side::Top),
+            Taller => Input::NudgeSize(Side::Bottom),
         );
         let body = div()
             .flex_1()
@@ -787,14 +804,8 @@ fn tab_picker_keys(cx: &mut Context<Willow>, window: &Window) -> gpui::Subscript
             return;
         }
         let k = &e.keystroke;
-        let input = match k.key.as_str() {
-            _ if k.modifiers.modified() => Input::Escape,
-            "up" => Input::PickSide(Side::Top),
-            "right" => Input::PickSide(Side::Right),
-            "down" => Input::PickSide(Side::Bottom),
-            "left" => Input::PickSide(Side::Left),
-            _ => Input::Escape,
-        };
+        let side = arrow_side(&k.key).filter(|_| !k.modifiers.modified());
+        let input = side.map_or(Input::Escape, Input::PickSide);
         this.update(cx, |w, cx| w.input(input, cx));
         cx.stop_propagation();
     })
@@ -815,12 +826,8 @@ fn paint_tab_picker(
         inset: false,
     });
     for &(side, m) in picker {
-        let (dx, dy) = match side {
-            Side::Top => (0.0, -1.0),
-            Side::Right => (1.0, 0.0),
-            Side::Bottom => (0.0, 1.0),
-            Side::Left => (-1.0, 0.0),
-        };
+        let (dx, dy) = side.unit();
+        let (dx, dy) = (dx as f32, dy as f32);
         let along = |d: f32| m + point(px(dx * d), px(dy * d));
         let mut d = 0.0;
         while d < t.stub_length {
@@ -996,7 +1003,7 @@ fn main() {
                 KeyBinding::new("ctrl-v", Paste, None),
             ]);
         }
-        // Canvas moves and resizes, outside editing, where these keys move the caret.
+        // Canvas commands: outside editing, where these keys edit text or move the caret.
         let canvas = Some("!editing");
         if cfg!(target_os = "macos") {
             cx.bind_keys([
@@ -1026,6 +1033,7 @@ fn main() {
         let ed = Some("editing");
         // Bare arrows navigate unless the text or the color picker takes them.
         let nav = Some("!editing && !picker");
+        let picker = Some("picker");
         // Enter and Esc everywhere, so they never reach a selected shape as typed text.
         cx.bind_keys([
             KeyBinding::new("f2", StartEditing, None),
@@ -1041,18 +1049,18 @@ fn main() {
             KeyBinding::new("end", LineEnd, ed),
             KeyBinding::new("backspace", Backspace, ed),
             KeyBinding::new("delete", Delete, ed),
-            KeyBinding::new("backspace", DeleteShapes, Some("!editing")),
-            KeyBinding::new("delete", DeleteShapes, Some("!editing")),
-            KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
-            KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
-            KeyBinding::new("cmd-l", SelectChain, Some("!editing")),
-            KeyBinding::new("ctrl-l", SelectChain, Some("!editing")),
-            KeyBinding::new("cmd-shift-c", OpenColorPicker, Some("!editing")),
-            KeyBinding::new("ctrl-shift-c", OpenColorPicker, Some("!editing")),
-            KeyBinding::new("left", PickerLeft, Some("picker")),
-            KeyBinding::new("right", PickerRight, Some("picker")),
-            KeyBinding::new("enter", PickerApply, Some("picker")),
-            KeyBinding::new("escape", PickerCancel, Some("picker")),
+            KeyBinding::new("backspace", DeleteShapes, canvas),
+            KeyBinding::new("delete", DeleteShapes, canvas),
+            KeyBinding::new("cmd-d", Duplicate, canvas),
+            KeyBinding::new("ctrl-d", Duplicate, canvas),
+            KeyBinding::new("cmd-l", SelectChain, canvas),
+            KeyBinding::new("ctrl-l", SelectChain, canvas),
+            KeyBinding::new("cmd-shift-c", OpenColorPicker, canvas),
+            KeyBinding::new("ctrl-shift-c", OpenColorPicker, canvas),
+            KeyBinding::new("left", PickerLeft, picker),
+            KeyBinding::new("right", PickerRight, picker),
+            KeyBinding::new("enter", PickerApply, picker),
+            KeyBinding::new("escape", PickerCancel, picker),
             KeyBinding::new("left", NavLeft, nav),
             KeyBinding::new("right", NavRight, nav),
             KeyBinding::new("up", NavUp, nav),

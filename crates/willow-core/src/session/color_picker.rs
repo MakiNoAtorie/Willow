@@ -5,13 +5,12 @@ use super::{Menu, MenuAction, MenuEntry, MenuKind, Session};
 use crate::{Color, Point};
 
 impl Session {
-    /// Opens the picker over the single selected shape, ringed on its color. Does nothing while
-    /// editing or without exactly one selected shape.
+    /// Opens the picker over the single selected shape, ringed on its color. Does nothing
+    /// without exactly one selected shape.
     pub(super) fn open_color_picker(&mut self) {
-        if self.editing.is_some() || self.selected.len() != 1 {
+        let Some(id) = self.only_selected() else {
             return;
-        }
-        let id = self.selected[0].clone();
+        };
         let Some(i) = self.index_of(&id) else {
             return;
         };

@@ -190,3 +190,30 @@ fn the_frame_shows_the_picker_at_the_selected_shapes_edge_midpoints() {
         ]
     );
 }
+
+#[test]
+fn edit_menu_inputs_close_the_picker_and_act_as_usual() {
+    // Undo: the picker closes and the move made before it is undone; Redo redoes it.
+    let mut s = session();
+    s.move_selection(10, 0);
+    input(&mut s, Input::Tab);
+    input(&mut s, Input::Undo);
+    assert!(!s.tab_picker_open());
+    assert_eq!(s.document(), session().document());
+    input(&mut s, Input::Tab);
+    input(&mut s, Input::Redo);
+    assert!(!s.tab_picker_open());
+    assert_ne!(s.document(), session().document());
+    // Cut removes the selected shape; Paste puts it back.
+    let mut s = session();
+    let text = s.clipboard_text().expect("a is selected");
+    input(&mut s, Input::Tab);
+    input(&mut s, Input::Cut);
+    assert!(!s.tab_picker_open());
+    assert_eq!(s.document().shapes.len(), 2);
+    s.select([id("c")]);
+    input(&mut s, Input::Tab);
+    input(&mut s, Input::Paste(text));
+    assert!(!s.tab_picker_open());
+    assert_eq!(s.document().shapes.len(), 3);
+}

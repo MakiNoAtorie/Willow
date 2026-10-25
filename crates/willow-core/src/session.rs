@@ -45,6 +45,14 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    /// The canvas point at the view's center.
+    pub fn center(&self) -> Point {
+        self.to_canvas(Point {
+            x: self.size.x / 2.0,
+            y: self.size.y / 2.0,
+        })
+    }
+
     pub fn to_screen(&self, p: Point) -> Point {
         Point {
             x: (p.x - self.origin.x) * self.zoom,
@@ -589,7 +597,22 @@ impl Session {
         {
             return r;
         }
-        match input {
+        // Keyboard commands act on the selection, while menu items act on what the menu was
+        // opened on: they close it first. The color picker keeps Ctrl/Cmd+Arrows to itself.
+        let closed = match input {
+            Input::Nudge(_) | Input::NudgeSize(_) if self.color_picker_open() => {
+                return self.respond(false);
+            }
+            Input::Navigate(_)
+            | Input::Nudge(_)
+            | Input::NudgeSize(_)
+            | Input::SelectChain
+            | Input::Enter
+            | Input::Cut
+            | Input::Duplicate => self.menu.take().is_some(),
+            _ => false,
+        };
+        let mut r = match input {
             Input::PointerDown { pos, button, mods } => {
                 // A press outside the menu closes it; a right press goes on to open another.
                 if self.menu.take().is_some() && button != Button::Right {
@@ -806,14 +829,22 @@ impl Session {
                 }
                 self.respond(true)
             }
-            Input::StopEditing if self.menu.is_some() => {
-                self.menu = None;
-                self.respond(true)
-            }
-            // Esc: the one place that closes what is open first (menu; pickers hook in here).
+            // Esc closes an open menu first; the Tab picker has closed before this `match`.
             Input::Escape if self.menu.is_some() => {
                 self.menu = None;
                 self.respond(true)
+            }
+            // Canvas commands never act on a shape being edited.
+            Input::Nudge(_)
+            | Input::NudgeSize(_)
+            | Input::NewBeside
+            | Input::SelectChain
+            | Input::DeleteShapes
+            | Input::Navigate(_)
+            | Input::OpenColorPicker
+                if self.editing.is_some() =>
+            {
+                self.respond(false)
             }
             Input::MenuChoose(action) => {
                 self.choose(action);
@@ -874,7 +905,6 @@ impl Session {
                 self.slides.clear();
                 self.respond(true)
             }
-            Input::Nudge(_) | Input::NudgeSize(_) if self.editing.is_some() => self.respond(false),
             Input::Nudge(side) => {
                 self.nudge(side);
                 self.respond(true)
@@ -883,7 +913,6 @@ impl Session {
                 self.nudge_size(side);
                 self.respond(true)
             }
-            Input::NewBeside if self.editing.is_some() => self.respond(false),
             Input::NewBeside => {
                 self.new_beside();
                 self.respond(true)
@@ -893,7 +922,6 @@ impl Session {
                 self.respond(true)
             }
             Input::PickSide(_) => self.respond(false),
-            Input::SelectChain if self.editing.is_some() => self.respond(false),
             Input::SelectChain => {
                 self.select_chain();
                 self.respond(true)
@@ -902,18 +930,15 @@ impl Session {
                 let moved = self.navigate(side);
                 self.respond(moved)
             }
-            Input::DeleteShapes if self.editing.is_some() => self.respond(false),
             Input::Paste(text) if self.editing.is_none() => {
                 self.paste_shapes(&text);
                 self.respond(true)
             }
             Input::Cut if self.editing.is_none() => {
-                self.menu = None;
                 self.delete(&self.selected.clone());
                 self.respond(true)
             }
             Input::Duplicate => {
-                self.menu = None;
                 self.duplicate();
                 self.respond(true)
             }
@@ -954,7 +979,6 @@ impl Session {
             | Input::Mark { .. }
             | Input::Unmark
             | Input::StartEditing
-            | Input::StopEditing
             | Input::Enter
             | Input::Escape
             | Input::NewLine
@@ -966,7 +990,9 @@ impl Session {
             | Input::ToggleItalic
             | Input::Move(_)
             | Input::Delete(_) => self.handle_text(input),
-        }
+        };
+        r.redraw |= closed;
+        r
     }
 
     /// Advances animations to `now`. The app calls it every frame while `Response.animating`.

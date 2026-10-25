@@ -368,6 +368,8 @@ pub struct Theme {
     pub follow: Transition,
     pub follow_margin: f32,
     pub key_pan: KeyPanStyle,
+    /// Canvas units one Ctrl/Cmd+Arrow press moves the selection, or resizes a shape, by.
+    pub nudge: i32,
 }
 
 impl Theme {
@@ -659,4 +661,5 @@ pub const PAPER: Theme = Theme {
         ease_in: Duration::from_millis(120),
         ease_out: Duration::from_millis(120),
     },
+    nudge: 24,
 };

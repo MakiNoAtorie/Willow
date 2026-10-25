@@ -27,6 +27,16 @@ impl Side {
             Side::Right => Side::Left,
         }
     }
+
+    /// One step toward this side, y down: (dx, dy).
+    pub fn unit(self) -> (i32, i32) {
+        match self {
+            Side::Top => (0, -1),
+            Side::Bottom => (0, 1),
+            Side::Left => (-1, 0),
+            Side::Right => (1, 0),
+        }
+    }
 }
 
 /// The side of the shape centered at `from` that faces the shape centered at `to`: vertical

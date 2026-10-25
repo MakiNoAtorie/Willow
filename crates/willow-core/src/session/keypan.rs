@@ -75,12 +75,9 @@ impl Session {
             let off = p.offset(now, k);
             let d = (off - p.done) / vp.zoom;
             p.done = off;
-            match p.side {
-                Side::Left => vp.origin.x -= d,
-                Side::Right => vp.origin.x += d,
-                Side::Top => vp.origin.y -= d,
-                Side::Bottom => vp.origin.y += d,
-            }
+            let (x, y) = p.side.unit();
+            vp.origin.x += x as f32 * d;
+            vp.origin.y += y as f32 * d;
         }
         self.key_pan.retain(|p| !p.settled(now, k));
         ran

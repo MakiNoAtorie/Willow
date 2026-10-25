@@ -24,13 +24,7 @@ impl Session {
                     y: from.y as f32 + h / 2.0,
                 }
             }
-            None => {
-                let v = self.viewport;
-                v.to_canvas(Point {
-                    x: v.size.x / 2.0,
-                    y: v.size.y / 2.0,
-                })
-            }
+            None => self.viewport.center(),
         };
         self.new_shape_at(center, true);
         if let Some(id) = self.selected.first().cloned() {

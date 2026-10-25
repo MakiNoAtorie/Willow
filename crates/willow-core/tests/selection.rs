@@ -211,7 +211,7 @@ fn paste_brings_paragraph_breaks_and_cut_removes_the_selection_in_one_undo_step(
     s.handle(Input::Paste("q".into()), T);
     assert_eq!(plain(&s), "q", "paste replaces the selection");
 
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert!(s.can_paste(), "shapes paste onto the canvas");
     s.handle(Input::Undo, T);
     assert_eq!(plain(&s), "ab");

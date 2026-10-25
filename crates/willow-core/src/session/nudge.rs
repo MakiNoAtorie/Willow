@@ -3,19 +3,11 @@
 use super::{ResizeTo, Session};
 use crate::Side;
 
-/// How far one press moves or resizes, in canvas units.
-const STEP: i32 = 24;
-
 impl Session {
     /// Moves the selection one step toward `side`, like a drag: pushes nothing, zones stay.
     pub(super) fn nudge(&mut self, side: Side) {
-        let (dx, dy) = match side {
-            Side::Left => (-STEP, 0),
-            Side::Right => (STEP, 0),
-            Side::Top => (0, -STEP),
-            Side::Bottom => (0, STEP),
-        };
-        self.move_selection(dx, dy);
+        let ((x, y), step) = (side.unit(), self.theme.nudge);
+        self.move_selection(x * step, y * step);
     }
 
     /// Resizes the one selected shape a step: Left/Right narrow/widen it around its center,
@@ -24,18 +16,19 @@ impl Session {
         let Some(id) = self.only_selected() else {
             return;
         };
-        let Some(s) = self.doc.shapes.iter().find(|s| s.id == id) else {
+        let Some(i) = self.index_of(&id) else {
             return;
         };
-        let half = STEP / 2;
+        let (s, step) = (&self.doc.shapes[i], self.theme.nudge);
+        let half = step / 2;
         let d = match side {
             Side::Left => (-half).max(self.least_growth(s)).min(0),
             Side::Right => half,
             _ => 0,
         };
         let extra = match side {
-            Side::Top => (s.extra_height as i32 - STEP).max(0),
-            Side::Bottom => s.extra_height as i32 + STEP,
+            Side::Top => (s.extra_height as i32 - step).max(0),
+            Side::Bottom => s.extra_height as i32 + step,
             _ => s.extra_height as i32,
         };
         let r = ResizeTo {

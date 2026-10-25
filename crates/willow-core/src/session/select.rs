@@ -1,5 +1,5 @@
 //! Multi-selection: the Shift+drag marquee, Shift+click toggling and moving the whole
-//! selection as one undo step.
+//! selection as one undo step, and selecting whole chains.
 
 use super::{Gesture, Session};
 use crate::{Point, ShapeId};
@@ -83,9 +83,7 @@ impl Session {
         let ids: Vec<ShapeId> = self.marquee_base.iter().cloned().chain(touched).collect();
         self.select(ids);
     }
-}
 
-impl Session {
     /// Selects every shape in the chains of the selected shapes; nothing selected, nothing happens.
     pub(super) fn select_chain(&mut self) {
         let all: Vec<ShapeId> = (self.selected.iter())

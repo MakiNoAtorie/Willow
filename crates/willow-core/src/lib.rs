@@ -94,6 +94,13 @@ fn id_for(mut n: usize) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShapeId(pub String);
 
+impl ShapeId {
+    /// The sort key for ID tie-breaks: generation order, shorter first, then alphabetical.
+    pub(crate) fn generation_order(&self) -> (usize, &str) {
+        (self.0.len(), &self.0)
+    }
+}
+
 /// A rounded rectangle holding rich text. Positions and sizes are whole canvas units.
 /// Its drawn height is text height + vertical padding + `extra_height`; text height is never stored.
 #[derive(Clone, Debug, PartialEq)]

@@ -103,7 +103,7 @@ fn already_close_shapes_stay_until_a_growth_brings_them_closer() {
     let mut s = session(&[("a", 0, 0), ("e", 0, 60), ("f", 200, 20)], &[]);
     // Typing that doesn't add a line, and widening (a's bottom stays), leave them be.
     type_into(&mut s, "a", "word");
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     let r = ResizeTo {
         x: -20,
         width: 250,
@@ -126,7 +126,7 @@ fn shrinking_and_drags_move_nothing() {
     // Deleting the text shrinks a; nothing comes back.
     s.handle(Input::SelectAll, T);
     s.handle(Input::Delete(willow_core::Motion::Left), T);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     assert!(bottom(&s, "a") < 50.0);
     // A narrower resize and a drag next to e push nothing either.
     let r = ResizeTo {
@@ -161,7 +161,7 @@ fn one_undo_reverts_a_typing_session_and_its_pushes_and_zones_keep_their_members
     // b (own chain) and then e (another chain) were pushed out of the zone's rectangle.
     assert!(at(&s, "b").1 > 230 && at(&s, "e").1 > at(&s, "b").1);
     assert_eq!(s.document().zones[0].members, [id("b"), id("e")]);
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(*s.document(), doc);
     assert!(!s.can_undo());
@@ -178,7 +178,7 @@ fn a_midpoint_created_shape_landing_on_another_chain_pushes_that_chain_clear() {
     // 24 below the new shape's bottom (145.5): 169.5, rounded up.
     assert_eq!((at(&s, "g"), at(&s, "g2")), ((0, 170), (400, 550)));
     assert_eq!(at(&s, "h"), (300, 97));
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!((at(&s, "g"), at(&s, "g2")), ((0, 120), (400, 500)));
 }

@@ -57,12 +57,8 @@ const GROWING: [Side; 3] = [Side::Bottom, Side::Left, Side::Right];
 
 /// A move of `d` units toward `side`.
 fn toward(side: Side, d: i32) -> (i32, i32) {
-    match side {
-        Side::Bottom => (0, d),
-        Side::Top => (0, -d),
-        Side::Right => (d, 0),
-        Side::Left => (-d, 0),
-    }
+    let (x, y) = side.unit();
+    (x * d, y * d)
 }
 
 /// How far `o` must move toward `side` to sit `gap` beyond mover `m`, in whole units; 0 when

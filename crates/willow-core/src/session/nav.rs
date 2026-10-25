@@ -20,7 +20,7 @@ pub(crate) fn next_shape(doc: &Document, heights: &[f32], from: usize, dir: Side
     let nearest = |them: &mut dyn Iterator<Item = usize>| {
         them.filter(|&i| i != from && side(at, center(i)) == dir)
             .min_by(|&i, &j| {
-                let key = |i: usize| (shapes[i].id.0.len(), &shapes[i].id.0);
+                let key = |i: usize| shapes[i].id.generation_order();
                 (distance(i).total_cmp(&distance(j))).then_with(|| key(i).cmp(&key(j)))
             })
     };
@@ -59,9 +59,10 @@ impl Session {
     /// keyboard selects or creates a shape. A running follow retargets.
     pub(crate) fn reveal(&mut self, id: &ShapeId) {
         self.advance_follow(self.now);
-        let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
+        let Some(i) = self.index_of(id) else {
             return;
         };
+        let s = &self.doc.shapes[i];
         let (h, vp) = (self.shape_height(s), self.viewport);
         let rest = self.follow.map_or(Point::default(), |f| Point {
             x: f.delta.x * (1.0 - f.done),
@@ -107,13 +108,10 @@ impl Session {
         (self.follow).is_some_and(|f| now < f.start + self.theme.follow.duration)
     }
 
-    /// Moves the selection one shape toward `dir` (an arrow key). Nothing while editing; with
-    /// nothing selected it starts a keyboard pan. A multi-selection first collapses to its first
-    /// shape in story order. Not an undo step. True if the selection changed or a pan started.
+    /// Moves the selection one shape toward `dir` (an arrow key); with nothing selected it
+    /// starts a keyboard pan. A multi-selection first collapses to its first shape in story
+    /// order. Not an undo step. True if the selection changed or a pan started.
     pub(crate) fn navigate(&mut self, dir: Side) -> bool {
-        if self.editing.is_some() {
-            return false;
-        }
         let old = self.selected.clone();
         let heights = self.heights();
         let Some(from) = self.first_in_story_order(&heights) else {

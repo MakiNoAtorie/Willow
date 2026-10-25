@@ -84,11 +84,6 @@ impl Session {
                 }
                 _ => self.respond(false),
             },
-            Input::StopEditing => {
-                let was = self.editing.is_some();
-                self.stop_editing();
-                self.respond(was)
-            }
             Input::Enter => {
                 if self.editing.is_some() {
                     self.stop_editing();
@@ -278,11 +273,7 @@ impl Session {
 
     /// The shape whose center is nearest the view center; ties go in generation order.
     fn nearest_view_center(&self) -> Option<ShapeId> {
-        let v = self.viewport;
-        let c = v.to_canvas(Point {
-            x: v.size.x / 2.0,
-            y: v.size.y / 2.0,
-        });
+        let c = self.viewport.center();
         let dist = |s: &Shape| {
             let p = s.center(self.shape_height(s));
             (p.x - c.x).hypot(p.y - c.y)
@@ -290,7 +281,7 @@ impl Session {
         (self.doc.shapes.iter())
             .min_by(|a, b| {
                 (dist(a).total_cmp(&dist(b)))
-                    .then_with(|| (a.id.0.len(), &a.id.0).cmp(&(b.id.0.len(), &b.id.0)))
+                    .then_with(|| a.id.generation_order().cmp(&b.id.generation_order()))
             })
             .map(|s| s.id.clone())
     }

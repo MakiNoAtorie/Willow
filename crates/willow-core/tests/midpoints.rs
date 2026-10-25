@@ -73,7 +73,7 @@ fn each_side_creates_a_linked_shape_one_gap_away_in_the_chain_color_in_editing()
 fn a_side_already_linked_inserts_the_new_shape() {
     let mut s = session();
     click(&mut s, BOTTOM);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     click(&mut s, BOTTOM);
     let doc = s.document();
     assert_eq!(doc.shapes.len(), 3);
@@ -109,7 +109,7 @@ fn one_undo_removes_the_new_shape_and_its_text() {
     // Undo after editing ended.
     let mut s = session();
     typed(&mut s);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     input(&mut s, Input::Undo);
     assert_eq!(*s.document(), before);
     assert!(!s.can_undo());
@@ -119,7 +119,7 @@ fn one_undo_removes_the_new_shape_and_its_text() {
 fn a_new_shape_left_empty_is_kept_and_undoes_in_one_step() {
     let mut s = session();
     click(&mut s, BOTTOM);
-    input(&mut s, Input::StopEditing);
+    input(&mut s, Input::Escape);
     assert_eq!(s.document().shapes.len(), 2);
     input(&mut s, Input::Undo);
     assert_eq!(s.document().shapes.len(), 1);

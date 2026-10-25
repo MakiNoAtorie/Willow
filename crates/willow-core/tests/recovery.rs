@@ -73,7 +73,7 @@ fn changes_that_keep_coming_are_recovered_every_thirty_seconds() {
 fn nothing_is_due_while_saved() {
     let mut s = session();
     typ(&mut s, "x", sec(10));
-    s.handle(Input::StopEditing, sec(10));
+    s.handle(Input::Escape, sec(10));
     s.save(|_| Ok(())).unwrap();
     assert_eq!(s.recovery_wake(sec(10)), None);
     assert_eq!(s.take_recovery(sec(60)), None);

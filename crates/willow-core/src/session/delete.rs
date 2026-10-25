@@ -70,7 +70,7 @@ fn reconnect(
         let hub = (hubs.iter())
             .min_by(|x, y| {
                 (dist(x).total_cmp(&dist(y)))
-                    .then_with(|| (x.0.len(), &x.0).cmp(&(y.0.len(), &y.0)))
+                    .then_with(|| x.generation_order().cmp(&y.generation_order()))
             })
             .expect("not empty");
         out.extend(others.iter().map(|&n| ((*hub).clone(), n.clone())));

@@ -86,7 +86,7 @@ fn arrows_do_nothing_while_editing_and_are_no_undo_step() {
     nav(&mut s, Side::Bottom);
     assert_eq!(s.selection(), [id("a")]);
     assert!(s.editing().is_some());
-    s.handle(Input::StopEditing, T);
+    s.handle(Input::Escape, T);
     nav(&mut s, Side::Bottom);
     assert_eq!(s.selection(), [id("b")]);
     assert!(!s.can_undo());
