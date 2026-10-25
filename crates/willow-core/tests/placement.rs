@@ -37,10 +37,11 @@ fn a_linked_shape_goes_one_creation_gap_away_in_its_stated_direction() {
          @layout h 10,20\n",
     );
     assert!(!s.is_saved());
-    assert_eq!(at(&s, "b"), (0, 97, 210));
+    // Centered on the anchor's side: b and e are 10 wider than a.
+    assert_eq!(at(&s, "b"), (-5, 97, 210));
     assert_eq!(at(&s, "c"), (248, 0, 210));
     assert_eq!(at(&s, "d"), (-258, 0, 210));
-    assert_eq!(at(&s, "e"), (0, -97, 210));
+    assert_eq!(at(&s, "e"), (-5, -97, 210));
     // A missing width is the default width.
     assert_eq!(at(&s, "h"), (10, 20, 210));
 }

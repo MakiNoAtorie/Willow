@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Document, Point, ShapeId};
+use crate::{Document, Point, Shape, ShapeId};
 
 /// A link between two shapes. Unordered, and it stores no sides.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +37,20 @@ impl Side {
             Side::Right => (1, 0),
         }
     }
+}
+
+/// Where a `w` x `h` shape goes `gap` from `a` (`ah` tall) on `side`: centered on that side's
+/// midpoint, so the connector between them runs straight.
+pub(crate) fn beside(a: &Shape, ah: f32, w: u32, h: f32, side: Side, gap: f32) -> (i32, i32) {
+    let (ax, ay, aw) = (a.x as f32, a.y as f32, a.width as f32);
+    let (cx, cy) = (ax + (aw - w as f32) / 2.0, ay + (ah - h) / 2.0);
+    let (x, y) = match side {
+        Side::Bottom => (cx, ay + ah + gap),
+        Side::Top => (cx, ay - h - gap),
+        Side::Right => (ax + aw + gap, cy),
+        Side::Left => (ax - w as f32 - gap, cy),
+    };
+    (x.round() as i32, y.round() as i32)
 }
 
 /// The side of the shape centered at `from` that faces the shape centered at `to`: vertical
