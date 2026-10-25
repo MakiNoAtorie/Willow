@@ -3,7 +3,7 @@ mod common;
 use std::time::Duration;
 
 use common::{doc_with, session_of};
-use willow_core::{Button, Input, Modifiers, Point, Run, Session};
+use willow_core::{Button, Input, Modifiers, Motion, Point, Run, Session};
 
 const T: Duration = Duration::ZERO;
 
@@ -122,4 +122,48 @@ fn formatting_is_part_of_the_sessions_single_undo_step() {
     s.handle(Input::Undo, T);
     assert_eq!(runs(&s), [r("abcd", false, false)]);
     assert!(!s.can_undo());
+}
+
+/// Each paragraph's runs as (text, bold).
+fn bold_runs(s: &Session) -> Vec<Vec<(String, bool)>> {
+    (s.document().shapes[0].text.paragraphs.iter())
+        .map(|p| p.runs.iter().map(|r| (r.text.clone(), r.bold)).collect())
+        .collect()
+}
+
+fn b(t: &str, bold: bool) -> (String, bool) {
+    (t.into(), bold)
+}
+
+#[test]
+fn a_toggle_across_a_paragraph_break_turns_off_only_when_every_paragraph_has_it() {
+    let mut s = started("a\nb");
+    s.handle(Input::SelectAll, T);
+    s.handle(Input::ToggleBold, T);
+    assert_eq!(bold_runs(&s), [[b("a", true)], [b("b", true)]]);
+    s.handle(Input::ToggleBold, T);
+    assert_eq!(
+        bold_runs(&s),
+        [[b("a", false)], [b("b", false)]],
+        "all bold across the break: off"
+    );
+
+    s.set_text_selection(0..1);
+    s.handle(Input::ToggleBold, T);
+    s.handle(Input::SelectAll, T);
+    s.handle(Input::ToggleBold, T);
+    assert_eq!(bold_runs(&s), [[b("a", true)], [b("b", true)]], "mixed: on");
+}
+
+#[test]
+fn a_line_selected_with_its_paragraph_break_toggles_off() {
+    let mut s = started("a\nb");
+    s.handle(Input::SelectAll, T);
+    s.handle(Input::ToggleBold, T);
+    s.handle(Input::Move(Motion::Up), T);
+    s.handle(Input::Move(Motion::LineStart), T);
+    s.handle(Input::Select(Motion::Down), T);
+    assert_eq!(s.selected_text().as_deref(), Some("a\n"));
+    s.handle(Input::ToggleBold, T);
+    assert_eq!(bold_runs(&s), [[b("a", false)], [b("b", true)]]);
 }
