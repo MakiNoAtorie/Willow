@@ -1,6 +1,6 @@
 # Conventions
 
-Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind future work and that the code can't tell you, delete stale ones. The orchestrator folds implementers' proposals in at merge.
+Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind future work and that the code can't tell you, delete stale ones.
 
 ## Stack
 - Rust + GPUI pinned to `zed-industries/zed` @ `79fe6a645f68f8c9230578f154bf99852d9f716f` (ADR 0003); re-copy Zed's `[patch.crates-io]` block on every pin bump.
@@ -54,7 +54,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
 ## Chains
-- Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
+- Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. The keyboard color picker is `MenuKind::Picker` (one `Colors` row); popup keys bind in the `picker` key context. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
 - Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape. Tests grab edges away from midpoints.
 - Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured (the layout cache keys on ID).
 - Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap, which is what ends cascades. Moves, drags and pastes never push.
@@ -67,6 +67,6 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
-- Property tests use the built-in fixed-seed xorshift (no new dependency) and print the case number in every assertion.
+- Property tests use the built-in fixed-seed xorshift and print the case number in each assertion.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1). Tool output is CSV.
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
