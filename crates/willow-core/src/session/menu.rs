@@ -37,6 +37,7 @@ pub enum MenuAction {
     Paste,
     Duplicate,
     Delete,
+    SelectChain,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -74,7 +75,7 @@ pub enum MenuEntry {
     Item(MenuItem),
     Separator,
     /// A small label over the entries after it.
-    Heading(&'static str),
+    Heading(&'static str, Option<Shortcut>),
     /// The seven picker colors in a row; `current` is ringed.
     Colors {
         current: Option<Color>,
@@ -143,6 +144,7 @@ impl Session {
             item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
             item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
             item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+            item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
             item(MenuAction::Delete, "Delete", Shortcut::DELETE),
         ];
         self.menu = Some(self.menu_at(MenuKind::Multi, at, entries));
@@ -170,6 +172,7 @@ impl Session {
             MenuAction::Cut | MenuAction::Delete => self.delete(&self.selected.clone()),
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
+            MenuAction::SelectChain => self.select_chain(),
             MenuAction::Recolor(color) => {
                 if let Some(id) = menu.shape {
                     self.ripple_recolor(&id, color);
@@ -277,8 +280,15 @@ fn shape_items(current: Color) -> Vec<MenuEntry> {
         item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
         item(MenuAction::Paste, "Paste", Shortcut::cmd("V")),
         item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
+        item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
         MenuEntry::Separator,
-        MenuEntry::Heading("Color"),
+        MenuEntry::Heading(
+            "Color",
+            Some(Shortcut {
+                shift: true,
+                key: "C",
+            }),
+        ),
         MenuEntry::Colors {
             current: Some(current),
         },

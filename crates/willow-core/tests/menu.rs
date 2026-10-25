@@ -6,7 +6,7 @@ use std::time::Duration;
 use common::{doc_with, session_of};
 use willow_core::{
     Button, Color, Document, Input, MenuAction, MenuEntry, MenuKind, Modifiers, Point, Session,
-    ShapeId, Zone,
+    ShapeId, Shortcut, Zone,
 };
 
 const T: Duration = Duration::ZERO;
@@ -216,7 +216,13 @@ fn the_shape_menu_ends_with_a_color_heading_over_the_colors() {
         entries[entries.len() - 3..],
         [
             MenuEntry::Separator,
-            MenuEntry::Heading("Color"),
+            MenuEntry::Heading(
+                "Color",
+                Some(Shortcut {
+                    shift: true,
+                    key: "C"
+                })
+            ),
             MenuEntry::Colors { current }
         ]
     );

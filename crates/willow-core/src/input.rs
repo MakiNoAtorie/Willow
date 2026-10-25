@@ -177,6 +177,8 @@ pub enum Input {
     /// An arrow in the directional picker: creates a linked shape on that side, as a
     /// midpoint click does.
     PickSide(crate::Side),
+    /// Ctrl/Cmd+L with nothing being edited: `Session::select_chain`.
+    SelectChain,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

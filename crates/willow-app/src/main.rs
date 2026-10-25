@@ -58,6 +58,8 @@ actions!(willow, [ShowTabPicker]);
 actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
 // Cmd/Ctrl+Shift+N: a new shape beside the selected chain.
 actions!(willow, [NewBeside]);
+// Cmd/Ctrl+L: select the chains of the selection.
+actions!(willow, [SelectChain]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -416,6 +418,7 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
+            .on_action(cx.listener(|w, _: &SelectChain, _, cx| w.input(Input::SelectChain, cx)))
             .on_action(
                 cx.listener(|w, _: &OpenColorPicker, _, cx| w.input(Input::OpenColorPicker, cx)),
             )
@@ -1032,6 +1035,8 @@ fn main() {
             KeyBinding::new("delete", DeleteShapes, Some("!editing")),
             KeyBinding::new("cmd-d", Duplicate, Some("!editing")),
             KeyBinding::new("ctrl-d", Duplicate, Some("!editing")),
+            KeyBinding::new("cmd-l", SelectChain, Some("!editing")),
+            KeyBinding::new("ctrl-l", SelectChain, Some("!editing")),
             KeyBinding::new("cmd-shift-c", OpenColorPicker, Some("!editing")),
             KeyBinding::new("ctrl-shift-c", OpenColorPicker, Some("!editing")),
             KeyBinding::new("left", PickerLeft, Some("picker")),
