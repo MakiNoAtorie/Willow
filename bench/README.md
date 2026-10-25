@@ -20,3 +20,7 @@ Three runs at `324dac2`, load average 4–5 (a system daemon was using about two
 - `save_unwarmed` (a save the instant a file opens, before the idle layout has run) is 35–55 ms. About 20 ms of it is the CPU waking from idle: the same save right after 100 ms of busy work takes 32–35 ms.
 - Laying everything out ahead raises idle RSS from about 135 MB to 125–176 MB.
 - Phase 2 targets still hold: pan and zoom draw p95 ≤ 6.1 ms; typing draw max ≤ 5.5 ms with no late frames; 0 renders while idle. The exception is the warm 2% pan at 8.0–9.6 ms. That comes from zone titles, and 2% is below the UI's 10% minimum zoom.
+
+## Review fixes (`mba-m4`, #58, rows at `1ae1547`)
+
+First run on the cold/warm split from #65 and the first since Phase 5. Every target holds: pan and zoom draw p95 3.7–5.7 ms (the 2% warm pan, 5.7 ms, is now under the 8 ms target too); typing p95 3.9 ms, max 5.1 ms, no late frames; `recovery_take` (the UI-thread part of autosave on 10k shapes) 7.7 ms; save 11.2 ms, load 17.6 ms; 0 renders while idle after both the pan and the animation, so the 3 renders in the `4cf2ae8` run did not reproduce. The cold pans now show the real first-layout cost: one 16–24 ms frame at 10% and 2% (one late frame at 2%), p95 unaffected.
