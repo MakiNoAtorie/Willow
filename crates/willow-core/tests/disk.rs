@@ -104,3 +104,20 @@ fn a_reload_with_the_same_document_in_other_bytes_adds_no_undo_step_and_keeps_ed
     assert!(s.is_saved());
     assert_eq!(s.bytes(), crlf);
 }
+
+#[test]
+fn a_reload_ends_a_held_gesture() {
+    use willow_core::{Button, Modifiers, Point};
+    let mut s = open(
+        b"willow 1\n\na: \"Gates\"\nb: \"Walls\"\n\n@layout a 0,0 w210\n@layout b 0,140 w210\n",
+    );
+    let (button, mods) = (Button::Left, Modifiers::default());
+    let pos = s.viewport().to_screen(Point { x: 100.0, y: 160.0 });
+    s.handle(Input::PointerDown { pos, button, mods }, Duration::ZERO);
+    s.disk_changed(Some(THEIRS));
+    let pos = s.viewport().to_screen(Point { x: 300.0, y: 300.0 });
+    s.handle(Input::PointerMove { pos, mods }, Duration::ZERO);
+    s.handle(Input::PointerUp { pos, button, mods }, Duration::ZERO);
+    assert_eq!(s.document().shapes.len(), 1);
+    assert_eq!((s.document().shapes[0].x, s.document().shapes[0].y), (0, 0));
+}

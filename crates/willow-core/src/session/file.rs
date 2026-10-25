@@ -87,6 +87,7 @@ impl Session {
                 // The same document in other bytes (line endings, indent) is no new step.
                 if loaded.document != self.doc {
                     self.stop_editing();
+                    self.end_gesture();
                     self.history.replace(&mut self.doc, loaded.document);
                     self.drop_missing_selection();
                 }
