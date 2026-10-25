@@ -595,12 +595,19 @@ impl Session {
 
     fn dispatch(&mut self, input: Input, now: Duration) -> Response {
         self.now = now;
+        // macOS sends no key-up for an arrow released while Cmd is held: end held arrows.
+        if matches!(
+            input,
+            Input::Nudge(_) | Input::NudgeSize(_) | Input::ModifiersChanged
+        ) {
+            self.key_pan_up(None);
+        }
         // Anything that may edit, undo or end the session commits the marked text first, so
         // no undo step ever holds it. Space keys come while the IME converts: leave it alone.
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom | Input::PointerLeft => {}
+            Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
             _ => self.unmark(),
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
@@ -904,6 +911,7 @@ impl Session {
                 self.pointer = None;
                 self.respond(false)
             }
+            Input::ModifiersChanged => self.respond(false),
             Input::FocusLost => {
                 self.space_held = false;
                 self.key_pan_up(None);
