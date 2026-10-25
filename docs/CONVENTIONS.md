@@ -15,7 +15,7 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - Core session: input vocabulary in `input.rs`, text editing in `session/editing.rs`. New editing inputs go in `Session::handle_text` and are listed in `handle`'s dispatch arm.
 
 ## Model
-- Build `Document` literals with `..Document::default()`. Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
+- Shapes and zones share `ShapeId` and one generator; `doc.zones` order is draw order, parents first.
 - Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor`/`join_zone`; `Document::link`/`unlink`/`recolor` are for loaders and generators.
 - A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add. Reuse `willow_core::side`, `Shape::center`, `Document::next_ids` and `format::walks`.
 - Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use generation order (shorter first, then alphabetical).
@@ -46,26 +46,26 @@ Binding rules. `ci.sh` keeps this file under 8 KB: add only rules that bind futu
 - All input goes through `Session::handle(input, now)`. The app calls `cx.notify()` only on `Response.redraw`, animates only while `Session::animating(now)`, else wakes at `Session::next_wake(now)`; idle is 0 renders.
 - Positions given to the core are canvas-relative. Wheel and pinch carry the pointer position; wheel deltas are content movement in screen px.
 - Pointer move/up listen window-wide (`window.on_mouse_event`); down and scroll on the canvas div. `Input::FocusLost` resets held keys and pans.
-- Enter, Esc, Shift+Enter send `Input::Enter`/`Escape`/`NewLine`; the core picks the action by state. Esc's close-first chain is in `Session::dispatch`: new popups go before the leave-editing arm.
+- Enter/Esc/Shift+Enter send `Input::Enter`/`Escape`/`NewLine`, resolved by state; new popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
 - Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable from handler presence: `.when(session.can_x(), …)` on the focused root. Read core state during render; `window.is_action_available` panics there.
-- Gestures: press-versus-drag uses `DRAG_START` (3 screen px), edges `EDGE_GRAB` (5 screen px). Previews are queries; the mutation lands once on release through a named `Session` method.
+- Previews are queries; the mutation lands once on release through a named `Session` method.
 - Undoable changes go through `History` from a named `Session` method; viewport and selection never do. Selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`. An editing session is one `begin()`/`end()` group.
 
 ## Chains
 - Menus are core data (`Session::menu()`); the app's `menu.rs` only draws them from `Theme.menu`. The keyboard color picker is `MenuKind::Picker` (one `Colors` row); popup keys bind in the `picker` key context. Items act on `Menu.shape` / `Menu.link`, set at open; clipboard items go through the app's `Willow::choose`.
 - Left press priority: midpoint (10 screen px), alt-autofit, resize edge, shape. Tests grab edges away from midpoints.
 - Commands that open editing (`create_linked`, New shape) put extra ops between `begin()` and `start_editing`. Copies get `next_ids(n)` before anything is measured (the layout cache keys on ID).
-- Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap, which is what ends cascades. Moves, drags and pastes never push.
+- Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that can make a shape taller or wider takes `rect_of(id)` before and calls `make_room(id, old)` after. A pushed block keeps shapes it was already closer than the gap to at that distance; only the change itself pushes to the full gap. Moves, drags and pastes never push.
 - A gesture that changes structure calls `stop_editing` first.
 - Animations are `Visible` fields computed in the core and counted in `animating`; screen-constant overlays are `Frame` fields painted after shapes.
 
 ## Drawing
 - Paint reads only `Session::draw(from, to, now)`: previews, fill, culling, low-zoom switches and each shape's `ring`, `selection`, `marked` and `caret`. Overlays paint with their shape. Paint order: zones (with titles), connectors, shapes; draw-query geometry is canvas units. Cull on position and width before asking for layout.
-- Paint multiplies canvas-unit values by `vp.zoom`; screen-space chrome (the zoom pill) is unscaled. The screen position of canvas (0,0) is rounded to whole pixels.
+- Paint multiplies canvas-unit values by `vp.zoom`. The screen position of canvas (0,0) is rounded to whole pixels.
 
 ## Tests
 - Drive the core's public API. Core tests use `tests/common::Fake` (space 4, CJK 15, other 10, bold 11) with `session_of` / `doc_with`, and compute screen points with `s.viewport().to_screen(..)`.
 - Property tests use the built-in fixed-seed xorshift and print the case number in each assertion.
 - Large inputs come from generators: `willow_core::generate(n, seed)` (`--generate` uses seed 1).
-- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv` (`git_rev` = Willow's short HEAD). gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`. gpui keeps the `profiler` feature. Bench rows go in their own commit after the code they measure.
