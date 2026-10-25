@@ -19,17 +19,13 @@ pub struct Loaded {
     pub unplaced: Unplaced,
 }
 
-/// Shapes and zones (indices into the loaded document) still to be placed, and chain colors
-/// still to be settled.
+/// Shapes and zones (indices into the loaded document) still to be placed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Unplaced {
     /// Each shape, and the shape it goes beside and on which side of it; `None` goes below
     /// the lowest shape.
     shapes: Vec<(usize, Option<(usize, Side)>)>,
     zones: Vec<usize>,
-    /// Every stated color in chains that state conflicting ones; story order, which picks the
-    /// winner, needs heights.
-    colors: Vec<(usize, Color)>,
 }
 
 /// Why a file can't open. `Display` is the reason an alert names.
@@ -57,8 +53,8 @@ impl std::error::Error for LoadError {}
 /// Shapes stack in the order their lines appear. Links resolve after the whole file, so they
 /// may point forward. Lines it can't read are dropped; a line reusing a taken ID is dropped;
 /// a zone inside a nested zone is flattened into it; links to missing shapes or closing a
-/// cycle are dropped; a chain stating two colors takes the first in the file, and the first in
-/// story order once `place` runs; shapes and zones without layout are listed in `unplaced`.
+/// cycle are dropped; a chain stating two colors takes the first in the file (where the writer
+/// puts it); shapes and zones without layout are listed in `unplaced`.
 /// All of these count as repairs.
 pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| LoadError::NotUtf8)?;
@@ -67,10 +63,16 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     let version = (lines.next())
         .and_then(|l| l.trim_end().strip_prefix("willow "))
         .ok_or(LoadError::NotWillow)?;
-    match version.parse::<u32>() {
-        Ok(1) => {}
-        Ok(n) if n > 1 => return Err(LoadError::Newer),
-        _ => return Err(LoadError::NotWillow),
+    if version != "1" {
+        // Any other version written as Willow writes numbers (`2`, `1.1`, `2.0`) is newer.
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let (major, minor) = version.split_once('.').unwrap_or((version, "0"));
+        let newer = digits(major) && digits(minor) && !major.starts_with('0');
+        return Err(if newer {
+            LoadError::Newer
+        } else {
+            LoadError::NotWillow
+        });
     }
     let mut doc = Document::default();
     let (mut layout, mut repaired) = (HashMap::new(), false);
@@ -84,7 +86,8 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
         if let Some(rest) = line.strip_prefix("@layout ") {
             match parse_layout(rest) {
                 Some((id, l, whole)) => {
-                    repaired |= !whole;
+                    let (l, fine) = l.clamped();
+                    repaired |= !whole || !fine;
                     match layout.entry(id) {
                         Entry::Vacant(e) => _ = e.insert(l),
                         Entry::Occupied(_) => repaired = true,
@@ -127,11 +130,15 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
                 doc.zones[z].members.push(s.id.clone());
             }
             doc.shapes.push(s);
-            let tail = parse_tail(rest);
-            repaired |= tail.is_none();
-            stated.push(tail.unwrap_or_default());
+            let (to, color, whole) = parse_tail(rest);
+            repaired |= !whole;
+            stated.push((to, color));
         } else {
             repaired = true;
+            // An unreadable line opening a block still takes the `}` closing it.
+            if line.ends_with('{') {
+                open.push(None);
+            }
         }
     }
     repaired |= !open.is_empty();
@@ -150,8 +157,7 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
         }
     }
     repaired |= !layout.is_empty();
-    let (dropped, anchor, colors) = resolve(&mut doc, &stated);
-    unplaced.colors = colors;
+    let (dropped, anchor) = resolve(&mut doc, &stated);
     // A shape goes beside the shape it names, or else beside a placed one naming it.
     let mut named_by = vec![None; doc.shapes.len()];
     for (k, a) in anchor.iter().enumerate() {
@@ -174,8 +180,7 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     })
 }
 
-/// Places what `unplaced` lists, then paints each chain that stated conflicting colors the
-/// first one in story order. `height` measures a shape.
+/// Places what `unplaced` lists. `height` measures a shape.
 pub(crate) fn place(
     doc: &mut Document,
     unplaced: &Unplaced,
@@ -183,46 +188,6 @@ pub(crate) fn place(
     height: impl Fn(&Shape) -> f32,
 ) {
     position(doc, unplaced, theme, &height);
-    recolor(doc, &unplaced.colors, &height);
-}
-
-/// Paints the chain of each shape in `stated` the color stated first in story order.
-fn recolor(doc: &mut Document, stated: &[(usize, Color)], height: &impl Fn(&Shape) -> f32) {
-    if stated.is_empty() {
-        return;
-    }
-    let colors: HashMap<usize, Color> = stated.iter().copied().collect();
-    let (shapes, next) = (&doc.shapes, neighbors(doc));
-    let center = |i: usize| shapes[i].center(height(&shapes[i]));
-    let n = shapes.len();
-    let (mut seen, mut chain, mut from) = (vec![false; n], vec![usize::MAX; n], vec![None; n]);
-    let mut paint = Vec::new();
-    for &(start, _) in stated {
-        if seen[start] {
-            continue;
-        }
-        // The chain's topmost shape starts the walk.
-        let (mut stack, mut top) = (vec![start], start);
-        seen[start] = true;
-        while let Some(i) = stack.pop() {
-            if key(&shapes[i]) < key(&shapes[top]) {
-                top = i;
-            }
-            for &j in &next[i] {
-                if !std::mem::replace(&mut seen[j], true) {
-                    stack.push(j);
-                }
-            }
-        }
-        let walk = walk(top, 0, &next, shapes, &center, &mut chain, &mut from);
-        let color = walk.iter().find_map(|i| colors.get(i).copied());
-        paint.push((walk, color.unwrap_or_default()));
-    }
-    for (walk, color) in paint {
-        for i in walk {
-            doc.shapes[i].color = color;
-        }
-    }
 }
 
 /// A shape goes one creation gap from its anchor on its side, or below the lowest shape (the
@@ -326,14 +291,14 @@ fn position(
 }
 
 /// Links each shape to the one it names and paints every chain the first color one of its
-/// shapes states in the file. Whether anything had to be dropped, for each shape the shape
-/// its kept link names and the side of it the shape sits on, and every color stated in a
-/// chain stating conflicting ones (for `place` to settle in story order).
+/// shapes states in the file. Whether anything had to be dropped or a chain stated two
+/// colors, and for each shape the shape its kept link names and the side of it the shape
+/// sits on.
 #[allow(clippy::type_complexity)]
 fn resolve(
     doc: &mut Document,
     stated: &[(Option<(&str, Side)>, Option<Color>)],
-) -> (bool, Vec<Option<(usize, Side)>>, Vec<(usize, Color)>) {
+) -> (bool, Vec<Option<(usize, Side)>>) {
     let index: HashMap<&str, usize> = (doc.shapes.iter().enumerate())
         .map(|(i, s)| (s.id.0.as_str(), i))
         .collect();
@@ -362,25 +327,17 @@ fn resolve(
         let link = Link(doc.shapes[j].id.clone(), doc.shapes[i].id.clone());
         doc.links.push(link);
     }
-    // Each chain's first stated color, and whether it states another.
-    let mut color: Vec<Option<(Color, bool)>> = vec![None; doc.shapes.len()];
+    // Each chain's first stated color; stating another is a repair.
+    let mut color: Vec<Option<Color>> = vec![None; doc.shapes.len()];
     for (i, &(_, c)) in stated.iter().enumerate() {
         let Some(c) = c else { continue };
         let r = find(&mut root, i);
-        match &mut color[r] {
-            None => color[r] = Some((c, false)),
-            Some((first, conflict)) => *conflict |= *first != c,
-        }
+        repaired |= *color[r].get_or_insert(c) != c;
     }
-    let mut conflicts = Vec::new();
-    for (i, (shape, &(_, c))) in doc.shapes.iter_mut().zip(stated).enumerate() {
-        let r = find(&mut root, i);
-        shape.color = color[r].map_or_else(Color::default, |c| c.0);
-        if let (Some((_, true)), Some(c)) = (color[r], c) {
-            conflicts.push((i, c));
-        }
+    for (i, shape) in doc.shapes.iter_mut().enumerate() {
+        shape.color = color[find(&mut root, i)].unwrap_or_default();
     }
-    (repaired || !conflicts.is_empty(), anchor, conflicts)
+    (repaired, anchor)
 }
 
 fn is_id(id: &str) -> bool {
@@ -388,9 +345,29 @@ fn is_id(id: &str) -> bool {
 }
 
 /// A shape's x, y, width and extra height, or a zone's x, y, width and height.
+#[derive(Clone, Copy, PartialEq)]
 enum Place {
     Shape(i32, i32, u32, u32),
     Zone(i32, i32, u32, u32),
+}
+
+/// Loaded coordinates and sizes are clamped to this, so `x + width`, and a copy beside it,
+/// stay well inside `i32`.
+const LIMIT: i32 = 500_000_000;
+
+impl Place {
+    /// Coordinates and sizes clamped to `LIMIT`, a zero shape width made the default; and
+    /// whether nothing changed.
+    fn clamped(self) -> (Place, bool) {
+        let at = |v: i32| v.clamp(-LIMIT, LIMIT);
+        let size = |v: u32| v.min(LIMIT as u32);
+        let fixed = match self {
+            Place::Shape(x, y, 0, h) => Place::Shape(at(x), at(y), DEFAULT_WIDTH, size(h)),
+            Place::Shape(x, y, w, h) => Place::Shape(at(x), at(y), size(w), size(h)),
+            Place::Zone(x, y, w, h) => Place::Zone(at(x), at(y), size(w), size(h)),
+        };
+        (fixed, fixed == self)
+    }
 }
 
 /// `id x,y wW [hH]` for a shape, `id x,y WxH` for a zone. A bare `id x,y` is a shape of the
@@ -420,9 +397,10 @@ fn parse_layout(rest: &str) -> Option<(&str, Place, bool)> {
 }
 
 /// After a shape's text: `[below|above a | right of a|left of a] [color name]`. The ID linked
-/// to with the side of it this shape sits on, and the stated color.
+/// to with the side of it this shape sits on, the stated color, and whether all of it read
+/// (a bad link or color drops only itself).
 #[allow(clippy::type_complexity)]
-fn parse_tail(rest: &str) -> Option<(Option<(&str, Side)>, Option<Color>)> {
+fn parse_tail(rest: &str) -> (Option<(&str, Side)>, Option<Color>, bool) {
     let t: Vec<&str> = rest.split_whitespace().collect();
     let (to, t) = match t.as_slice() {
         ["below", to, t @ ..] => (Some((*to, Side::Bottom)), t),
@@ -431,10 +409,9 @@ fn parse_tail(rest: &str) -> Option<(Option<(&str, Side)>, Option<Color>)> {
         ["left", "of", to, t @ ..] => (Some((*to, Side::Left)), t),
         t => (None, t),
     };
-    if to.is_some_and(|(to, _)| !is_id(to)) {
-        return None;
-    }
-    Some((to, parse_color(t)?))
+    let good = to.filter(|(to, _)| is_id(to));
+    let color = parse_color(t);
+    (good, color.flatten(), good == to && color.is_some())
 }
 
 /// `[]` or `["color", name]`.

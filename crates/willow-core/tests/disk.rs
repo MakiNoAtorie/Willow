@@ -89,3 +89,18 @@ fn unreadable_bytes_keep_this_version_unsaved() {
     assert_eq!(text(&s), "Gates");
     assert!(!s.is_saved());
 }
+
+#[test]
+fn a_reload_with_the_same_document_in_other_bytes_adds_no_undo_step_and_keeps_editing() {
+    let mut s = open(FILE);
+    let a = s.document().shapes[0].id.clone();
+    s.select([a]);
+    s.handle(Input::Enter, Duration::ZERO);
+    assert!(s.editing().is_some());
+    let crlf = b"willow 1\r\n\r\na: \"Gates\"\r\n\r\n@layout a 0,0 w210\r\n";
+    s.disk_changed(Some(crlf));
+    assert!(s.editing().is_some());
+    assert!(!s.can_undo());
+    assert!(s.is_saved());
+    assert_eq!(s.bytes(), crlf);
+}

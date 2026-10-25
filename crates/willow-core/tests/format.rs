@@ -418,3 +418,59 @@ fn a_stray_brace_is_dropped_and_an_unclosed_zone_closes_at_the_end() {
     };
     assert_repaired("repair-braces.willow", &doc);
 }
+
+#[test]
+fn a_malformed_zone_line_keeps_later_siblings_in_the_parent() {
+    let doc = Document {
+        shapes: vec![shape("a", 0, 0, "A"), shape("b", 0, 140, "B")],
+        zones: vec![zone(
+            "p",
+            "P",
+            Color::Neutral,
+            (-40, -40, 300, 300),
+            &["a", "b"],
+        )],
+        ..Document::default()
+    };
+    assert_repaired("repair-bad-zone.willow", &doc);
+}
+
+#[test]
+fn an_unknown_color_on_a_linked_line_keeps_the_link() {
+    let doc = Document {
+        shapes: vec![shape("a", 0, 0, "A"), shape("b", 0, 140, "B")],
+        links: vec![link("a", "b")],
+        ..Document::default()
+    };
+    assert_repaired("repair-bad-color-link.willow", &doc);
+}
+
+#[test]
+fn conflicting_colors_in_a_chain_split_across_blocks_keep_the_first_in_the_file() {
+    // Story order reaches a first, but c's color comes first in the file.
+    let sky = |id, y, text| colored(id, 0, y, text, Color::Sky);
+    let doc = Document {
+        shapes: vec![sky("a", 0, "A"), sky("b", 140, "B"), sky("c", 280, "C")],
+        links: vec![link("a", "b"), link("b", "c")],
+        zones: vec![zone("z", "Z", Color::Neutral, (-40, 240, 300, 150), &["c"])],
+    };
+    let bytes = golden("repair-split-colors.willow");
+    let loaded = load(&bytes).unwrap();
+    assert!(loaded.repaired);
+    let s = willow_core::Session::open(loaded, bytes, &willow_core::PAPER, Box::new(common::Fake));
+    assert_eq!(unordered(s.document()), unordered(&doc));
+    let first = saved(s.document());
+    let again = load(first.as_bytes()).unwrap();
+    assert!(!again.repaired);
+    assert_eq!(saved(&again.document), first);
+}
+
+#[test]
+fn a_higher_version_number_is_newer_and_a_noncanonical_one_is_not_willow() {
+    let err = |v: &str| load(format!("willow {v}\n").as_bytes()).unwrap_err();
+    assert_eq!(err("2.0"), LoadError::Newer);
+    assert_eq!(err("1.1"), LoadError::Newer);
+    assert_eq!(err("01"), LoadError::NotWillow);
+    assert_eq!(err("+1"), LoadError::NotWillow);
+    assert_eq!(err("0"), LoadError::NotWillow);
+}

@@ -2,7 +2,7 @@
 //! one-line shape is 48.5 tall; Paper's creation gap is 48 and its zone padding 40.
 mod common;
 
-use willow_core::{Color, PAPER, Session, load};
+use willow_core::{PAPER, Session, load};
 
 fn open(text: &str) -> Session {
     let loaded = load(text.as_bytes()).unwrap();
@@ -110,21 +110,21 @@ fn an_unlinked_shape_goes_below_the_lowest_bottom_edge_not_the_lowest_top() {
 }
 
 #[test]
-fn conflicting_chain_colors_resolve_to_the_first_in_story_order() {
-    // Story order walks a, b, c (below first), then d: c is the first to state a color,
-    // though d comes first in the file and is the topmost to state one.
-    let s = open(
+fn a_zero_width_or_a_far_out_layout_is_clamped_as_a_repair_and_duplicates_without_overflow() {
+    let mut s = open(
         "willow 1\n\n\
-         d: \"D\" right of a color rose\n\
-         a: \"A\"\n\
-         b: \"B\" below a\n\
-         c: \"C\" below b color sky\n\n\
-         @layout a 0,0 w210\n\
-         @layout b 0,140 w210\n\
-         @layout c 0,280 w210\n\
-         @layout d 300,0 w210\n",
+         a: \"A\"\n\n\
+         @layout a 2147483600,0 w0\n",
     );
     assert!(!s.is_saved());
-    let colors: Vec<_> = s.document().shapes.iter().map(|s| s.color).collect();
-    assert_eq!(colors, [Color::Sky; 4]);
+    let (x, _, w) = at(&s, "a");
+    assert!(w > 0 && x.checked_add(w as i32).is_some(), "{x} {w}");
+    let a = s.document().shapes[0].id.clone();
+    s.select([a]);
+    s.handle(willow_core::Input::Duplicate, std::time::Duration::ZERO);
+    assert_eq!(s.document().shapes.len(), 2);
+    let (x, _, w) = (s.document().shapes.iter().map(|s| (s.x, s.y, s.width)))
+        .max()
+        .unwrap();
+    assert!(x.checked_add(w as i32).is_some(), "{x} {w}");
 }

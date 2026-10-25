@@ -1,0 +1,7 @@
+willow 1
+
+a: "A"
+b: "B" below a color skyy
+
+@layout a 0,0 w210
+@layout b 0,140 w210
