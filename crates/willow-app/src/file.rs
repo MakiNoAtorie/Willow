@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use gpui::{AnyWindowHandle, App, AsyncApp, Context, PromptLevel, Task, Window, WindowHandle};
 use willow_core::{Document, load};
@@ -103,11 +104,18 @@ impl Willow {
         let pick = panel.save_file();
         cx.spawn_in(window, async move |this, cx| {
             let Some(file) = pick.await else { return false };
-            let mut path = file.path().to_path_buf();
-            if path.extension().is_none() {
-                path.set_extension("willow");
-            }
+            let picked = file.path();
             this.update_in(cx, |w, window, cx| {
+                let Some(path) = save_as_path(picked) else {
+                    let path = picked.with_extension("willow");
+                    let message = format!("“{}” could not be saved.", name(Some(&path)));
+                    let detail = format!(
+                        "A file named “{}” already exists. Choose another name.",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                    alert(window, &message, &detail, cx);
+                    return false;
+                };
                 // Two windows on one file would overwrite each other.
                 let canon = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
                 if showing(&canon, Some(window.window_handle()), cx).is_some() {
@@ -138,6 +146,16 @@ impl Willow {
             }
         }
     }
+}
+
+/// The file Save As writes for the panel's `picked` path: `.willow` is added when it has no
+/// extension. None when that names an existing file, which the panel never asked to replace.
+fn save_as_path(picked: &Path) -> Option<PathBuf> {
+    if picked.extension().is_some() {
+        return Some(picked.into());
+    }
+    let path = picked.with_extension("willow");
+    (!path.exists()).then_some(path)
 }
 
 /// Writes a temporary file beside `path` and renames it over `path`, so a crash mid-save
@@ -215,29 +233,51 @@ pub(crate) async fn settle(w: WindowHandle<Willow>, cx: &mut AsyncApp) -> bool {
     }
 }
 
-/// Settles `w` and, unless cancelled, deletes its recovery file and closes it.
-pub(crate) async fn close(w: WindowHandle<Willow>, cx: &mut AsyncApp) {
-    if !settle(w, cx).await {
-        return;
-    }
-    // Closing the last window quits, so the deletion finishes first.
-    if let Ok(gone) = w.update(cx, |w, _, cx| w.discard_recovery(cx)) {
-        gone.await;
-    }
-    w.update(cx, |_, window, _| window.remove_window()).ok();
+/// Set while `quit` settles windows; `close` and a second `quit` are ignored meanwhile.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// Settles `w` and, unless cancelled, deletes its recovery file and closes it. Ignored while
+/// `w` is already closing or a quit is running, so no window is asked twice. The checks run
+/// in the task: callers may be inside an update of `w`, where `w.update` fails.
+pub(crate) fn close(w: WindowHandle<Willow>, cx: &mut App) {
+    cx.spawn(async move |cx| {
+        let start = w.update(cx, |w, _, _| {
+            !QUITTING.load(Relaxed) && !std::mem::replace(&mut w.settling, true)
+        });
+        if !start.unwrap_or(false) {
+            return;
+        }
+        if !settle(w, cx).await {
+            w.update(cx, |w, _, _| w.settling = false).ok();
+            return;
+        }
+        // Closing the last window quits, so the deletion finishes first.
+        if let Ok(gone) = w.update(cx, |w, _, cx| w.discard_recovery(cx)) {
+            gone.await;
+        }
+        w.update(cx, |_, window, _| window.remove_window()).ok();
+    })
+    .detach();
 }
 
 /// Quits after settling each window in turn; Cancel anywhere leaves every window open with
-/// its recovery file. Recovery files are deleted only once the quit goes ahead.
+/// its recovery file. Recovery files are deleted only once the quit goes ahead. Ignored while
+/// a quit is running or a window is closing.
 pub(crate) fn quit(cx: &mut App) {
-    let windows: Vec<_> = cx
-        .windows()
-        .into_iter()
-        .filter_map(|w| w.downcast::<Willow>())
-        .collect();
     cx.spawn(async move |cx| {
+        let (windows, closing) = cx.update(|cx| {
+            let windows: Vec<_> = (cx.windows().into_iter())
+                .filter_map(|w| w.downcast::<Willow>())
+                .collect();
+            let closing = (windows.iter()).any(|w| w.read(cx).is_ok_and(|w| w.settling));
+            (windows, closing)
+        });
+        if closing || QUITTING.swap(true, Relaxed) {
+            return;
+        }
         for &w in &windows {
             if !settle(w, cx).await {
+                QUITTING.store(false, Relaxed);
                 return;
             }
         }
@@ -249,4 +289,26 @@ pub(crate) fn quit(cx: &mut App) {
         cx.update(|cx| cx.quit());
     })
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_as_adds_the_extension_only_onto_a_free_name() {
+        let dir = std::env::temp_dir().join(format!("willow-save-as-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("taken.willow"), b"").unwrap();
+        let picked = |n: &str| save_as_path(&dir.join(n));
+        assert_eq!(picked("story"), Some(dir.join("story.willow")));
+        assert_eq!(
+            picked("taken"),
+            None,
+            "the panel never asked to replace taken.willow"
+        );
+        assert_eq!(picked("taken.willow"), Some(dir.join("taken.willow")));
+        assert_eq!(picked("notes.txt"), Some(dir.join("notes.txt")));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
