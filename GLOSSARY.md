@@ -88,6 +88,10 @@ _Avoid_: Group, frame, section, container
 **Member**:
 A shape or nested zone that belongs to a zone.
 
+**Title band**:
+The strip along a zone's top edge, where the title sits; the part of a zone the mouse grabs. The rest of a zone acts like empty canvas.
+_Avoid_: Header, handle
+
 ### Look
 
 **Theme**:
