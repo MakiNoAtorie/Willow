@@ -15,7 +15,7 @@ Put `OUT.png` in the scratchpad, then Read it. The app's stderr lands in `OUT.lo
 Steps, run in order 0.3 s apart:
 - A key: `enter`, `esc`, `tab`, `delete`, `left`/`right`/`up`/`down`, or one character, with `cmd+`, `ctrl+`, `shift+` or `alt+` prefixes (`cmd+shift+down`).
 - `type:TEXT` types text. `sleep:S` waits.
-- `click:X,Y` and `rclick:X,Y` click at window-relative points. The script prints the window size, and `--generate 5` centers its first shape near `590,370`.
+- `click:X,Y`, `rclick:X,Y` and `dclick:X,Y` (double) click at window-relative points. `move:X,Y` hovers; `down:X,Y`, `drag:X,Y` (ten moves from the cursor) and `up:X,Y` drag. End on `drag:` without `up:` to screenshot mid-drag. The screenshot includes the cursor. The script prints the window size, and `--generate 5` centers its first shape near `590,370`.
 
 The script takes over the user's keyboard and mouse focus for a few seconds. So run it only from the main session, one run at a time, and say so before the first run in a session. Screenshot the window only (the script's `-R` region), never the full screen: the rest of the desktop is the user's.
 

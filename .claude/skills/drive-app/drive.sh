@@ -24,9 +24,9 @@ for step in "$@"; do
   case $step in
     sleep:*) sleep "${step#sleep:}" ;;
     type:*) osa "keystroke \"${step#type:}\"" ;;
-    click:*|rclick:*)
+    click:*|rclick:*|dclick:*|move:*|down:*|drag:*|up:*)
       xy=${step#*:}; x=$((wx + ${xy%,*})); y=$((wy + ${xy#*,}))
-      [ "${step%%:*}" = rclick ] && b=right || b=left
+      case ${step%%:*} in click) b=left ;; rclick) b=right ;; dclick) b=double ;; *) b=${step%%:*} ;; esac
       "$cache/click" "$b" "$x" "$y" ;;
     *)
       # key: [cmd+][ctrl+][shift+][alt+]NAME, NAME a key below or one character.
@@ -52,6 +52,6 @@ for step in "$@"; do
   sleep 0.3
 done
 sleep 0.5
-screencapture -x -R"$wx,$wy,$ww,$wh" "$out"
+screencapture -x -C -R"$wx,$wy,$ww,$wh" "$out"
 sips -Z 1200 "$out" >/dev/null
 echo "$out (window at $wx,$wy ${ww}x$wh points)"
