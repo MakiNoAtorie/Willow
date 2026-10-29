@@ -34,10 +34,8 @@ enum Op {
     /// Take out the zone at this index.
     RemoveZone(usize),
     /// Swap with the zone of this ID.
-    #[allow(dead_code)]
     SetZone(Zone),
     /// Put the zones in this ID order.
-    #[allow(dead_code)]
     Order(Vec<ShapeId>),
 }
 
@@ -355,7 +353,6 @@ impl History {
 }
 
 // The zone steps. Their callers arrive with the zone commands (#71, #72 and on).
-#[allow(dead_code)]
 impl History {
     /// Adds `zone` as one step, its ID new. Its members leave the zones that held them; the
     /// caller joins it to a parent with `join_zone`. It draws on top, below any zone it holds.
@@ -371,6 +368,7 @@ impl History {
 
     /// Removes zone `id` as one step: its parent stops listing it, its nested zones become
     /// top-level and its shapes loose. Nothing else changes.
+    #[allow(dead_code)]
     pub fn remove_zone(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Zone> {
         let i = doc.zones.iter().position(|z| &z.id == id)?;
         let zone = doc.zones[i].clone();

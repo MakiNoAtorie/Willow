@@ -647,7 +647,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     };
     for v in &frame.zones {
         window.paint_quad(quad(
-            zone_bounds(v.zone),
+            zone_bounds(&v.zone),
             px(zt.radius * z),
             color(v.fill),
             px(zt.edge_width * z),
@@ -659,7 +659,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     let ringed = (frame.zones.iter()).find(|v| Some(&v.zone.id) == frame.zone_ring);
     if let Some(v) = ringed {
         window.paint_quad(quad(
-            zone_bounds(v.zone),
+            zone_bounds(&v.zone),
             px(zt.radius * z),
             gpui::transparent_black(),
             px(zt.ring * z),

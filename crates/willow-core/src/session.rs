@@ -1,6 +1,7 @@
 //! The editor session: one per window. Owns the document and the viewport, takes plain input
 //! events with the time passed in, and tells the app whether to redraw and which cursor to show.
 
+mod band;
 mod beside;
 mod clipboard;
 mod color_picker;
@@ -126,6 +127,13 @@ enum Gesture {
     },
     /// Shift+drag from empty canvas: the marquee's press and current corner, canvas units.
     Marquee { from: Point, to: Point },
+    /// Left press on the title band of the zone at `index`. Once dragged, `to` is the
+    /// previewed top-left; release then moves the zone there.
+    Band {
+        index: usize,
+        from: Point,
+        to: Option<(i32, i32)>,
+    },
 }
 
 /// What a resize sets: a shape's x, width and extra height, in canvas units.
@@ -193,6 +201,8 @@ pub struct Session {
     over_text: bool,
     /// The pointer is over a shape's edge.
     over_edge: Option<Edge>,
+    /// The zone whose title band the pointer is over.
+    over_band: Option<ShapeId>,
     rings: HashMap<ShapeId, Ring>,
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
@@ -254,6 +264,7 @@ impl Session {
             menu: None,
             over_text: false,
             over_edge: None,
+            over_band: None,
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
@@ -709,12 +720,24 @@ impl Session {
                         return self.respond(true);
                     }
                     self.stop_editing();
-                    if hit.is_none() {
+                    if hit.is_none() && self.band_at(pos).is_none() {
                         return self.respond(true);
                     }
                 }
+                let band = (hit.is_none() && !self.space_held && button == Button::Left)
+                    .then(|| self.band_at(pos))
+                    .flatten();
                 let gesture = match (button, hit) {
                     _ if self.gesture.is_some() => None,
+                    // Zones are never selected: a band press clears the selection.
+                    (Button::Left, None) if let Some(index) = band => {
+                        self.select([]);
+                        Some(Gesture::Band {
+                            index,
+                            from: pos,
+                            to: None,
+                        })
+                    }
                     (Button::Left, Some(index)) if !self.space_held => Some(Gesture::Press {
                         index,
                         from: pos,
@@ -727,11 +750,11 @@ impl Session {
                     }),
                     (Button::Right, _) => None,
                 };
-                let pans = matches!(gesture, Some(Gesture::Pan { .. }));
+                let redraw = matches!(gesture, Some(Gesture::Pan { .. } | Gesture::Band { .. }));
                 if gesture.is_some() {
                     self.gesture = gesture;
                 }
-                self.respond(pans)
+                self.respond(redraw)
             }
             Input::PointerMove { pos, .. }
                 if matches!(self.gesture, Some(Gesture::Resize { .. })) =>
@@ -767,6 +790,18 @@ impl Session {
                     ));
                     self.respond(true)
                 }
+                Some(Gesture::Band { index, from, to }) => {
+                    let d = pos - *from;
+                    if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+                        return self.respond(false);
+                    }
+                    let (zone, z) = (&self.doc.zones[*index], self.viewport.zoom);
+                    *to = Some((
+                        (zone.x as f32 + d.x / z).round() as i32,
+                        (zone.y as f32 + d.y / z).round() as i32,
+                    ));
+                    self.respond(true)
+                }
                 Some(Gesture::Text) => {
                     let caret = self.caret_at(pos);
                     self.extend_to(caret, None);
@@ -788,6 +823,12 @@ impl Session {
                     let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
                     let edge = edge.map(|e| e.1);
                     let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
+                    let band = (edge.is_none() && self.midpoint_at(pos).is_none())
+                        .then(|| self.band_at(pos))
+                        .flatten()
+                        .map(|i| self.doc.zones[i].id.clone());
+                    let edge_changed = edge_changed || band != self.over_band;
+                    self.over_band = band;
                     let over = self.editing.as_ref().is_some_and(|e| {
                         (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
                     });
@@ -836,6 +877,14 @@ impl Session {
                         }
                     }
                     Some(Gesture::Text) if button == Button::Left => self.gesture = None,
+                    Some(Gesture::Band { index, to, .. }) if button == Button::Left => {
+                        self.gesture = None;
+                        if let Some((x, y)) = to {
+                            let z = &self.doc.zones[index];
+                            let (dx, dy) = (x - z.x, y - z.y);
+                            self.drop_zone_by(index, dx, dy);
+                        }
+                    }
                     Some(Gesture::Midpoint {
                         index,
                         side,

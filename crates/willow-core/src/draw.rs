@@ -20,7 +20,7 @@ pub struct Frame<'a> {
     pub zones: Vec<VisibleZone<'a>>,
     /// The zone whose edge shows the hover ring (`Theme.zone.ring` wide, `Theme.accent`,
     /// following its corner radius; paint it after every zone fill): the zone a drag in
-    /// progress would make the pressed shape join.
+    /// progress would make the pressed shape join, or the hovered title band's zone.
     pub zone_ring: Option<&'a ShapeId>,
     /// Connectors of links that may cross the rectangle, in canvas units.
     pub connectors: Vec<Connector>,
@@ -77,7 +77,8 @@ pub struct Connector {
 }
 
 pub struct VisibleZone<'a> {
-    pub zone: &'a Zone,
+    /// The zone as a drag in progress previews it.
+    pub zone: Cow<'a, Zone>,
     /// Inside another zone: a deeper fill.
     pub nested: bool,
     pub fill: Rgba,
@@ -126,8 +127,15 @@ impl Session {
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let edited = self.editing().filter(|_| fade > 0.0);
-        let group = self.group_drag();
-        let moved: HashSet<&ShapeId> = group.iter().flat_map(|_| self.selection()).collect();
+        // A multi-selection or a zone being dragged: how far, and what moves.
+        let group = (self
+            .group_drag()
+            .map(|d| (d, self.selection().iter().collect())))
+        .or_else(|| self.zone_drag());
+        let (group, moved): (_, HashSet<&ShapeId>) = match group {
+            Some((d, moved)) => (Some(d), moved),
+            None => (None, HashSet::new()),
+        };
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and top-left.
         let placed = |s: &'a Shape| {
@@ -217,6 +225,14 @@ impl Session {
             w * title_size / t.font_size
         };
         let zones = (doc.zones.iter())
+            .map(|z| match group {
+                Some((dx, dy)) if moved.contains(&z.id) => Cow::Owned(Zone {
+                    x: z.x + dx,
+                    y: z.y + dy,
+                    ..z.clone()
+                }),
+                _ => Cow::Borrowed(z),
+            })
             .filter(|z| {
                 let (x, y) = (z.x as f32, z.y as f32);
                 x <= b.x && x + z.width as f32 >= a.x && y <= b.y && y + z.height as f32 >= a.y
@@ -229,7 +245,6 @@ impl Session {
                     zt.fill_mix
                 };
                 VisibleZone {
-                    zone,
                     nested,
                     fill: mix(t.canvas, pastel, fill),
                     edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
@@ -240,6 +255,7 @@ impl Session {
                     title_size,
                     show_title: title_width(&zone.title) + 2.0 * zt.title_x * k
                         <= zone.width as f32,
+                    zone,
                 }
             })
             .collect();
@@ -285,7 +301,7 @@ impl Session {
         let full = vp.zoom >= z.fade_end;
         Frame {
             zones,
-            zone_ring: self.drop_zone(),
+            zone_ring: self.drop_zone().or(self.band_ring()),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
             shapes,

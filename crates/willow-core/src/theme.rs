@@ -71,6 +71,8 @@ pub struct ZoneStyle {
     pub title_min_screen: f32,
     pub title_x: f32,
     pub title_y: f32,
+    /// The title band's height: screen px when zoomed out, scaled with the title zoomed in.
+    pub band: f32,
     /// Room around the members of a zone the loader wraps (clears the title).
     pub padding: f32,
 }
@@ -439,6 +441,7 @@ pub const PAPER: Theme = Theme {
         title_min_screen: 12.0,
         title_x: 16.0,
         title_y: 12.0,
+        band: 40.0,
         padding: 40.0,
     },
     selection: SelectionStyle {
