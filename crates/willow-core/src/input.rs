@@ -198,6 +198,10 @@ pub enum Cursor {
     ResizeEw,
     /// Over the bottom edge, or resizing from it.
     ResizeNs,
+    /// Over a zone's top-left or bottom-right corner, or resizing from it.
+    ResizeNwse,
+    /// Over a zone's top-right or bottom-left corner, or resizing from it.
+    ResizeNesw,
 }
 
 /// What the app does after an event.

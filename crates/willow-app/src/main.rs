@@ -544,6 +544,8 @@ impl Render for Willow {
                 Cursor::Text => CursorStyle::IBeam,
                 Cursor::ResizeEw => CursorStyle::ResizeLeftRight,
                 Cursor::ResizeNs => CursorStyle::ResizeUpDown,
+                Cursor::ResizeNwse => CursorStyle::ResizeUpLeftDownRight,
+                Cursor::ResizeNesw => CursorStyle::ResizeUpRightDownLeft,
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))

@@ -224,9 +224,11 @@ impl Session {
             let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
             w * title_size / t.font_size
         };
+        let zone_resized = self.zone_resize_preview();
         let zones = (doc.zones.iter())
-            .map(|z| match group {
-                Some((dx, dy)) if moved.contains(&z.id) => Cow::Owned(Zone {
+            .map(|z| match (&zone_resized, group) {
+                (Some(r), _) if r.id == z.id => Cow::Owned(r.clone()),
+                (_, Some((dx, dy))) if moved.contains(&z.id) => Cow::Owned(Zone {
                     x: z.x + dx,
                     y: z.y + dy,
                     ..z.clone()

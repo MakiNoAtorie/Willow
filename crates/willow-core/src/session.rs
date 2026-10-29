@@ -11,6 +11,7 @@ mod editing;
 mod file;
 mod keypan;
 mod menu;
+mod zone_resize;
 use menu::Ripple;
 mod link;
 mod midpoints;
@@ -134,6 +135,14 @@ enum Gesture {
         from: Point,
         to: Option<(i32, i32)>,
     },
+    /// Left press on an edge or corner of the zone at `index`. Once dragged, `to` is the
+    /// previewed rectangle; release then resizes the zone to it.
+    ZoneResize {
+        index: usize,
+        grab: zone_resize::Grab,
+        from: Point,
+        to: Option<zone_resize::Rect>,
+    },
 }
 
 /// What a resize sets: a shape's x, width and extra height, in canvas units.
@@ -203,6 +212,8 @@ pub struct Session {
     over_edge: Option<Edge>,
     /// The zone whose title band the pointer is over.
     over_band: Option<ShapeId>,
+    /// The zone edge or corner the pointer is over.
+    over_zone_edge: Option<zone_resize::Grab>,
     rings: HashMap<ShapeId, Ring>,
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
@@ -265,6 +276,7 @@ impl Session {
             over_text: false,
             over_edge: None,
             over_band: None,
+            over_zone_edge: None,
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
@@ -695,6 +707,17 @@ impl Session {
                         });
                         return self.respond(true);
                     }
+                    if let Some((index, grab)) = self.zone_edge_at(pos) {
+                        self.stop_editing();
+                        self.select([]);
+                        self.gesture = Some(Gesture::ZoneResize {
+                            index,
+                            grab,
+                            from: pos,
+                            to: None,
+                        });
+                        return self.respond(true);
+                    }
                     if hit.is_none() && mods.shift {
                         self.stop_editing();
                         self.start_marquee(pos);
@@ -763,6 +786,12 @@ impl Session {
                 self.respond(true)
             }
             Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::ZoneResize { .. })) =>
+            {
+                self.zone_resize_to(pos);
+                self.respond(true)
+            }
+            Input::PointerMove { pos, .. }
                 if matches!(self.gesture, Some(Gesture::Marquee { .. })) =>
             {
                 self.marquee_to(pos);
@@ -807,7 +836,7 @@ impl Session {
                     self.extend_to(caret, None);
                     self.respond(true)
                 }
-                Some(Gesture::Resize { .. }) => self.respond(false),
+                Some(Gesture::Resize { .. } | Gesture::ZoneResize { .. }) => self.respond(false),
                 Some(Gesture::Midpoint { from, dragged, .. }) => {
                     let d = pos - *from;
                     *dragged |= d.x.hypot(d.y) >= DRAG_START;
@@ -823,10 +852,18 @@ impl Session {
                     let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
                     let edge = edge.map(|e| e.1);
                     let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
-                    let band = (edge.is_none() && self.midpoint_at(pos).is_none())
-                        .then(|| self.band_at(pos))
+                    let zone_edge = (edge.is_none() && self.midpoint_at(pos).is_none())
+                        .then(|| self.zone_edge_at(pos).map(|e| e.1))
                         .flatten()
-                        .map(|i| self.doc.zones[i].id.clone());
+                        .filter(|_| !self.space_held);
+                    let zone_edge_changed =
+                        zone_edge != std::mem::replace(&mut self.over_zone_edge, zone_edge);
+                    let edge_changed = edge_changed || zone_edge_changed;
+                    let band =
+                        (edge.is_none() && zone_edge.is_none() && self.midpoint_at(pos).is_none())
+                            .then(|| self.band_at(pos))
+                            .flatten()
+                            .map(|i| self.doc.zones[i].id.clone());
                     let edge_changed = edge_changed || band != self.over_band;
                     self.over_band = band;
                     let over = self.editing.as_ref().is_some_and(|e| {
@@ -900,6 +937,12 @@ impl Session {
                         }
                     }
                     Some(Gesture::Marquee { .. }) if button == Button::Left => self.gesture = None,
+                    Some(Gesture::ZoneResize { index, to, .. }) if button == Button::Left => {
+                        self.gesture = None;
+                        if let Some(r) = to {
+                            self.resize_zone(index, r);
+                        }
+                    }
                     Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
                         self.gesture = None;
                         if let Some(r) = to {
@@ -1181,10 +1224,12 @@ impl Session {
             cursor: match self.gesture {
                 Some(Gesture::Pan { .. }) => Cursor::Grabbing,
                 Some(Gesture::Resize { edge, .. }) => edge_cursor(edge),
+                Some(Gesture::ZoneResize { grab, .. }) => grab.cursor(),
                 _ if self.space_held => Cursor::Grab,
                 Some(Gesture::Text) => Cursor::Text,
                 _ if self.over_text => Cursor::Text,
                 _ if let Some(e) = self.over_edge => edge_cursor(e),
+                _ if let Some(g) = self.over_zone_edge => g.cursor(),
                 _ => Cursor::Arrow,
             },
             animating: self.animating(self.now),
