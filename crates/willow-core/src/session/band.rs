@@ -9,7 +9,7 @@ use crate::{Document, Point, ShapeId, Zone};
 impl Session {
     /// Index of the zone whose title band is under screen point `p`: the band of the zone
     /// drawn on top there, unless a shape covers it. The one zone hit-test.
-    pub(super) fn band_at(&self, p: Point) -> Option<usize> {
+    pub fn band_at(&self, p: Point) -> Option<usize> {
         if self.shape_at(p).is_some() {
             return None;
         }

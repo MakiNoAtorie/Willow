@@ -371,16 +371,31 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     let zoom = (size.x * 0.8 / zone.width as f32)
         .min(size.y * 0.8 / zone.height as f32)
         .clamp(0.1, 1.0);
-    // The zone's top-left corner at screen (60, 80); the press just inside its band.
+    // The zone's top-left corner at screen (60, 80). Press in the middle of its band, at the
+    // first point along it where the session says the zone's band is under the pointer (a member
+    // shape or a nested zone can cover the rest); no such point fails the bench.
     let corner = Point { x: 60.0, y: 80.0 };
     let origin = Point {
         x: zone.x as f32 - corner.x / zoom,
         y: zone.y as f32 - corner.y / zoom,
     };
-    let grab = Point {
-        x: corner.x + 40.0,
-        y: corner.y + 15.0,
-    };
+    let grab = this
+        .update(cx, |w, _| {
+            let s = &mut w.session;
+            s.set_viewport(Viewport { origin, zoom, size });
+            let index = s.document().zones.iter().position(|z| z.id == zone.id);
+            let y = corner.y + s.theme().zone.band / 2.0;
+            let width = zone.width as f32 * zoom;
+            (0..)
+                .map(|i| Point {
+                    x: corner.x + 8.0 + 8.0 * i as f32,
+                    y,
+                })
+                .take_while(|p| p.x < corner.x + width)
+                .find(|&p| s.band_at(p) == index)
+        })
+        .unwrap()
+        .expect("bench: no point on the largest zone's title band hits it");
     let button = Button::Left;
     let mut drag = vec![Input::PointerDown {
         pos: grab,

@@ -399,17 +399,27 @@ impl History {
     /// Sets the zones' draw order to `order` (every zone's ID, bottom first), recorded. Parents
     /// still draw first: a nested zone listed before its parent draws right after it.
     pub fn order_zones(&mut self, doc: &mut Document, order: &[ShapeId]) {
-        let parent = |id: &ShapeId| doc.zones.iter().find(|z| z.members.contains(id));
+        // Hashed, not scanned: the generated 10k document has hundreds of zones, thousands of members.
+        let mut parent = std::collections::HashMap::new();
+        for z in &doc.zones {
+            parent.extend(z.members.iter().map(|m| (m, &z.id)));
+        }
+        let at: std::collections::HashMap<_, _> =
+            order.iter().enumerate().map(|(i, id)| (id, i)).collect();
+        // The zones of `order[..i]` by parent.
+        let mut kids: std::collections::HashMap<&ShapeId, Vec<&ShapeId>> = Default::default();
         let mut new = Vec::new();
         for (i, id) in order.iter().enumerate() {
-            if parent(id).is_some_and(|p| order[i..].contains(&p.id)) {
+            let p = parent.get(id).copied();
+            if let Some(p) = p {
+                kids.entry(p).or_default().push(id);
+            }
+            if p.is_some_and(|p| at.get(p).is_some_and(|&j| j >= i)) {
                 continue;
             }
             new.push(id.clone());
-            let children = order[..i]
-                .iter()
-                .filter(|c| parent(c).is_some_and(|p| &p.id == id));
-            new.extend(children.cloned());
+            // `id` itself is not its own child, and was added to its parent's list only.
+            new.extend(kids.get(id).into_iter().flatten().map(|c| (*c).clone()));
         }
         if doc.zones.iter().map(|z| &z.id).eq(new.iter()) {
             return;
