@@ -3,10 +3,15 @@
 //! added or removed, links, chain colors) through `add` / `remove` / `link` / `unlink` /
 //! `recolor`, several changes as one step through `step`, a reload from disk through
 //! `replace`. Viewport and selection never do.
+//!
+//! Zones: `add_zone` / `remove_zone` add and remove one, keeping every ID in at most one
+//! member list and no member list naming a missing zone; `change_zone` changes position, size,
+//! title or color; `join_zone` changes membership; `order_zones` sets the draw order, parents
+//! first. Each is undoable and joins an open group like the shape steps.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Color, Document, Link, Shape, ShapeId};
+use crate::{Color, Document, Link, Shape, ShapeId, Zone};
 
 /// One recorded change, as what takes the document back across it. Applying an op returns
 /// the op that takes it forward again.
@@ -24,6 +29,16 @@ enum Op {
     Unlink(usize),
     /// Swap the member list of the zone with this ID.
     Members(ShapeId, Vec<ShapeId>),
+    /// Put this zone back at this draw-order index.
+    InsertZone(usize, Zone),
+    /// Take out the zone at this index.
+    RemoveZone(usize),
+    /// Swap with the zone of this ID.
+    #[allow(dead_code)]
+    SetZone(Zone),
+    /// Put the zones in this ID order.
+    #[allow(dead_code)]
+    Order(Vec<ShapeId>),
 }
 
 impl Op {
@@ -61,12 +76,34 @@ impl Op {
                 }
                 Op::Members(id, m)
             }
+            Op::InsertZone(i, z) => {
+                doc.zones.insert(i, z);
+                Op::RemoveZone(i)
+            }
+            Op::RemoveZone(i) => Op::InsertZone(i, doc.zones.remove(i)),
+            Op::SetZone(mut z) => {
+                if let Some(d) = doc.zones.iter_mut().find(|d| d.id == z.id) {
+                    std::mem::swap(d, &mut z);
+                }
+                Op::SetZone(z)
+            }
+            Op::Order(order) => {
+                let old = doc.zones.iter().map(|z| z.id.clone()).collect();
+                doc.zones
+                    .sort_by_cached_key(|z| order.iter().position(|id| id == &z.id));
+                Op::Order(old)
+            }
         }
     }
 
-    /// A `Set` the document already matches: it changes nothing.
+    /// A `Set` or `SetZone` the document already matches: it changes nothing. (Members
+    /// change only through `Members` ops, which restore their own.)
     fn is_noop(&self, doc: &Document) -> bool {
-        matches!(self, Op::Set(s) if doc.shapes.contains(s))
+        match self {
+            Op::Set(s) => doc.shapes.contains(s),
+            Op::SetZone(z) => doc.zones.contains(z),
+            _ => false,
+        }
     }
 }
 
@@ -79,7 +116,7 @@ enum Step {
     Document(Box<Document>),
 }
 
-/// A group in progress: its ops, and the shapes it already holds a `Set` for.
+/// A group in progress: its ops, and the shapes and zones it holds a `Set` or `SetZone` for.
 #[derive(Debug, Default)]
 struct Group {
     ops: Vec<Op>,
@@ -165,11 +202,7 @@ impl History {
                 let l = doc.links.remove(j);
                 h.record(Some(Op::Link(j, l)));
             }
-            for z in doc.zones.iter_mut().filter(|z| z.members.contains(id)) {
-                let old = z.members.clone();
-                z.members.retain(|m| m != id);
-                h.record(Some(Op::Members(z.id.clone(), old)));
-            }
+            h.leave_zones(doc, std::slice::from_ref(id));
             let shape = doc.shapes.remove(i);
             h.record(Some(Op::Insert(i, shape)));
         });
@@ -301,6 +334,87 @@ impl History {
             self.begin();
         }
     }
+
+    /// Takes `ids` out of every zone that lists them, recorded.
+    fn leave_zones(&mut self, doc: &mut Document, ids: &[ShapeId]) {
+        for z in doc
+            .zones
+            .iter_mut()
+            .filter(|z| z.members.iter().any(|m| ids.contains(m)))
+        {
+            let old = z.members.clone();
+            z.members.retain(|m| !ids.contains(m));
+            self.record(Some(Op::Members(z.id.clone(), old)));
+        }
+    }
+}
+
+// The zone steps. Their callers arrive with the zone commands (#71, #72 and on).
+#[allow(dead_code)]
+impl History {
+    /// Adds `zone` as one step, its ID new. Its members leave the zones that held them; the
+    /// caller joins it to a parent with `join_zone`. It draws on top, below any zone it holds.
+    pub fn add_zone(&mut self, doc: &mut Document, zone: Zone) {
+        self.step(doc, |h, doc| {
+            h.leave_zones(doc, &zone.members);
+            let i = (doc.zones.iter().position(|z| zone.members.contains(&z.id)))
+                .unwrap_or(doc.zones.len());
+            doc.zones.insert(i, zone);
+            h.record(Some(Op::RemoveZone(i)));
+        });
+    }
+
+    /// Removes zone `id` as one step: its parent stops listing it, its nested zones become
+    /// top-level and its shapes loose. Nothing else changes.
+    pub fn remove_zone(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Zone> {
+        let i = doc.zones.iter().position(|z| &z.id == id)?;
+        let zone = doc.zones[i].clone();
+        self.step(doc, |h, doc| {
+            h.leave_zones(doc, std::slice::from_ref(id));
+            h.record(Some(Op::InsertZone(i, doc.zones.remove(i))));
+        });
+        Some(zone)
+    }
+
+    /// Changes zone `id`'s position, size, title or color through `f`: its own step, or part
+    /// of the open group. Members change only through `join_zone` and the other zone steps.
+    /// A change that leaves the zone as it was adds nothing.
+    pub fn change_zone(&mut self, doc: &mut Document, id: &ShapeId, f: impl FnOnce(&mut Zone)) {
+        let Some(zone) = doc.zones.iter_mut().find(|z| &z.id == id) else {
+            return;
+        };
+        let before = zone.clone();
+        f(zone);
+        debug_assert_eq!(zone.members, before.members, "change_zone changed members");
+        if *zone == before {
+            return;
+        }
+        // Zones share the shapes' ID space, so one set serves both.
+        let first = (self.open.as_mut()).is_none_or(|g| g.set.insert(before.id.clone()));
+        self.record(first.then_some(Op::SetZone(before)));
+    }
+
+    /// Sets the zones' draw order to `order` (every zone's ID, bottom first), recorded. Parents
+    /// still draw first: a nested zone listed before its parent draws right after it.
+    pub fn order_zones(&mut self, doc: &mut Document, order: &[ShapeId]) {
+        let parent = |id: &ShapeId| doc.zones.iter().find(|z| z.members.contains(id));
+        let mut new = Vec::new();
+        for (i, id) in order.iter().enumerate() {
+            if parent(id).is_some_and(|p| order[i..].contains(&p.id)) {
+                continue;
+            }
+            new.push(id.clone());
+            let children = order[..i]
+                .iter()
+                .filter(|c| parent(c).is_some_and(|p| &p.id == id));
+            new.extend(children.cloned());
+        }
+        if doc.zones.iter().map(|z| &z.id).eq(new.iter()) {
+            return;
+        }
+        let undo = Op::Order(new).apply(doc, &mut None);
+        self.record(Some(undo));
+    }
 }
 
 #[cfg(test)]
@@ -407,3 +521,6 @@ mod tests {
         assert_eq!(doc, after);
     }
 }
+
+#[cfg(test)]
+mod zone_tests;
