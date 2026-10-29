@@ -354,8 +354,8 @@ impl Session {
         self.edited().map(|(_, s)| s)
     }
 
-    /// Top of the caret stop at byte `offset` of the edited title, in canvas units; the line
-    /// is `title_line()` tall, the title's em box centered in it as shape text's is.
+    /// Top of the caret stop at byte `offset` of the edited title, in canvas units: the top of
+    /// its line box, `title_line()` tall, the title's em box centered in it as shape text's is.
     fn title_point(&self, offset: usize) -> Option<Point> {
         let e = self.editing.as_ref()?;
         let z = self.doc.zones.iter().find(|z| z.id == e.id)?;
@@ -364,7 +364,7 @@ impl Session {
         let offset = z.title.floor_char_boundary(offset);
         Some(Point {
             x: at.x + self.title_width(&z.title[..offset], size),
-            y: at.y - (self.title_line() - size) / 2.0,
+            y: at.y,
         })
     }
 

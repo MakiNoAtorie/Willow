@@ -65,7 +65,8 @@ pub struct ZoneStyle {
     /// The hover ring on a zone's edge (a hovered band, a drop's target), in `accent`.
     pub ring: f32,
     /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
-    /// never faded. Its top-left sits `title_x`, `title_y` in, constant on screen when zoomed out.
+    /// never faded. Its line box (`line_height` times its size, glyphs centered as in shape
+    /// text) has its top-left `title_x`, `title_y` in, constant on screen when zoomed out.
     pub title_size: f32,
     pub title_weight: f32,
     pub title_min_screen: f32,
@@ -374,6 +375,14 @@ pub struct Theme {
     pub key_pan: KeyPanStyle,
     /// Canvas units one Ctrl/Cmd+Arrow press moves the selection, or resizes a shape, by.
     pub nudge: i32,
+}
+
+impl ZoneStyle {
+    /// Whether titles use the bold face: only Regular and Bold are bundled, and CSS matching
+    /// takes Bold from 600 up. Drawn and measured alike.
+    pub fn title_bold(&self) -> bool {
+        self.title_weight >= 600.0
+    }
 }
 
 impl Theme {

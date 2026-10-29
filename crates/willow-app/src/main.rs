@@ -701,7 +701,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             at(v.title_at),
             &v.zone.title,
             t,
-            zt.title_weight,
+            zt.title_bold(),
             v.title_size * z,
         );
         if let Some((a, c)) = v.marked {

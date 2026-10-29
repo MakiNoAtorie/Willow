@@ -193,22 +193,23 @@ fn title_view(s: &Session) -> TitleView {
 fn the_draw_query_shows_an_edited_title_even_when_it_overflows() {
     let mut s = session("Act");
     rename(&mut s);
-    // A title 13 units tall: the Fake's 10 per letter at 15 is 26 for "Act", 16 in. Its
-    // 19.5-unit line centers the em box, starting 12 - 3.25 down.
+    // A title 13 units tall, measured bold as it is drawn: the Fake's 11 per bold letter at
+    // 15 is 28.6 for "Act", 16 in. Its 19.5-unit line box starts at the title's top, 12 down,
+    // where the app paints it with the glyphs centered as in shape text.
     let (shown, caret, sel, marked) = title_view(&s);
     assert!(shown);
     let c = caret.expect("caret");
-    assert_eq!((c.pos, c.height), (Point { x: 42.0, y: 8.75 }, 19.5));
+    assert_eq!((c.pos, c.height), (Point { x: 44.6, y: 12.0 }, 19.5));
     assert!(sel.is_empty() && marked.is_none());
 
     s.handle(Input::Select(Motion::LineStart), T);
     let (_, _, sel, _) = title_view(&s);
     assert_eq!(
         sel,
-        [(Point { x: 16.0, y: 8.75 }, Point { x: 42.0, y: 28.25 })]
+        [(Point { x: 16.0, y: 12.0 }, Point { x: 44.6, y: 31.5 })]
     );
 
-    // Marked text underlines at the em box's bottom.
+    // Marked text underlines at the em box's bottom, (19.5 + 13) / 2 down the line.
     s.handle(Input::Move(Motion::LineEnd), T);
     let (text, replace, selected) = ("か".into(), None, None);
     s.handle(
@@ -222,7 +223,7 @@ fn the_draw_query_shows_an_edited_title_even_when_it_overflows() {
     let (_, _, _, marked) = title_view(&s);
     assert_eq!(
         marked,
-        Some((Point { x: 42.0, y: 25.0 }, Point { x: 55.0, y: 25.0 }))
+        Some((Point { x: 44.6, y: 28.25 }, Point { x: 57.6, y: 28.25 }))
     );
 
     // 100 letters overflow the 800-wide zone; editing still shows them, committing hides them.

@@ -87,7 +87,9 @@ pub struct VisibleZone<'a> {
     pub fill: Rgba,
     /// The inset edge's color.
     pub edge: Rgba,
-    /// Title text's top-left and size in canvas units: never under the theme's minimum on screen.
+    /// Top-left of the title's line box and the title's size in canvas units: never under the
+    /// theme's minimum on screen. The box is `Theme.line_height` times the size tall; paint the
+    /// glyphs centered in it, in the bold face if `ZoneStyle::title_bold`.
     pub title_at: Point,
     pub title_size: f32,
     /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
@@ -324,7 +326,7 @@ impl Session {
             .max(zt.title_min_screen / self.viewport().zoom)
     }
 
-    /// `zone`'s title text top-left in canvas units, constant on screen zoomed out.
+    /// `zone`'s title line box top-left in canvas units, constant on screen zoomed out.
     pub(crate) fn title_at(&self, zone: &Zone) -> Point {
         let (zt, k) = (&self.theme().zone, 1.0 / self.viewport().zoom.min(1.0));
         Point {
@@ -334,13 +336,14 @@ impl Session {
     }
 
     /// `title`'s width at `size`, canvas units. Measured on every draw: the app's word cache
-    /// makes a known title a few lookups. Shaped at the shape font's size and regular weight,
-    /// then scaled to `size`; the `title_x` margin absorbs the title weight's extra width.
+    /// makes a known title a few lookups. Shaped at the shape font's size in the face titles
+    /// draw with, then scaled to `size`.
     pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
         let t = self.theme();
         let para = Paragraph {
             runs: vec![Run {
                 text: title.into(),
+                bold: t.zone.title_bold(),
                 ..Run::default()
             }],
         };
