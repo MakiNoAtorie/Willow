@@ -18,6 +18,13 @@ use crate::{
 pub struct Frame<'a> {
     /// Zones intersecting the rectangle, parents before the zones nested in them.
     pub zones: Vec<VisibleZone<'a>>,
+    /// The zone whose edge shows the hover ring (`zone_ring_width` wide, `Theme.accent`,
+    /// following its corner radius; paint it after every zone fill): the zone a drag in
+    /// progress would make a dragged shape or zone join, or the hovered title band's zone.
+    pub zone_ring: Option<&'a ShapeId>,
+    /// The ring's width in canvas units: `Theme.zone.ring` on screen zoomed out, scaling with
+    /// the zone zoomed in.
+    pub zone_ring_width: f32,
     /// Connectors of links that may cross the rectangle, in canvas units.
     pub connectors: Vec<Connector>,
     /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
@@ -73,17 +80,28 @@ pub struct Connector {
 }
 
 pub struct VisibleZone<'a> {
-    pub zone: &'a Zone,
+    /// The zone as a drag in progress previews it.
+    pub zone: Cow<'a, Zone>,
     /// Inside another zone: a deeper fill.
     pub nested: bool,
     pub fill: Rgba,
     /// The inset edge's color.
     pub edge: Rgba,
-    /// Title text's top-left and size in canvas units: never under the theme's minimum on screen.
+    /// Top-left of the title's line box and the title's size in canvas units: never under the
+    /// theme's minimum on screen. The box is `Theme.line_height` times the size tall; paint the
+    /// glyphs centered in it, in the bold face if `ZoneStyle::title_bold`.
     pub title_at: Point,
     pub title_size: f32,
-    /// The title fits inside the zone on screen, `title_x` in on both sides; else paint none.
+    /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
+    /// edited; else paint none.
     pub show_title: bool,
+    /// While its title is edited: the text selection highlight (top-left, bottom-right), the
+    /// IME marked text's underline (from, to: `Theme.caret.marked_underline` screen px thick,
+    /// hanging below) and the caret, unless in its blink's hidden half. Canvas units; paint
+    /// the highlight under the title, the rest over it.
+    pub selection: Vec<(Point, Point)>,
+    pub marked: Option<(Point, Point)>,
+    pub caret: Option<CaretView>,
 }
 
 pub struct Visible<'a> {
@@ -122,8 +140,15 @@ impl Session {
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let edited = self.editing().filter(|_| fade > 0.0);
-        let group = self.group_drag();
-        let moved: HashSet<&ShapeId> = group.iter().flat_map(|_| self.selection()).collect();
+        // A multi-selection or a zone being dragged: how far, and what moves.
+        let group = (self
+            .group_drag()
+            .map(|d| (d, self.selection().iter().collect())))
+        .or_else(|| self.zone_drag());
+        let (group, moved): (_, HashSet<&ShapeId>) = match group {
+            Some((d, moved)) => (Some(d), moved),
+            None => (None, HashSet::new()),
+        };
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and top-left.
         let placed = |s: &'a Shape| {
@@ -194,48 +219,43 @@ impl Session {
             .collect();
         let zt = &t.zone;
         let k = 1.0 / vp.zoom.min(1.0);
-        let title_size = zt.title_size.max(zt.title_min_screen / vp.zoom);
-        // Measured on every draw: the app's word cache makes a known title a few lookups.
-        // Shaped at the shape font's size and regular weight, then scaled to the title's
-        // size; the `title_x` margin absorbs the title weight's extra width.
-        let title_width = |title: &str| {
-            let text = title.into();
-            let para = Paragraph {
-                runs: vec![Run {
-                    text,
-                    ..Run::default()
-                }],
-            };
-            let clusters: Vec<_> = (title.grapheme_indices(true))
-                .map(|(i, g)| i..i + g.len())
-                .collect();
-            let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
-            w * title_size / t.font_size
-        };
+        let title_size = self.title_size();
+        let zone_resized = self.zone_resize_preview();
         let zones = (doc.zones.iter())
+            .map(|z| match (&zone_resized, group) {
+                (Some(r), _) if r.id == z.id => Cow::Owned(r.clone()),
+                (_, Some((dx, dy))) if moved.contains(&z.id) => Cow::Owned(Zone {
+                    x: z.x + dx,
+                    y: z.y + dy,
+                    ..z.clone()
+                }),
+                _ => Cow::Borrowed(z),
+            })
             .filter(|z| {
                 let (x, y) = (z.x as f32, z.y as f32);
                 x <= b.x && x + z.width as f32 >= a.x && y <= b.y && y + z.height as f32 >= a.y
             })
             .map(|zone| {
                 let (pastel, nested) = (t.pastel(zone.color), nested.contains(&zone.id));
+                let e = self.editing().filter(|e| e.zone && e.id == zone.id);
                 let fill = if nested {
                     zt.nested_fill_mix
                 } else {
                     zt.fill_mix
                 };
                 VisibleZone {
-                    zone,
                     nested,
                     fill: mix(t.canvas, pastel, fill),
                     edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
-                    title_at: Point {
-                        x: zone.x as f32 + zt.title_x * k,
-                        y: zone.y as f32 + zt.title_y * k,
-                    },
+                    title_at: self.title_at(&zone),
                     title_size,
-                    show_title: title_width(&zone.title) + 2.0 * zt.title_x * k
-                        <= zone.width as f32,
+                    show_title: e.is_some()
+                        || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
+                            <= zone.width as f32,
+                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
+                    marked: e.and_then(|e| self.title_underline(e.marked.clone()?)),
+                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
+                    zone,
                 }
             })
             .collect();
@@ -281,6 +301,8 @@ impl Session {
         let full = vp.zoom >= z.fade_end;
         Frame {
             zones,
+            zone_ring: self.drop_zone().or(self.band_ring()),
+            zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
             shapes,
@@ -293,6 +315,43 @@ impl Session {
             link_drag,
             tab_picker: self.tab_picker(),
         }
+    }
+}
+
+impl Session {
+    /// Zone titles' size in canvas units: never under the theme's minimum on screen.
+    pub(crate) fn title_size(&self) -> f32 {
+        let zt = &self.theme().zone;
+        zt.title_size
+            .max(zt.title_min_screen / self.viewport().zoom)
+    }
+
+    /// `zone`'s title line box top-left in canvas units, constant on screen zoomed out.
+    pub(crate) fn title_at(&self, zone: &Zone) -> Point {
+        let (zt, k) = (&self.theme().zone, 1.0 / self.viewport().zoom.min(1.0));
+        Point {
+            x: zone.x as f32 + zt.title_x * k,
+            y: zone.y as f32 + zt.title_y * k,
+        }
+    }
+
+    /// `title`'s width at `size`, canvas units. Measured on every draw: the app's word cache
+    /// makes a known title a few lookups. Shaped at the shape font's size in the face titles
+    /// draw with, then scaled to `size`.
+    pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
+        let t = self.theme();
+        let para = Paragraph {
+            runs: vec![Run {
+                text: title.into(),
+                bold: t.zone.title_bold(),
+                ..Run::default()
+            }],
+        };
+        let clusters: Vec<_> = (title.grapheme_indices(true))
+            .map(|(i, g)| i..i + g.len())
+            .collect();
+        let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
+        w * size / t.font_size
     }
 }
 

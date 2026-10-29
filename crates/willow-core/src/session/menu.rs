@@ -3,7 +3,7 @@
 
 use super::Session;
 use crate::input::Point;
-use crate::{Color, Link, Shape, ShapeId};
+use crate::{Color, Link, Shape, ShapeId, Zone};
 use std::time::Duration;
 
 /// A shape's color fading in from `from`, begun at `start`.
@@ -21,6 +21,8 @@ pub enum MenuKind {
     Multi,
     /// The keyboard color picker: one color row over the selected shape.
     Picker,
+    /// A right-click on a zone's title band.
+    Zone,
 }
 
 /// What an item does. One variant per item; `choose` runs it.
@@ -38,6 +40,13 @@ pub enum MenuAction {
     Duplicate,
     Delete,
     SelectChain,
+    CreateZone,
+    /// Starts editing `Menu.zone`'s title.
+    Rename,
+    /// Removes `Menu.zone`, keeping what it held one level up.
+    Dissolve,
+    /// Deletes `Menu.zone`, its nested zones and every member shape.
+    DeleteZone,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -95,6 +104,8 @@ pub struct Menu {
     pub shape: Option<ShapeId>,
     /// The link a connector menu was opened on; Remove link removes it.
     pub link: Option<Link>,
+    /// The zone a zone menu was opened on; its colors go to the zone.
+    pub zone: Option<ShapeId>,
 }
 
 impl Session {
@@ -132,21 +143,60 @@ impl Session {
         if self.selected.len() > 1 {
             return self.open_multi_menu(at);
         }
+        let mut entries = shape_items(current);
+        if self.can_create_zone() {
+            // After Select chain, before the color separator.
+            let chain = entries.iter().position(
+                |e| matches!(e, MenuEntry::Item(i) if i.action == MenuAction::SelectChain),
+            );
+            let at = chain.map_or(entries.len(), |i| i + 1);
+            entries.splice(at..at, create_zone_entries());
+        }
         self.menu = Some(Menu {
             shape: Some(id),
-            ..self.menu_at(MenuKind::Shape, at, shape_items(current))
+            ..self.menu_at(MenuKind::Shape, at, entries)
+        });
+    }
+
+    /// Opens the zone menu for zone `index`, whose band is under screen point `at`: Rename, its
+    /// colors, Dissolve and Delete. The selection stays.
+    pub(super) fn open_zone_menu(&mut self, at: Point, index: usize) {
+        self.stop_editing();
+        let z = &self.doc.zones[index];
+        let (id, current) = (z.id.clone(), z.color);
+        let mut delete = item(MenuAction::DeleteZone, "Delete", None);
+        if let MenuEntry::Item(i) = &mut delete {
+            i.destructive = true;
+        }
+        let entries = vec![
+            item(MenuAction::Rename, "Rename", None),
+            MenuEntry::Separator,
+            MenuEntry::Heading("Color", None),
+            MenuEntry::Colors {
+                current: Some(current),
+            },
+            MenuEntry::Separator,
+            item(MenuAction::Dissolve, "Dissolve", None),
+            delete,
+        ];
+        self.menu = Some(Menu {
+            zone: Some(id),
+            ..self.menu_at(MenuKind::Zone, at, entries)
         });
     }
 
     /// Opens the multi-selection menu at screen point `at`; the selection stays.
     fn open_multi_menu(&mut self, at: Point) {
-        let entries = vec![
+        let mut entries = vec![
             item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
             item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
             item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
             item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
             item(MenuAction::Delete, "Delete", Shortcut::DELETE),
         ];
+        if self.can_create_zone() {
+            entries.extend(create_zone_entries());
+        }
         self.menu = Some(self.menu_at(MenuKind::Multi, at, entries));
     }
 
@@ -159,6 +209,7 @@ impl Session {
             entries,
             shape: None,
             link: None,
+            zone: None,
         }
     }
 
@@ -173,8 +224,27 @@ impl Session {
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
             MenuAction::SelectChain => self.select_chain(),
+            MenuAction::CreateZone => self.create_zone(),
+            MenuAction::Rename => {
+                if let Some(id) = menu.zone {
+                    self.stop_editing();
+                    self.rename_zone(id);
+                }
+            }
+            MenuAction::Dissolve => {
+                if let Some(id) = menu.zone {
+                    self.dissolve_zone(&id);
+                }
+            }
+            MenuAction::DeleteZone => {
+                if let Some(id) = menu.zone {
+                    self.delete_zone(&id);
+                }
+            }
             MenuAction::Recolor(color) => {
-                if let Some(id) = menu.shape {
+                if let Some(id) = menu.zone {
+                    self.recolor_zone(&id, color);
+                } else if let Some(id) = menu.shape {
                     self.ripple_recolor(&id, color);
                 }
             }
@@ -250,26 +320,41 @@ impl Session {
         self.start_editing(id);
     }
 
-    /// The smallest zone containing canvas point `c`.
+    /// The innermost zone containing canvas point `c`: the one drawn on top there. Every
+    /// rule that puts a shape in a zone uses it.
     pub(super) fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
-        (self.doc.zones.iter())
-            .filter(|z| {
-                let (x, y) = (z.x as f32, z.y as f32);
-                (x..=x + z.width as f32).contains(&c.x) && (y..=y + z.height as f32).contains(&c.y)
-            })
-            .min_by_key(|z| z.width as u64 * z.height as u64)
-            .map(|z| z.id.clone())
+        self.zone_at(c, |_| true).map(|z| z.id.clone())
+    }
+
+    /// The last zone in draw order containing canvas point `c` among those `keep` accepts.
+    pub(super) fn zone_at(&self, c: Point, keep: impl Fn(&Zone) -> bool) -> Option<&Zone> {
+        (self.doc.zones.iter()).rfind(|z| {
+            let (x, y) = (z.x as f32, z.y as f32);
+            (x..=x + z.width as f32).contains(&c.x)
+                && (y..=y + z.height as f32).contains(&c.y)
+                && keep(z)
+        })
     }
 }
 
-fn item(action: MenuAction, label: &'static str, shortcut: Shortcut) -> MenuEntry {
+fn item(
+    action: MenuAction,
+    label: &'static str,
+    shortcut: impl Into<Option<Shortcut>>,
+) -> MenuEntry {
     MenuEntry::Item(MenuItem {
         action,
         label,
-        shortcut: Some(shortcut),
+        shortcut: shortcut.into(),
         enabled: true,
         destructive: false,
     })
+}
+
+/// Create zone under its own separator.
+fn create_zone_entries() -> [MenuEntry; 2] {
+    let create = item(MenuAction::CreateZone, "Create zone", None);
+    [MenuEntry::Separator, create]
 }
 
 /// The shape menu: clipboard items, a separator, then the colors under their heading with

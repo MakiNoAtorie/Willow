@@ -73,6 +73,13 @@ impl Document {
             .map(ShapeId)
             .collect()
     }
+
+    /// The zone listing shape or zone `id` as a member, if any.
+    pub(crate) fn parent_zone(&self, id: &ShapeId) -> Option<&ShapeId> {
+        (self.zones.iter())
+            .find(|z| z.members.contains(id))
+            .map(|z| &z.id)
+    }
 }
 
 /// Bijective base-26: 0 → "a", 25 → "z", 26 → "aa".

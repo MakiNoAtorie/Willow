@@ -20,6 +20,9 @@
 //! sweeps the bench lays out every shape, as the app's idle `measure_ahead` would, so the zoom
 //! sweeps, typing and `recovery_take` run on a fully laid-out document.
 //!
+//! `zone_drag` drags the largest zone by its title band, out and back over 240 pointer moves,
+//! zoomed to fit it on screen; the drop returns it to where it started.
+//!
 //! `recovery_take` times, in milliseconds, `Session::take_recovery` once the typing has made a
 //! recovery write due: autosave's UI-thread part (clone the document, every shape's height).
 
@@ -40,6 +43,8 @@ const PAN_FRAMES: usize = 240;
 /// Frames per zoom sweep leg (100% to 10%, then back).
 const SWEEP_FRAMES: usize = 150;
 const KEYSTROKES: usize = 200;
+/// Pointer moves in the zone drag: out for half, back for half.
+const DRAG_FRAMES: usize = 240;
 const IDLE: Duration = Duration::from_secs(5);
 
 pub(crate) struct Bench {
@@ -351,6 +356,67 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let s = format!("zoom_sweep_{pass}");
         scripted(&this, cx, &s, at(1.0, origin, size), sweep.clone()).await;
     }
+
+    // Drag the largest zone by its title band, out and back, zoomed to fit it on screen
+    // (not below the UI's 10% minimum). The drop returns it to where it started.
+    let zone = this
+        .update(cx, |w, _| {
+            let zs = &w.session.document().zones;
+            zs.iter()
+                .max_by_key(|z| z.width as u64 * z.height as u64)
+                .cloned()
+        })
+        .unwrap()
+        .expect("bench: the generated document has no zone");
+    let zoom = (size.x * 0.8 / zone.width as f32)
+        .min(size.y * 0.8 / zone.height as f32)
+        .clamp(0.1, 1.0);
+    // The zone's top-left corner at screen (60, 80). Press in the middle of its band, at the
+    // first point along it where the session says the zone's band is under the pointer (a member
+    // shape or a nested zone can cover the rest); no such point fails the bench.
+    let corner = Point { x: 60.0, y: 80.0 };
+    let origin = Point {
+        x: zone.x as f32 - corner.x / zoom,
+        y: zone.y as f32 - corner.y / zoom,
+    };
+    let grab = this
+        .update(cx, |w, _| {
+            let s = &mut w.session;
+            s.set_viewport(Viewport { origin, zoom, size });
+            let index = s.document().zones.iter().position(|z| z.id == zone.id);
+            let y = corner.y + s.theme().zone.band / 2.0;
+            let width = zone.width as f32 * zoom;
+            (0..)
+                .map(|i| Point {
+                    x: corner.x + 8.0 + 8.0 * i as f32,
+                    y,
+                })
+                .take_while(|p| p.x < corner.x + width)
+                .find(|&p| s.band_at(p) == index)
+        })
+        .unwrap()
+        .expect("bench: no point on the largest zone's title band hits it");
+    let button = Button::Left;
+    let mut drag = vec![Input::PointerDown {
+        pos: grab,
+        button,
+        mods,
+    }];
+    let step = |i: usize| {
+        let k = (i.min(DRAG_FRAMES - i)) as f32;
+        let pos = Point {
+            x: grab.x + 3.0 * k,
+            y: grab.y + 2.0 * k,
+        };
+        Input::PointerMove { pos, mods }
+    };
+    drag.extend((1..=DRAG_FRAMES).map(step));
+    drag.push(Input::PointerUp {
+        pos: grab,
+        button,
+        mods,
+    });
+    scripted(&this, cx, "zone_drag", at(zoom, origin, size), drag).await;
 
     // Typing into the first shape: select it, F2, then keystrokes through the platform path.
     // Characters in the first shape, which the keystrokes should grow.

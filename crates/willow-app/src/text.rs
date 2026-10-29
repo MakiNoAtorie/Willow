@@ -175,23 +175,23 @@ pub(crate) fn paint_text(
     }
 }
 
-/// Paints one line of plain `text` in the theme font at `weight` and `size` (screen px), its
-/// top-left at `origin`, in ink.
+/// Paints one line of plain `text` in the theme font, `bold` or regular, at `size` (screen px),
+/// in ink: its glyphs centered in a `Theme.line_height` times `size` line box whose top-left is
+/// `origin`, as shape text's are.
 pub(crate) fn paint_line(
     window: &mut Window,
     origin: gpui::Point<Pixels>,
     text: &str,
     t: &Theme,
-    weight: f32,
+    bold: bool,
     size: f32,
 ) {
     if text.is_empty() {
         return;
     }
     let mut font = gpui::font(t.font);
-    // Only Regular and Bold are bundled, and CSS matching takes Bold for 600; asking for 600
-    // itself benched about 1 ms slower per frame.
-    font.weight = if weight >= 600.0 {
+    // Asking for 600 itself benched about 1 ms slower per frame than Bold.
+    font.weight = if bold {
         FontWeight::BOLD
     } else {
         FontWeight::NORMAL
@@ -208,9 +208,11 @@ pub(crate) fn paint_line(
     let size = px((size * 2.0).round() / 2.0);
     let l = window.text_system().layout_line(text, size, &[run], None);
     let ink = color(t.ink);
+    let (a, d): (f32, f32) = (l.ascent.into(), l.descent.into());
+    let baseline = px((f32::from(size) * t.line_height - (a + d)) / 2.0 + a);
     for run in &l.runs {
         for g in &run.glyphs {
-            let o = origin + point(g.position.x, l.ascent);
+            let o = origin + point(g.position.x, baseline);
             // A missing glyph only loses that glyph; nothing to recover.
             let _ = if g.is_emoji {
                 window.paint_emoji(o, run.font_id, g.id, size)
@@ -263,13 +265,9 @@ fn from16(s: &str, u: usize) -> usize {
 }
 
 impl Willow {
-    /// The edited shape's plain text; empty when not editing.
+    /// The edited shape's plain text or zone's title; empty when not editing.
     fn edited_text(&self) -> String {
-        let s = &self.session;
-        let id = s.editing().map(|e| &e.id);
-        (s.document().shapes.iter())
-            .find(|sh| Some(&sh.id) == id)
-            .map_or_else(String::new, |sh| sh.text.plain())
+        self.session.edited_text().unwrap_or_default()
     }
 }
 
@@ -367,7 +365,8 @@ impl EntityInputHandler for Willow {
             0.0
         };
         let p = vp.to_screen(a);
-        let height = self.session.theme().line_height() * vp.zoom;
+        // The caret's line: a zone title's differs from a shape's.
+        let height = self.session.caret(self.start.elapsed())?.height * vp.zoom;
         Some(Bounds::new(
             self.canvas_origin + point(px(p.x), px(p.y)),
             size(px(width.max(1.0)), px(height)),

@@ -154,7 +154,14 @@ fn right_click_in_a_multi_selection_keeps_it_and_offers_multi_items() {
     assert_eq!(s.menu().unwrap().kind, MenuKind::Multi);
     assert_eq!(
         labels(&s),
-        ["Cut", "Copy", "Duplicate", "Select chain", "Delete"]
+        [
+            "Cut",
+            "Copy",
+            "Duplicate",
+            "Select chain",
+            "Delete",
+            "Create zone"
+        ]
     );
     s.handle(Input::MenuChoose(MenuAction::Duplicate), T);
     assert!(s.menu().is_none());
@@ -165,7 +172,14 @@ fn right_click_in_a_multi_selection_keeps_it_and_offers_multi_items() {
     assert_eq!(s.menu().unwrap().kind, MenuKind::Shape);
     assert_eq!(
         labels(&s),
-        ["Cut", "Copy", "Paste", "Duplicate", "Select chain"]
+        [
+            "Cut",
+            "Copy",
+            "Paste",
+            "Duplicate",
+            "Select chain",
+            "Create zone"
+        ]
     );
     s.select([id("a"), id("b"), id("c")]);
     right_click(&mut s, Point { x: 20.0, y: 220.0 });

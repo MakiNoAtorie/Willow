@@ -62,13 +62,18 @@ pub struct ZoneStyle {
     /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
     pub edge_mix: f32,
     pub edge_width: f32,
+    /// The hover ring on a zone's edge (a hovered band, a drop's target), in `accent`.
+    pub ring: f32,
     /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
-    /// never faded. Its top-left sits `title_x`, `title_y` in, constant on screen when zoomed out.
+    /// never faded. Its line box (`line_height` times its size, glyphs centered as in shape
+    /// text) has its top-left `title_x`, `title_y` in, constant on screen when zoomed out.
     pub title_size: f32,
     pub title_weight: f32,
     pub title_min_screen: f32,
     pub title_x: f32,
     pub title_y: f32,
+    /// The title band's height: screen px when zoomed out, scaled with the title zoomed in.
+    pub band: f32,
     /// Room around the members of a zone the loader wraps (clears the title).
     pub padding: f32,
 }
@@ -372,6 +377,14 @@ pub struct Theme {
     pub nudge: i32,
 }
 
+impl ZoneStyle {
+    /// Whether titles use the bold face: only Regular and Bold are bundled, and CSS matching
+    /// takes Bold from 600 up. Drawn and measured alike.
+    pub fn title_bold(&self) -> bool {
+        self.title_weight >= 600.0
+    }
+}
+
 impl Theme {
     /// One line of shape text, in canvas units.
     pub fn line_height(&self) -> f32 {
@@ -431,11 +444,13 @@ pub const PAPER: Theme = Theme {
         nested_fill_mix: 0.7,
         edge_mix: 0.35,
         edge_width: 1.0,
+        ring: 2.0,
         title_size: 13.0,
         title_weight: 600.0,
         title_min_screen: 12.0,
         title_x: 16.0,
         title_y: 12.0,
+        band: 40.0,
         padding: 40.0,
     },
     selection: SelectionStyle {

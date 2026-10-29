@@ -315,6 +315,9 @@ impl Willow {
             let pos = self.local(e.position);
             let mods = mods(&e.modifiers);
             self.input(Input::PointerDown { pos, button, mods }, cx);
+            if button == Button::Left && e.click_count == 2 {
+                self.input(Input::DoubleClick { pos }, cx);
+            }
         }
     }
 
@@ -408,8 +411,9 @@ impl Render for Willow {
                 let w = entity.read(cx);
                 let (session, now) = (&w.session, w.start.elapsed());
                 paint(bounds, session, now, window);
-                // Text input reaches the selected shape too: typing on it starts editing.
-                if !session.selection().is_empty() {
+                // Text input reaches the selected shape too: typing on it starts editing. A
+                // zone title is edited with nothing selected.
+                if !session.selection().is_empty() || session.editing().is_some() {
                     let handler = ElementInputHandler::new(bounds, entity.clone());
                     window.handle_input(&w.focus, handler, cx);
                 }
@@ -544,6 +548,8 @@ impl Render for Willow {
                 Cursor::Text => CursorStyle::IBeam,
                 Cursor::ResizeEw => CursorStyle::ResizeLeftRight,
                 Cursor::ResizeNs => CursorStyle::ResizeUpDown,
+                Cursor::ResizeNwse => CursorStyle::ResizeUpLeftDownRight,
+                Cursor::ResizeNesw => CursorStyle::ResizeUpRightDownLeft,
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::mouse_down))
@@ -588,6 +594,21 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .child(format!("{}%", pill.percent)),
         )
+}
+
+/// The caret `c` (canvas units) at zoom `z` and opacity `k`; its width is screen pixels at
+/// any zoom.
+fn paint_caret(
+    window: &mut Window,
+    origin: gpui::Point<Pixels>,
+    c: willow_core::CaretView,
+    t: &Theme,
+    z: f32,
+    k: f32,
+) {
+    let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
+    let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
+    window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
 }
 
 /// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
@@ -636,17 +657,18 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     // connectors, under the shapes.
     let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
     let zt = &t.zone;
-    for v in &frame.zones {
-        let zone = v.zone;
-        let b = Bounds::new(
+    let zone_bounds = |zone: &willow_core::Zone| {
+        Bounds::new(
             at(willow_core::Point {
                 x: zone.x as f32,
                 y: zone.y as f32,
             }),
             size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
-        );
+        )
+    };
+    for v in &frame.zones {
         window.paint_quad(quad(
-            b,
+            zone_bounds(&v.zone),
             px(zt.radius * z),
             color(v.fill),
             px(zt.edge_width * z),
@@ -654,16 +676,44 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             Default::default(),
         ));
     }
+    // The hover ring over the edge, after every fill so an overlapping zone never hides it.
+    let ringed = (frame.zones.iter()).find(|v| Some(&v.zone.id) == frame.zone_ring);
+    if let Some(v) = ringed {
+        window.paint_quad(quad(
+            zone_bounds(&v.zone),
+            px(zt.radius * z),
+            gpui::transparent_black(),
+            px(frame.zone_ring_width * z),
+            color(t.accent),
+            Default::default(),
+        ));
+    }
+    let sel = &t.selection;
     for v in frame.zones.iter().filter(|v| v.show_title) {
-        let size = v.title_size * z;
+        for (a, c) in &v.selection {
+            window.paint_quad(gpui::fill(
+                Bounds::from_corners(at(*a), at(*c)),
+                color(sel.text),
+            ));
+        }
         text::paint_line(
             window,
             at(v.title_at),
             &v.zone.title,
             t,
-            zt.title_weight,
-            size,
+            zt.title_bold(),
+            v.title_size * z,
         );
+        if let Some((a, c)) = v.marked {
+            let b = Bounds::new(
+                at(a),
+                size(px((c.x - a.x) * z), px(t.caret.marked_underline)),
+            );
+            window.paint_quad(gpui::fill(b, color(t.ink)));
+        }
+        if let Some(c) = v.caret {
+            paint_caret(window, origin, c, t, z, 1.0);
+        }
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
@@ -678,7 +728,6 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
     }
 
-    let sel = &t.selection;
     for v in &frame.shapes {
         // A pushed shape paints off its place while it slides there.
         let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
@@ -748,10 +797,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }
         }
         if let Some(c) = v.caret {
-            // The caret's width is screen pixels at any zoom.
-            let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
-            let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-            window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
+            paint_caret(window, origin, c, t, z, k);
         }
     }
 

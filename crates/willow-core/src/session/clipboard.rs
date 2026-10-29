@@ -97,10 +97,7 @@ impl Session {
             ..
         } = self.copied(&self.selected);
         let zones: Vec<Option<ShapeId>> = (shapes.iter())
-            .map(|s| {
-                let z = self.doc.zones.iter().find(|z| z.members.contains(&s.id));
-                z.map(|z| z.id.clone())
-            })
+            .map(|s| self.doc.parent_zone(&s.id).cloned())
             .collect();
         let lo = shapes.iter().map(|s| s.x).min().unwrap_or(0);
         let hi = (shapes.iter().map(|s| s.x + s.width as i32))

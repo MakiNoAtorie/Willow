@@ -24,3 +24,10 @@ Three runs at `324dac2`, load average 4–5 (a system daemon was using about two
 ## Review fixes (`mba-m4`, #58, rows at `1ae1547`)
 
 First run on the cold/warm split from #65 and the first since Phase 5. Every target holds: pan and zoom draw p95 3.7–5.7 ms (the 2% warm pan, 5.7 ms, is now under the 8 ms target too); typing p95 3.9 ms, max 5.1 ms, no late frames; `recovery_take` (the UI-thread part of autosave on 10k shapes) 7.7 ms; save 11.2 ms, load 17.6 ms; 0 renders while idle after both the pan and the animation, so the 3 renders in the `4cf2ae8` run did not reproduce. The cold pans now show the real first-layout cost: one 16–24 ms frame at 10% and 2% (one late frame at 2%), p95 unaffected.
+
+## Zone drag, 10,000 shapes (`mba-m4`, #76, rows at `af238a8`)
+
+`zone_drag` presses the title band of the largest zone (about 490 zones in the document), zoomed to fit it on screen, moves 240 times out and back, and drops it. Two runs: `draw_p95` 6.0 and 7.2 ms (target ≤ 8 ms), `draw_p50` 4.7 and 4.5 ms, `draw_max` 19 and 26 ms, `dirty_to_present_p95` 9.3 and 9.5 ms, one late frame each.
+
+- The first run of the scenario showed a 2.05 s frame: the drop. `History::order_zones` looked up each zone's parent by scanning every zone's member list, inside a loop over all zone pairs. It now hashes the parents once; the drop is milliseconds.
+- The same first run pressed 15 px into the band, which probably hit a member shape, so its p95 (5.2–5.6 ms) was a shape drag's. The bench now picks the press point with `Session::band_at` and fails if none hits the zone.
