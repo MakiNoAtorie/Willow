@@ -1,4 +1,4 @@
-//! Zone commands: Create zone from the selection.
+//! Zone commands: Create zone from the selection; the zone menu's color, Dissolve and Delete.
 
 use super::Session;
 use crate::{Color, ShapeId, Zone};
@@ -65,5 +65,57 @@ impl Session {
                 h.join_zone(doc, p, &id);
             }
         });
+    }
+
+    /// Paints zone `id` `color`, as one undo step; its members keep theirs.
+    pub(super) fn recolor_zone(&mut self, id: &ShapeId, color: Color) {
+        self.history
+            .change_zone(&mut self.doc, id, |z| z.color = color);
+    }
+
+    /// Removes zone `id` and keeps what it held one level up, as one undo step: a nested
+    /// zone's shapes join its parent; a top-level zone's nested zones become top-level and its
+    /// shapes loose. Nothing moves.
+    pub(super) fn dissolve_zone(&mut self, id: &ShapeId) {
+        let parent = (self.doc.zones.iter())
+            .find(|z| z.members.contains(id))
+            .map(|z| z.id.clone());
+        self.history.step(&mut self.doc, |h, doc| {
+            let Some(zone) = h.remove_zone(doc, id) else {
+                return;
+            };
+            if let Some(p) = &parent {
+                for m in &zone.members {
+                    h.join_zone(doc, p, m);
+                }
+            }
+        });
+    }
+
+    /// Deletes zone `id`, its nested zones and every member shape (inside its rectangle or
+    /// not), as one undo step. The shapes go through `delete`, so chains crossing its edge
+    /// reconnect shape by shape in story order.
+    pub(super) fn delete_zone(&mut self, id: &ShapeId) {
+        let Some(zone) = self.doc.zones.iter().find(|z| &z.id == id) else {
+            return;
+        };
+        let nested: Vec<_> = (self.doc.zones.iter())
+            .filter(|n| zone.members.contains(&n.id))
+            .collect();
+        let shapes: Vec<ShapeId> = (zone.members.iter())
+            .chain(nested.iter().flat_map(|n| &n.members))
+            .filter(|m| !nested.iter().any(|n| &n.id == *m))
+            .cloned()
+            .collect();
+        let zones: Vec<ShapeId> = nested.iter().map(|n| n.id.clone()).collect();
+        let opened = !self.history.is_open();
+        self.history.begin();
+        self.delete(&shapes);
+        for z in zones.iter().chain([id]) {
+            self.history.remove_zone(&mut self.doc, z);
+        }
+        if opened {
+            self.history.end(&self.doc);
+        }
     }
 }

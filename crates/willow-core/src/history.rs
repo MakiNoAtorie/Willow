@@ -368,7 +368,6 @@ impl History {
 
     /// Removes zone `id` as one step: its parent stops listing it, its nested zones become
     /// top-level and its shapes loose. Nothing else changes.
-    #[allow(dead_code)]
     pub fn remove_zone(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Zone> {
         let i = doc.zones.iter().position(|z| &z.id == id)?;
         let zone = doc.zones[i].clone();

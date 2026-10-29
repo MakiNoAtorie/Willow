@@ -675,6 +675,7 @@ impl Session {
                         None if let Some(l) = self.connector_at(pos) => {
                             self.open_connector_menu(pos, l)
                         }
+                        None if let Some(i) = self.band_at(pos) => self.open_zone_menu(pos, i),
                         None => self.open_empty_menu(pos),
                         Some(i) => self.open_shape_menu(pos, i),
                     }
