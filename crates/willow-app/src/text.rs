@@ -363,7 +363,8 @@ impl EntityInputHandler for Willow {
             0.0
         };
         let p = vp.to_screen(a);
-        let height = self.session.theme().line_height() * vp.zoom;
+        // The caret's line: a zone title's differs from a shape's.
+        let height = self.session.caret(self.start.elapsed())?.height * vp.zoom;
         Some(Bounds::new(
             self.canvas_origin + point(px(p.x), px(p.y)),
             size(px(width.max(1.0)), px(height)),

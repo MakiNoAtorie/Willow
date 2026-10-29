@@ -411,8 +411,9 @@ impl Render for Willow {
                 let w = entity.read(cx);
                 let (session, now) = (&w.session, w.start.elapsed());
                 paint(bounds, session, now, window);
-                // Text input reaches the selected shape too: typing on it starts editing.
-                if !session.selection().is_empty() {
+                // Text input reaches the selected shape too: typing on it starts editing. A
+                // zone title is edited with nothing selected.
+                if !session.selection().is_empty() || session.editing().is_some() {
                     let handler = ElementInputHandler::new(bounds, entity.clone());
                     window.handle_input(&w.focus, handler, cx);
                 }
