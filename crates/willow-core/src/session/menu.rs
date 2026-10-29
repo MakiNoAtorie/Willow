@@ -38,6 +38,7 @@ pub enum MenuAction {
     Duplicate,
     Delete,
     SelectChain,
+    CreateZone,
 }
 
 /// Cmd (macOS) or Ctrl (Windows), plus Shift if set, plus `key`; the app picks the glyphs.
@@ -132,21 +133,29 @@ impl Session {
         if self.selected.len() > 1 {
             return self.open_multi_menu(at);
         }
+        let mut entries = shape_items(current);
+        if self.can_create_zone() {
+            // After Select chain, before the color separator.
+            entries.splice(5..5, create_zone_entries());
+        }
         self.menu = Some(Menu {
             shape: Some(id),
-            ..self.menu_at(MenuKind::Shape, at, shape_items(current))
+            ..self.menu_at(MenuKind::Shape, at, entries)
         });
     }
 
     /// Opens the multi-selection menu at screen point `at`; the selection stays.
     fn open_multi_menu(&mut self, at: Point) {
-        let entries = vec![
+        let mut entries = vec![
             item(MenuAction::Cut, "Cut", Shortcut::cmd("X")),
             item(MenuAction::Copy, "Copy", Shortcut::cmd("C")),
             item(MenuAction::Duplicate, "Duplicate", Shortcut::cmd("D")),
             item(MenuAction::SelectChain, "Select chain", Shortcut::cmd("L")),
             item(MenuAction::Delete, "Delete", Shortcut::DELETE),
         ];
+        if self.can_create_zone() {
+            entries.extend(create_zone_entries());
+        }
         self.menu = Some(self.menu_at(MenuKind::Multi, at, entries));
     }
 
@@ -173,6 +182,7 @@ impl Session {
             MenuAction::Copy | MenuAction::Paste => {}
             MenuAction::Duplicate => self.duplicate(),
             MenuAction::SelectChain => self.select_chain(),
+            MenuAction::CreateZone => self.create_zone(),
             MenuAction::Recolor(color) => {
                 if let Some(id) = menu.shape {
                     self.ripple_recolor(&id, color);
@@ -270,6 +280,18 @@ fn item(action: MenuAction, label: &'static str, shortcut: Shortcut) -> MenuEntr
         enabled: true,
         destructive: false,
     })
+}
+
+/// Create zone under its own separator.
+fn create_zone_entries() -> [MenuEntry; 2] {
+    let create = MenuItem {
+        action: MenuAction::CreateZone,
+        label: "Create zone",
+        shortcut: None,
+        enabled: true,
+        destructive: false,
+    };
+    [MenuEntry::Separator, MenuEntry::Item(create)]
 }
 
 /// The shape menu: clipboard items, a separator, then the colors under their heading with

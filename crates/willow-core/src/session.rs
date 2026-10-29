@@ -18,6 +18,7 @@ mod nudge;
 mod push;
 mod select;
 mod tab_picker;
+mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
 use std::cell::{Cell, RefCell};
