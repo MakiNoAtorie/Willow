@@ -124,6 +124,11 @@ impl Session {
         // `start_editing`'s group is this one; `stop_editing` closes both as one step.
         self.history.begin();
         self.history.add(&mut self.doc, new);
+        // It joins its source's zone, wherever it lands.
+        let zone = (self.doc.zones.iter()).find(|z| z.members.contains(id));
+        if let Some(z) = zone.map(|z| z.id.clone()) {
+            self.history.join_zone(&mut self.doc, &z, &new_id);
+        }
         self.history.link(&mut self.doc, id, &new_id);
         if let Some(((dx, dy), block, n)) = insert {
             if (dx, dy) != (0, 0) {
