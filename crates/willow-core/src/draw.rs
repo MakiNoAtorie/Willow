@@ -18,6 +18,10 @@ use crate::{
 pub struct Frame<'a> {
     /// Zones intersecting the rectangle, parents before the zones nested in them.
     pub zones: Vec<VisibleZone<'a>>,
+    /// The zone whose edge shows the hover ring (`Theme.zone.ring` wide, `Theme.accent`,
+    /// following its corner radius; paint it after every zone fill): the zone a drag in
+    /// progress would make the pressed shape join.
+    pub zone_ring: Option<&'a ShapeId>,
     /// Connectors of links that may cross the rectangle, in canvas units.
     pub connectors: Vec<Connector>,
     /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
@@ -281,6 +285,7 @@ impl Session {
         let full = vp.zoom >= z.fade_end;
         Frame {
             zones,
+            zone_ring: self.drop_zone(),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
             shapes,

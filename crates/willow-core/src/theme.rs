@@ -62,6 +62,8 @@ pub struct ZoneStyle {
     /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
     pub edge_mix: f32,
     pub edge_width: f32,
+    /// The hover ring on a zone's edge (a hovered band, a drop's target), in `accent`.
+    pub ring: f32,
     /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
     /// never faded. Its top-left sits `title_x`, `title_y` in, constant on screen when zoomed out.
     pub title_size: f32,
@@ -431,6 +433,7 @@ pub const PAPER: Theme = Theme {
         nested_fill_mix: 0.7,
         edge_mix: 0.35,
         edge_width: 1.0,
+        ring: 2.0,
         title_size: 13.0,
         title_weight: 600.0,
         title_min_screen: 12.0,

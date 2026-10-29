@@ -192,6 +192,11 @@ impl History {
         }
     }
 
+    /// Takes shape `id` out of the zone that holds it, recorded. Nothing if none does.
+    pub fn leave_zone(&mut self, doc: &mut Document, id: &ShapeId) {
+        self.leave_zones(doc, std::slice::from_ref(id));
+    }
+
     /// Removes shape `id`, its links and its zone memberships, as one step. Nothing else
     /// changes: no reconnecting.
     pub fn remove(&mut self, doc: &mut Document, id: &ShapeId) -> Option<Shape> {

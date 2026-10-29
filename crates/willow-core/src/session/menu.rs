@@ -250,14 +250,14 @@ impl Session {
         self.start_editing(id);
     }
 
-    /// The smallest zone containing canvas point `c`.
+    /// The innermost zone containing canvas point `c`: the one drawn on top there. Every
+    /// rule that puts a shape in a zone uses it.
     pub(super) fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
         (self.doc.zones.iter())
-            .filter(|z| {
+            .rfind(|z| {
                 let (x, y) = (z.x as f32, z.y as f32);
                 (x..=x + z.width as f32).contains(&c.x) && (y..=y + z.height as f32).contains(&c.y)
             })
-            .min_by_key(|z| z.width as u64 * z.height as u64)
             .map(|z| z.id.clone())
     }
 }

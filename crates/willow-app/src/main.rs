@@ -636,21 +636,34 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     // connectors, under the shapes.
     let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
     let zt = &t.zone;
-    for v in &frame.zones {
-        let zone = v.zone;
-        let b = Bounds::new(
+    let zone_bounds = |zone: &willow_core::Zone| {
+        Bounds::new(
             at(willow_core::Point {
                 x: zone.x as f32,
                 y: zone.y as f32,
             }),
             size(px(zone.width as f32 * z), px(zone.height as f32 * z)),
-        );
+        )
+    };
+    for v in &frame.zones {
         window.paint_quad(quad(
-            b,
+            zone_bounds(v.zone),
             px(zt.radius * z),
             color(v.fill),
             px(zt.edge_width * z),
             color(v.edge),
+            Default::default(),
+        ));
+    }
+    // The hover ring over the edge, after every fill so an overlapping zone never hides it.
+    let ringed = (frame.zones.iter()).find(|v| Some(&v.zone.id) == frame.zone_ring);
+    if let Some(v) = ringed {
+        window.paint_quad(quad(
+            zone_bounds(v.zone),
+            px(zt.radius * z),
+            gpui::transparent_black(),
+            px(zt.ring * z),
+            color(t.accent),
             Default::default(),
         ));
     }

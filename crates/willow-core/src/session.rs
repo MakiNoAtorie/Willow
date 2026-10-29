@@ -5,6 +5,7 @@ mod beside;
 mod clipboard;
 mod color_picker;
 mod delete;
+mod drop;
 mod editing;
 mod file;
 mod keypan;
@@ -811,13 +812,18 @@ impl Session {
                             && let Some((dx, dy)) = self.group_drag() =>
                     {
                         self.gesture = None;
-                        self.move_selection(dx, dy);
+                        let ids = self.selected.clone();
+                        self.drop_shapes(&ids, dx, dy);
                     }
                     Some(Gesture::Press { index, to, from }) if button == Button::Left => {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
-                            Some((x, y)) => self.move_shape(&id, x, y),
+                            Some((x, y)) => {
+                                let s = &self.doc.shapes[index];
+                                let (dx, dy) = (x - s.x, y - s.y);
+                                self.drop_shapes(&[id], dx, dy);
+                            }
                             None if mods.shift => self.toggle_selected(id),
                             // A click on the selected shape edits it, caret where clicked.
                             None if self.selected == [id.clone()] => {
