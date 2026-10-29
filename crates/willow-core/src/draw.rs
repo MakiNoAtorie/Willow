@@ -18,10 +18,13 @@ use crate::{
 pub struct Frame<'a> {
     /// Zones intersecting the rectangle, parents before the zones nested in them.
     pub zones: Vec<VisibleZone<'a>>,
-    /// The zone whose edge shows the hover ring (`Theme.zone.ring` wide, `Theme.accent`,
+    /// The zone whose edge shows the hover ring (`zone_ring_width` wide, `Theme.accent`,
     /// following its corner radius; paint it after every zone fill): the zone a drag in
-    /// progress would make the pressed shape join, or the hovered title band's zone.
+    /// progress would make a dragged shape or zone join, or the hovered title band's zone.
     pub zone_ring: Option<&'a ShapeId>,
+    /// The ring's width in canvas units: `Theme.zone.ring` on screen zoomed out, scaling with
+    /// the zone zoomed in.
+    pub zone_ring_width: f32,
     /// Connectors of links that may cross the rectangle, in canvas units.
     pub connectors: Vec<Connector>,
     /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
@@ -297,6 +300,7 @@ impl Session {
         Frame {
             zones,
             zone_ring: self.drop_zone().or(self.band_ring()),
+            zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
             shapes,

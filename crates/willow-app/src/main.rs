@@ -682,7 +682,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             zone_bounds(&v.zone),
             px(zt.radius * z),
             gpui::transparent_black(),
-            px(zt.ring * z),
+            px(frame.zone_ring_width * z),
             color(t.accent),
             Default::default(),
         ));

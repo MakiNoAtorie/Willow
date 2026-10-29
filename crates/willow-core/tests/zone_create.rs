@@ -119,15 +119,23 @@ fn a_new_top_level_zone_wraps_exactly_the_selection_with_padding() {
 }
 
 #[test]
-fn a_nested_zone_joins_its_parent_and_draws_above_overlapping_siblings() {
-    let mut s = session(vec![zone("p", &["a", "b"]), zone("q", &["c"])]);
+fn a_nested_zone_joins_its_parent_and_draws_above_its_siblings_as_a_drop_would() {
+    // p holds a, b and the nested zone n; q, top-level, draws above p.
+    let mut s = session(vec![
+        zone("p", &["a", "b", "n"]),
+        zone("n", &["c"]),
+        zone("q", &["d"]),
+    ]);
     create(&mut s, &["a"]);
     let zones = &s.document().zones;
-    assert_eq!(zones.len(), 3);
+    assert_eq!(zones.len(), 4);
     let new = &zones[2];
     assert_eq!(new.members, [id("a")]);
-    assert!(!new.id.0.is_empty() && zones[..2].iter().all(|z| z.id != new.id));
-    assert_eq!(zones[0].members, [id("b"), new.id.clone()]);
+    assert!(!new.id.0.is_empty() && zones.iter().filter(|z| z.id == new.id).count() == 1);
+    assert_eq!(zones[0].members, [id("b"), id("n"), new.id.clone()]);
+    // Above its sibling n, still below q, which draws above its parent.
+    let order: Vec<&str> = zones.iter().map(|z| z.id.0.as_str()).collect();
+    assert_eq!(order, ["p", "n", new.id.0.as_str(), "q"]);
 }
 
 #[test]

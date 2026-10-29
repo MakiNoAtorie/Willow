@@ -3,7 +3,7 @@
 
 use super::Session;
 use crate::input::Point;
-use crate::{Color, Link, Shape, ShapeId};
+use crate::{Color, Link, Shape, ShapeId, Zone};
 use std::time::Duration;
 
 /// A shape's color fading in from `from`, begun at `start`.
@@ -146,7 +146,11 @@ impl Session {
         let mut entries = shape_items(current);
         if self.can_create_zone() {
             // After Select chain, before the color separator.
-            entries.splice(5..5, create_zone_entries());
+            let chain = entries.iter().position(
+                |e| matches!(e, MenuEntry::Item(i) if i.action == MenuAction::SelectChain),
+            );
+            let at = chain.map_or(entries.len(), |i| i + 1);
+            entries.splice(at..at, create_zone_entries());
         }
         self.menu = Some(Menu {
             shape: Some(id),
@@ -160,25 +164,20 @@ impl Session {
         self.stop_editing();
         let z = &self.doc.zones[index];
         let (id, current) = (z.id.clone(), z.color);
-        let plain = |action, label, destructive| {
-            MenuEntry::Item(MenuItem {
-                action,
-                label,
-                shortcut: None,
-                enabled: true,
-                destructive,
-            })
-        };
+        let mut delete = item(MenuAction::DeleteZone, "Delete", None);
+        if let MenuEntry::Item(i) = &mut delete {
+            i.destructive = true;
+        }
         let entries = vec![
-            plain(MenuAction::Rename, "Rename", false),
+            item(MenuAction::Rename, "Rename", None),
             MenuEntry::Separator,
             MenuEntry::Heading("Color", None),
             MenuEntry::Colors {
                 current: Some(current),
             },
             MenuEntry::Separator,
-            plain(MenuAction::Dissolve, "Dissolve", false),
-            plain(MenuAction::DeleteZone, "Delete", true),
+            item(MenuAction::Dissolve, "Dissolve", None),
+            delete,
         ];
         self.menu = Some(Menu {
             zone: Some(id),
@@ -324,20 +323,29 @@ impl Session {
     /// The innermost zone containing canvas point `c`: the one drawn on top there. Every
     /// rule that puts a shape in a zone uses it.
     pub(super) fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
-        (self.doc.zones.iter())
-            .rfind(|z| {
-                let (x, y) = (z.x as f32, z.y as f32);
-                (x..=x + z.width as f32).contains(&c.x) && (y..=y + z.height as f32).contains(&c.y)
-            })
-            .map(|z| z.id.clone())
+        self.zone_at(c, |_| true).map(|z| z.id.clone())
+    }
+
+    /// The last zone in draw order containing canvas point `c` among those `keep` accepts.
+    pub(super) fn zone_at(&self, c: Point, keep: impl Fn(&Zone) -> bool) -> Option<&Zone> {
+        (self.doc.zones.iter()).rfind(|z| {
+            let (x, y) = (z.x as f32, z.y as f32);
+            (x..=x + z.width as f32).contains(&c.x)
+                && (y..=y + z.height as f32).contains(&c.y)
+                && keep(z)
+        })
     }
 }
 
-fn item(action: MenuAction, label: &'static str, shortcut: Shortcut) -> MenuEntry {
+fn item(
+    action: MenuAction,
+    label: &'static str,
+    shortcut: impl Into<Option<Shortcut>>,
+) -> MenuEntry {
     MenuEntry::Item(MenuItem {
         action,
         label,
-        shortcut: Some(shortcut),
+        shortcut: shortcut.into(),
         enabled: true,
         destructive: false,
     })
@@ -345,14 +353,8 @@ fn item(action: MenuAction, label: &'static str, shortcut: Shortcut) -> MenuEntr
 
 /// Create zone under its own separator.
 fn create_zone_entries() -> [MenuEntry; 2] {
-    let create = MenuItem {
-        action: MenuAction::CreateZone,
-        label: "Create zone",
-        shortcut: None,
-        enabled: true,
-        destructive: false,
-    };
-    [MenuEntry::Separator, MenuEntry::Item(create)]
+    let create = item(MenuAction::CreateZone, "Create zone", None);
+    [MenuEntry::Separator, create]
 }
 
 /// The shape menu: clipboard items, a separator, then the colors under their heading with

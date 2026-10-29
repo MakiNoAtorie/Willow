@@ -125,8 +125,7 @@ impl Session {
         self.history.begin();
         self.history.add(&mut self.doc, new);
         // It joins its source's zone, wherever it lands.
-        let zone = (self.doc.zones.iter()).find(|z| z.members.contains(id));
-        if let Some(z) = zone.map(|z| z.id.clone()) {
+        if let Some(z) = self.doc.parent_zone(id).cloned() {
             self.history.join_zone(&mut self.doc, &z, &new_id);
         }
         self.history.link(&mut self.doc, id, &new_id);

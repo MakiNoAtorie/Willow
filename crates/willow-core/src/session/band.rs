@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use super::{Gesture, Session};
-use crate::{Document, Point, ShapeId, Zone};
+use crate::{Document, Point, ShapeId};
 
 impl Session {
     /// Index of the zone whose title band is under screen point `p`: the band of the zone
@@ -19,6 +19,29 @@ impl Session {
         // Constant on screen zoomed out, scaling with the title zoomed in.
         let k = 1.0 / self.viewport.zoom.min(1.0);
         (c.y <= self.doc.zones[i].y as f32 + self.theme.zone.band * k).then_some(i)
+    }
+
+    /// Tracks the edge or band the pointer at screen point `p` hovers, first that applies: a
+    /// shape's resize edge, a zone's edge or corner, a title band. None over a midpoint, and
+    /// no edge while Space is held. Whether any of them changed.
+    pub(super) fn track_edges(&mut self, p: Point) -> bool {
+        let free = self.midpoint_at(p).is_none();
+        let edge = (free && !self.space_held)
+            .then(|| self.edge_at(p))
+            .flatten();
+        let edge = edge.map(|e| e.1);
+        let zone_edge = (free && edge.is_none() && !self.space_held)
+            .then(|| self.zone_edge_at(p))
+            .flatten()
+            .map(|e| e.1);
+        let band = (free && edge.is_none() && zone_edge.is_none())
+            .then(|| self.band_at(p))
+            .flatten()
+            .map(|i| self.doc.zones[i].id.clone());
+        let changed =
+            edge != self.over_edge || zone_edge != self.over_zone_edge || band != self.over_band;
+        (self.over_edge, self.over_zone_edge, self.over_band) = (edge, zone_edge, band);
+        changed
     }
 
     /// The zone whose ring shows for the band: the hovered band while no gesture runs, or
@@ -94,37 +117,25 @@ impl Session {
     /// top-level zone drawn on top under its new center, or none. A zone holding nested
     /// zones never nests.
     fn nest_change(&self, index: usize, dx: i32, dy: i32) -> Option<Option<ShapeId>> {
-        let zones = &self.doc.zones;
-        let z = &zones[index];
-        if zones.iter().any(|n| z.members.contains(&n.id)) {
+        let doc = &self.doc;
+        let z = &doc.zones[index];
+        if doc.zones.iter().any(|n| z.members.contains(&n.id)) {
             return None;
         }
         let c = Point {
             x: (z.x + dx) as f32 + z.width as f32 / 2.0,
             y: (z.y + dy) as f32 + z.height as f32 / 2.0,
         };
-        let top_level = |q: &Zone| !zones.iter().any(|p| p.members.contains(&q.id));
-        let to = (zones.iter())
-            .rfind(|q| q.id != z.id && top_level(q) && contains(q, c))
-            .map(|q| q.id.clone());
-        let from = zones.iter().find(|p| p.members.contains(&z.id));
-        (from.map(|p| &p.id) != to.as_ref()).then_some(to)
+        let to = self.zone_at(c, |q| q.id != z.id && doc.parent_zone(&q.id).is_none());
+        let to = to.map(|q| q.id.clone());
+        (doc.parent_zone(&z.id) != to.as_ref()).then_some(to)
     }
-}
-
-fn contains(z: &Zone, c: Point) -> bool {
-    let (x, y) = (z.x as f32, z.y as f32);
-    (x..=x + z.width as f32).contains(&c.x) && (y..=y + z.height as f32).contains(&c.y)
 }
 
 /// The zones' draw order with zone `id` (and the zones it holds) raised above its siblings:
 /// a top-level zone to the top, a nested one to just after its parent's other zones.
-fn raised(doc: &Document, id: &ShapeId) -> Vec<ShapeId> {
-    let parent = |q: &ShapeId| {
-        (doc.zones.iter())
-            .find(|p| p.members.contains(q))
-            .map(|p| &p.id)
-    };
+pub(super) fn raised(doc: &Document, id: &ShapeId) -> Vec<ShapeId> {
+    let parent = |q: &ShapeId| doc.parent_zone(q);
     let ids = doc.zones.iter().map(|z| &z.id);
     let group: Vec<&ShapeId> = (ids.clone())
         .filter(|q| *q == id || parent(q) == Some(id))

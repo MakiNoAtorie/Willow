@@ -515,8 +515,10 @@ impl Session {
     /// goes this way.
     fn replace_outside_history(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
-        if let Some(z) = self.doc.zones.iter_mut().find(|z| z.id == e.id) {
-            z.title.replace_range(range, text);
+        if e.zone {
+            if let Some(z) = self.doc.zones.iter_mut().find(|z| z.id == e.id) {
+                z.title.replace_range(range, text);
+            }
         } else if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
             let end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = e.pending {

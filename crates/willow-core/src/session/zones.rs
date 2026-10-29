@@ -13,11 +13,7 @@ impl Session {
     /// The parent a zone around the selection would join: `Some(None)` for the top level,
     /// `Some(Some(zone))` for a nested zone, `None` when it can't be made.
     fn zone_parent(&self) -> Option<Option<ShapeId>> {
-        let parent_of = |id: &ShapeId| {
-            (self.doc.zones.iter())
-                .find(|z| z.members.contains(id))
-                .map(|z| &z.id)
-        };
+        let parent_of = |id: &ShapeId| self.doc.parent_zone(id);
         let parent = parent_of(self.selected.first()?);
         if self.selected.iter().any(|id| parent_of(id) != parent) {
             return None;
@@ -30,34 +26,32 @@ impl Session {
     }
 
     /// Wraps the selected shapes in a new neutral zone, padded like the loader's, joining their
-    /// shared parent zone if any, and edits its empty title. One undo step with that first
+    /// shared parent zone if any and drawing above its siblings as a dropped zone does, and
+    /// edits its empty title. One undo step with that first
     /// edit; does nothing when `can_create_zone` is false.
     pub(super) fn create_zone(&mut self) {
         let Some(parent) = self.zone_parent() else {
             return;
         };
         self.stop_editing();
-        let pad = self.theme.zone.padding;
         let members: Vec<_> = (self.doc.shapes.iter())
             .filter(|s| self.selected.contains(&s.id))
             .collect();
-        let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
-        for s in &members {
-            let (x, y) = (s.x as f32, s.y as f32);
-            let (r, b) = (x + s.width as f32, y + self.shape_height(s));
-            (lo, hi) = ((lo.0.min(x), lo.1.min(y)), (hi.0.max(r), hi.1.max(b)));
-        }
-        // The loader's rounding.
-        let (x, y) = ((lo.0 - pad).floor(), (lo.1 - pad).floor());
+        let rects = (members.iter())
+            .map(|s| (s.x as f32, s.y as f32, s.width as f32, self.shape_height(s)));
+        let Some((x, y, width, height)) = crate::format::wrap(rects, self.theme.zone.padding)
+        else {
+            return;
+        };
         let id = self.doc.next_ids(1).remove(0);
         let zone = Zone {
             id: id.clone(),
             title: String::new(),
             color: Color::Neutral,
-            x: x as i32,
-            y: y as i32,
-            width: ((hi.0 + pad).ceil() - x) as u32,
-            height: ((hi.1 + pad).ceil() - y) as u32,
+            x,
+            y,
+            width,
+            height,
             members: members.iter().map(|s| s.id.clone()).collect(),
         };
         // `stop_editing`'s end closes the step.
@@ -67,6 +61,8 @@ impl Session {
             if let Some(p) = &parent {
                 h.join_zone(doc, p, &id);
             }
+            // Placed as a drop places it.
+            h.order_zones(doc, &super::band::raised(doc, &id));
         });
         self.rename_zone(id);
     }
@@ -89,9 +85,7 @@ impl Session {
     /// zone's shapes join its parent; a top-level zone's nested zones become top-level and its
     /// shapes loose. Nothing moves.
     pub(super) fn dissolve_zone(&mut self, id: &ShapeId) {
-        let parent = (self.doc.zones.iter())
-            .find(|z| z.members.contains(id))
-            .map(|z| z.id.clone());
+        let parent = self.doc.parent_zone(id).cloned();
         self.history.step(&mut self.doc, |h, doc| {
             let Some(zone) = h.remove_zone(doc, id) else {
                 return;

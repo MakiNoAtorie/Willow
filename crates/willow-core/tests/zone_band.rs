@@ -325,3 +325,19 @@ fn a_band_press_clears_the_selection_and_shift_passes_through_to_the_marquee() {
     assert_eq!(s.selection(), [id("a")], "Shift+click does nothing");
     assert_eq!(s.document().zones[0], p);
 }
+
+#[test]
+fn the_ring_is_never_thinner_on_screen_than_the_theme_width() {
+    let mut s = session(&[("a", 0, 0)], vec![zone("p", 1000, 0, 400, 600, &[])]);
+    let ring = s.theme().zone.ring;
+    for zoom in [0.1, 0.5, 1.0, 2.0] {
+        set_zoom(&mut s, zoom);
+        let frame = s.draw(Point::default(), at(&s, 4000.0, 4000.0), T);
+        // Canvas units: the theme's width on screen zoomed out, scaling with the zone zoomed in.
+        let screen = frame.zone_ring_width * zoom;
+        assert!(
+            (screen - ring * zoom.max(1.0)).abs() < 1e-4,
+            "{zoom}x: {screen}"
+        );
+    }
+}

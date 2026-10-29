@@ -6,8 +6,8 @@
 //!
 //! Zones: `add_zone` / `remove_zone` add and remove one, keeping every ID in at most one
 //! member list and no member list naming a missing zone; `change_zone` changes position, size,
-//! title or color; `join_zone` changes membership; `order_zones` sets the draw order, parents
-//! first. Each is undoable and joins an open group like the shape steps.
+//! title or color; `join_zone` and `leave_zone` change membership; `order_zones` sets the draw
+//! order, parents first. Each is undoable and joins an open group like the shape steps.
 
 use std::collections::{HashMap, HashSet};
 
@@ -352,7 +352,7 @@ impl History {
     }
 }
 
-// The zone steps. Their callers arrive with the zone commands (#71, #72 and on).
+// The zone steps.
 impl History {
     /// Adds `zone` as one step, its ID new. Its members leave the zones that held them; the
     /// caller joins it to a parent with `join_zone`. It draws on top, below any zone it holds.

@@ -849,24 +849,7 @@ impl Session {
                 }
                 Some(Gesture::Marquee { .. }) => self.respond(false),
                 None => {
-                    let edge = (!self.space_held).then(|| self.edge_at(pos)).flatten();
-                    let edge = edge.filter(|_| self.midpoint_at(pos).is_none());
-                    let edge = edge.map(|e| e.1);
-                    let edge_changed = edge != std::mem::replace(&mut self.over_edge, edge);
-                    let zone_edge = (edge.is_none() && self.midpoint_at(pos).is_none())
-                        .then(|| self.zone_edge_at(pos).map(|e| e.1))
-                        .flatten()
-                        .filter(|_| !self.space_held);
-                    let zone_edge_changed =
-                        zone_edge != std::mem::replace(&mut self.over_zone_edge, zone_edge);
-                    let edge_changed = edge_changed || zone_edge_changed;
-                    let band =
-                        (edge.is_none() && zone_edge.is_none() && self.midpoint_at(pos).is_none())
-                            .then(|| self.band_at(pos))
-                            .flatten()
-                            .map(|i| self.doc.zones[i].id.clone());
-                    let edge_changed = edge_changed || band != self.over_band;
-                    self.over_band = band;
+                    let edge_changed = self.track_edges(pos);
                     let over = self.editing.as_ref().is_some_and(|e| {
                         (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
                     });

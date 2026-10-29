@@ -301,15 +301,24 @@ fn while_dragging_the_draw_query_rings_the_target_only_when_membership_would_cha
 }
 
 #[test]
-fn a_multi_selection_rings_the_zone_the_pressed_shape_would_join() {
+fn a_multi_selection_rings_the_pressed_shapes_target_else_the_first_change_in_story_order() {
     let mut s = session(
-        &[("a", 0, 0), ("b", 300, 0)],
-        vec![zone("p", 1000, 0, 300, 300, &[])],
+        &[("a", 0, 0), ("b", 300, 0), ("c", 600, 0)],
+        vec![
+            zone("r", 750, 0, 250, 300, &[]),
+            zone("p", 1000, 0, 300, 300, &[]),
+            zone("q", 1600, 0, 300, 300, &[]),
+        ],
     );
-    s.select([id("a"), id("b")]);
-    // Pressing b: b lands outside p, a inside; only b's target counts.
+    // Selected in an order other than story order (a, b, c).
+    s.select([id("c"), id("a"), id("b")]);
+    // Pressing b, 1000 right: b lands in no zone, a in p, c in q; a comes first in story order.
     drag_to(&mut s, (310.0, 10.0), (1310.0, 10.0));
-    assert_eq!(ring(&s), None);
+    assert_eq!(ring(&s), Some("p"));
+    // 700 right: a lands in r, b in p; the pressed shape's target wins.
     pointer_at(&mut s, 1, (1010.0, 10.0));
     assert_eq!(ring(&s), Some("p"));
+    // Back where they were: no membership changes, no ring.
+    pointer_at(&mut s, 1, (310.0, 10.0));
+    assert_eq!(ring(&s), None);
 }

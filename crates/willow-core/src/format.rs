@@ -256,38 +256,50 @@ fn position(
         .collect();
     // Nested zones come after their parents, so going backwards wraps them first.
     for &z in unplaced.zones.iter().rev() {
-        let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
-        for m in &doc.zones[z].members {
-            let (x, y, w, h) = if let Some(&i) = index.get(m) {
+        let rects = doc.zones[z].members.iter().filter_map(|m| {
+            if let Some(&i) = index.get(m) {
                 let s = &shapes[i];
-                (s.x as f32, s.y as f32, s.width as f32, height(s))
-            } else if let Some(&c) = zindex.get(m) {
-                let c = &doc.zones[c];
-                (c.x as f32, c.y as f32, c.width as f32, c.height as f32)
+                Some((s.x as f32, s.y as f32, s.width as f32, height(s)))
             } else {
-                continue;
-            };
-            (lo, hi) = (
-                (lo.0.min(x), lo.1.min(y)),
-                (hi.0.max(x + w), hi.1.max(y + h)),
-            );
-        }
+                let c = &doc.zones[*zindex.get(m)?];
+                Some((c.x as f32, c.y as f32, c.width as f32, c.height as f32))
+            }
+        });
+        let wrapped = wrap(rects, pad);
         let zone = &mut doc.zones[z];
-        if lo.0 > hi.0 {
+        ((zone.x, zone.y), zone.width, zone.height) = match wrapped {
+            Some((x, y, w, h)) => ((x, y), w, h),
             // ponytail: an empty zone gets a small box below the lowest shape; a later
             // spacing pass may move it.
-            ((zone.x, zone.y), zone.width, zone.height) = (
+            None => (
                 below(lowest),
                 DEFAULT_WIDTH + 2 * pad as u32,
                 2 * pad as u32,
-            );
-            continue;
-        }
-        let (x, y) = ((lo.0 - pad).floor(), (lo.1 - pad).floor());
-        (zone.x, zone.y) = (x as i32, y as i32);
-        zone.width = ((hi.0 + pad).ceil() - x) as u32;
-        zone.height = ((hi.1 + pad).ceil() - y) as u32;
+            ),
+        };
     }
+}
+
+/// The rectangle (x, y, width, height) around `rects` (the same) padded by `pad` on every
+/// side, rounded out to whole canvas units; `None` for no rectangles. A loaded zone without a
+/// position and a created zone both wrap their members with it.
+pub(crate) fn wrap(
+    rects: impl IntoIterator<Item = (f32, f32, f32, f32)>,
+    pad: f32,
+) -> Option<(i32, i32, u32, u32)> {
+    let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+    for (x, y, w, h) in rects {
+        (lo, hi) = (
+            (lo.0.min(x), lo.1.min(y)),
+            (hi.0.max(x + w), hi.1.max(y + h)),
+        );
+    }
+    if lo.0 > hi.0 {
+        return None;
+    }
+    let (x, y) = ((lo.0 - pad).floor(), (lo.1 - pad).floor());
+    let (w, h) = ((hi.0 + pad).ceil() - x, (hi.1 + pad).ceil() - y);
+    Some((x as i32, y as i32, w as u32, h as u32))
 }
 
 /// Links each shape to the one it names and paints every chain the first color one of its
