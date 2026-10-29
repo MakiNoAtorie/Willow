@@ -133,9 +133,12 @@ impl Session {
         let mut document = self.doc.clone();
         if let Some(e) = &self.editing
             && let Some(m) = e.marked.clone()
-            && let Some(s) = document.shapes.iter_mut().find(|s| s.id == e.id)
         {
-            s.text.replace(m, "");
+            if let Some(s) = document.shapes.iter_mut().find(|s| s.id == e.id) {
+                s.text.replace(m, "");
+            } else if let Some(z) = document.zones.iter_mut().find(|z| z.id == e.id) {
+                z.title.replace_range(m, "");
+            }
         }
         let heights = document
             .shapes

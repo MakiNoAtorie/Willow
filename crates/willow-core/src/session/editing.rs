@@ -10,10 +10,12 @@ use crate::input::{Input, Motion, Point, Response};
 use crate::layout::Caret;
 use crate::{Shape, ShapeId};
 
-/// The shape being edited and where its caret is.
+/// The shape or zone title being edited and where its caret is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Editing {
     pub id: ShapeId,
+    /// `id` is a zone: its title is edited, plain text on one line.
+    pub zone: bool,
     pub caret: Caret,
     /// The text selection's other end; `caret.offset` when nothing is selected.
     pub anchor: usize,
@@ -109,7 +111,7 @@ impl Session {
                 }
                 self.respond(true)
             }
-            Input::NewLine if self.editing.is_some() => {
+            Input::NewLine if self.edited().is_some() => {
                 self.replace(self.text_selection(), "\n");
                 self.respond(true)
             }
@@ -134,14 +136,17 @@ impl Session {
                     return self.respond(false);
                 }
                 let text = super::clipboard::as_text(text);
-                let text: String = (text.replace("\r\n", "\n").replace('\r', "\n").chars())
+                let mut text: String = (text.replace("\r\n", "\n").replace('\r', "\n").chars())
                     .filter(|&c| c == '\n' || !c.is_control())
                     .collect();
+                if self.edited().is_none() {
+                    text = text.replace('\n', " ");
+                }
                 self.replace(self.text_selection(), &text);
                 self.respond(true)
             }
             Input::SelectAll => {
-                let Some((_, s)) = self.edited() else {
+                let Some(s) = self.edited_text() else {
                     return self.respond(false);
                 };
                 self.set_text_selection(0..s.len());
@@ -198,13 +203,13 @@ impl Session {
             replace = None;
         }
         let marked = self.editing.as_ref().and_then(|e| e.marked.clone());
-        let s = self.edited().map(|(_, s)| s).unwrap_or_default();
+        let s = self.edited_text().unwrap_or_default();
         let replace = replace.map(|r| s.floor_char_boundary(r.start)..s.floor_char_boundary(r.end));
         let range = (replace.or(marked)).unwrap_or_else(|| self.text_selection());
         Some((text, self.drop_marked(range)))
     }
 
-    /// The shape being edited, if any, and its caret.
+    /// The shape or zone being edited, if any, and its caret.
     pub fn editing(&self) -> Option<&Editing> {
         self.editing.as_ref()
     }
@@ -228,23 +233,33 @@ impl Session {
     /// The caret to draw at `now`, while editing.
     pub fn caret(&self, now: Duration) -> Option<CaretView> {
         let e = self.editing.as_ref()?;
-        let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
-        let p = self.layout(shape).caret_point(e.caret);
         let (t, since) = (self.theme, now.saturating_sub(e.since));
-        Some(CaretView {
-            pos: Point {
+        let (pos, height) = if e.zone {
+            (self.title_point(e.caret.offset)?, self.title_line())
+        } else {
+            let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
+            let p = self.layout(shape).caret_point(e.caret);
+            let pos = Point {
                 x: shape.x as f32 + t.shape.pad_x + p.x,
                 y: shape.y as f32 + t.shape.pad_y + p.y,
-            },
-            height: t.line_height(),
+            };
+            (pos, t.line_height())
+        };
+        Some(CaretView {
+            pos,
+            height,
             visible: !self.blinking(now)
                 || (since.as_millis() / t.caret.blink.as_millis()) % 2 == 0,
         })
     }
 
     /// Top of the caret stop at byte `offset` of the edited text, in canvas units; the line
-    /// is `Theme::line_height()` tall. The app places the IME candidate window with it.
+    /// is `Theme::line_height()` tall (a title's, `CaretView.height`). The app places the IME
+    /// candidate window with it.
     pub fn text_point(&self, offset: usize) -> Option<Point> {
+        if self.editing.as_ref()?.zone {
+            return self.title_point(offset);
+        }
         let (shape, _) = self.edited()?;
         let c = Caret {
             offset,
@@ -288,14 +303,19 @@ impl Session {
             .map(|s| s.id.clone())
     }
 
-    /// Opens an editing session on `id` with the caret at the end of its text.
+    /// Opens an editing session on shape `id`, or zone `id`'s title, caret at the end.
     pub(super) fn start_editing(&mut self, id: ShapeId) {
-        let Some(shape) = self.doc.shapes.iter().find(|s| s.id == id) else {
-            return;
+        let shape = self.doc.shapes.iter().find(|s| s.id == id);
+        let end = match shape {
+            Some(shape) => shape.text.plain().len(),
+            None => match self.doc.zones.iter().find(|z| z.id == id) {
+                Some(z) => z.title.len(),
+                None => return,
+            },
         };
-        let end = shape.text.plain().len();
         self.history.begin();
         self.editing = Some(Editing {
+            zone: shape.is_none(),
             id,
             caret: Caret {
                 offset: end,
@@ -317,11 +337,47 @@ impl Session {
         }
     }
 
-    /// The edited shape and its plain text.
+    /// The edited shape and its plain text; `None` while a zone title is edited.
     pub(super) fn edited(&self) -> Option<(&Shape, String)> {
         let e = self.editing.as_ref()?;
         let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
         Some((shape, shape.text.plain()))
+    }
+
+    /// The edited text: the edited shape's plain text or zone's title. What offsets index.
+    pub fn edited_text(&self) -> Option<String> {
+        let e = self.editing.as_ref()?;
+        if e.zone {
+            let z = self.doc.zones.iter().find(|z| z.id == e.id)?;
+            return Some(z.title.clone());
+        }
+        self.edited().map(|(_, s)| s)
+    }
+
+    /// Top of the caret stop at byte `offset` of the edited title, in canvas units; the line
+    /// is `title_line()` tall, the title's em box centered in it as shape text's is.
+    fn title_point(&self, offset: usize) -> Option<Point> {
+        let e = self.editing.as_ref()?;
+        let z = self.doc.zones.iter().find(|z| z.id == e.id)?;
+        let at = self.title_at(z);
+        let size = self.title_size();
+        let offset = z.title.floor_char_boundary(offset);
+        Some(Point {
+            x: at.x + self.title_width(&z.title[..offset], size),
+            y: at.y - (self.title_line() - size) / 2.0,
+        })
+    }
+
+    /// Under the edited title's `range`, at its em box's bottom: from and to, canvas units.
+    pub(crate) fn title_underline(&self, range: Range<usize>) -> Option<(Point, Point)> {
+        let (a, b) = (self.title_point(range.start)?, self.title_point(range.end)?);
+        let y = a.y + (self.title_line() + self.title_size()) / 2.0;
+        Some((Point { y, ..a }, Point { y, ..b }))
+    }
+
+    /// The edited title's line height in canvas units.
+    fn title_line(&self) -> f32 {
+        self.title_size() * self.theme.line_height
     }
 
     /// The caret nearest screen point `p` in the edited shape.
@@ -352,6 +408,20 @@ impl Session {
 
     /// Text selection highlight in canvas units, one (top-left, bottom-right) per line.
     pub fn selection_rects(&self) -> Vec<(Point, Point)> {
+        let sel = self.text_selection();
+        if self.editing.as_ref().is_some_and(|e| e.zone) {
+            let (a, b) = (self.title_point(sel.start), self.title_point(sel.end));
+            let rect = (a.zip(b)).map(|(a, b)| {
+                (
+                    a,
+                    Point {
+                        y: b.y + self.title_line(),
+                        ..b
+                    },
+                )
+            });
+            return rect.filter(|_| !sel.is_empty()).into_iter().collect();
+        }
         let Some((shape, _)) = self.edited() else {
             return Vec::new();
         };
@@ -360,16 +430,14 @@ impl Session {
             x: shape.x as f32 + pad.pad_x + p.x,
             y: shape.y as f32 + pad.pad_y + p.y,
         };
-        let rects = self
-            .layout(shape)
-            .selection_rects(self.text_selection(), lh);
+        let rects = self.layout(shape).selection_rects(sel, lh);
         rects.into_iter().map(|(a, b)| (o(a), o(b))).collect()
     }
 
     /// The selected text of the edited shape as plain text (`\n` between paragraphs);
     /// `None` when nothing is selected. What Copy puts on the clipboard.
     pub fn selected_text(&self) -> Option<String> {
-        let (_, s) = self.edited()?;
+        let s = self.edited_text()?;
         let r = self.text_selection();
         (!r.is_empty()).then(|| s[r].to_string())
     }
@@ -384,14 +452,13 @@ impl Session {
     /// left and right collapse a selection to its edge.
     fn motion(&self, m: Motion, extend: bool) -> Option<(Caret, Option<f32>)> {
         let e = self.editing.as_ref()?;
-        let (shape, s) = self.edited()?;
+        let s = self.edited_text()?;
         let i = e.caret.offset;
         let sel = if extend { i..i } else { self.text_selection() };
         let at = |offset| Caret {
             offset,
             upstream: false,
         };
-        let l = self.layout(shape);
         let c = match m {
             Motion::Left if !sel.is_empty() => at(sel.start),
             Motion::Right if !sel.is_empty() => at(sel.end),
@@ -399,12 +466,16 @@ impl Session {
             Motion::Right => at(next_cluster(&s, i)),
             Motion::WordLeft => at(word_left(&s, i)),
             Motion::WordRight => at(word_right(&s, i)),
+            // A title is one line.
+            Motion::Up | Motion::LineStart if e.zone => at(0),
+            Motion::Down | Motion::LineEnd if e.zone => at(s.len()),
             Motion::Up | Motion::Down => {
+                let l = self.layout(self.edited()?.0);
                 let goal = e.goal_x.unwrap_or_else(|| l.caret_point(e.caret).x);
                 return Some((l.vertical(e.caret, goal, m == Motion::Down), Some(goal)));
             }
-            Motion::LineStart => l.line_bounds(e.caret).0,
-            Motion::LineEnd => l.line_bounds(e.caret).1,
+            Motion::LineStart => self.layout(self.edited()?.0).line_bounds(e.caret).0,
+            Motion::LineEnd => self.layout(self.edited()?.0).line_bounds(e.caret).1,
         };
         Some((c, None))
     }
@@ -413,6 +484,16 @@ impl Session {
     fn replace(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
         let (id, pending, mut end) = (e.id.clone(), e.pending, range.start);
+        if e.zone {
+            (self.history).change_zone(&mut self.doc, &id, |z| {
+                z.title.replace_range(range.clone(), text);
+                end = range.start + text.len();
+            });
+            return self.set_caret(Caret {
+                offset: end,
+                upstream: false,
+            });
+        }
         let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             end = s.text.replace(range.clone(), text);
@@ -434,7 +515,9 @@ impl Session {
     /// goes this way.
     fn replace_outside_history(&mut self, range: Range<usize>, text: &str) {
         let Some(e) = &self.editing else { return };
-        if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
+        if let Some(z) = self.doc.zones.iter_mut().find(|z| z.id == e.id) {
+            z.title.replace_range(range, text);
+        } else if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
             let end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = e.pending {
                 s.text.set_style(range.start..end, Style::Bold, bold);
@@ -464,7 +547,7 @@ impl Session {
         let Some(m) = self.editing.as_ref().and_then(|e| e.marked.clone()) else {
             return;
         };
-        let text = self.edited().map(|(_, s)| s[m.clone()].to_string());
+        let text = self.edited_text().map(|s| s[m.clone()].to_string());
         let at = self.drop_marked(m.start..m.start);
         self.replace(at, &text.unwrap_or_default());
     }
@@ -498,7 +581,7 @@ impl Session {
     /// Selects `range` of the edited text, caret at its end; ends past the text or inside a
     /// character move back to the nearest boundary.
     pub fn set_text_selection(&mut self, range: Range<usize>) {
-        let s = self.edited().map(|(_, s)| s).unwrap_or_default();
+        let s = self.edited_text().unwrap_or_default();
         self.set_caret(Caret {
             offset: s.floor_char_boundary(range.start),
             upstream: false,

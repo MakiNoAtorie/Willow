@@ -263,13 +263,9 @@ fn from16(s: &str, u: usize) -> usize {
 }
 
 impl Willow {
-    /// The edited shape's plain text; empty when not editing.
+    /// The edited shape's plain text or zone's title; empty when not editing.
     fn edited_text(&self) -> String {
-        let s = &self.session;
-        let id = s.editing().map(|e| &e.id);
-        (s.document().shapes.iter())
-            .find(|sh| Some(&sh.id) == id)
-            .map_or_else(String::new, |sh| sh.text.plain())
+        self.session.edited_text().unwrap_or_default()
     }
 }
 

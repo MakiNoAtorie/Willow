@@ -76,6 +76,11 @@ pub enum Input {
         button: Button,
         mods: Modifiers,
     },
+    /// The second press of a left double-click, sent after its `PointerDown`: on a zone's
+    /// title band, edits the title.
+    DoubleClick {
+        pos: Point,
+    },
     /// The pointer left the window: Paste goes to the view center until it is back.
     PointerLeft,
     /// Wheel or trackpad scroll at `pos`: how far the content should move, in screen pixels.

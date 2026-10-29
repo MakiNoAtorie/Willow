@@ -92,6 +92,7 @@ fn right_click_on_the_band_opens_the_zone_menu_and_elsewhere_in_the_zone_the_emp
     assert_eq!(
         items,
         [
+            (MenuAction::Rename, "Rename", false),
             (MenuAction::Dissolve, "Dissolve", false),
             (MenuAction::DeleteZone, "Delete", true),
         ]

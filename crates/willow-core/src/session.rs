@@ -1007,6 +1007,17 @@ impl Session {
                 self.key_pan_up(Some(side));
                 self.respond(false)
             }
+            // Zone edges win over the band, as on a press.
+            Input::DoubleClick { pos } => match self.band_at(pos) {
+                Some(i) if self.zone_edge_at(pos).is_none() => {
+                    // The press's band drag would move the zone being renamed.
+                    self.end_gesture();
+                    self.stop_editing();
+                    self.rename_zone(self.doc.zones[i].id.clone());
+                    self.respond(true)
+                }
+                _ => self.respond(false),
+            },
             Input::PointerLeft => {
                 self.pointer = None;
                 self.respond(false)

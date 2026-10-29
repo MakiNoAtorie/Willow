@@ -41,6 +41,8 @@ pub enum MenuAction {
     Delete,
     SelectChain,
     CreateZone,
+    /// Starts editing `Menu.zone`'s title.
+    Rename,
     /// Removes `Menu.zone`, keeping what it held one level up.
     Dissolve,
     /// Deletes `Menu.zone`, its nested zones and every member shape.
@@ -152,8 +154,8 @@ impl Session {
         });
     }
 
-    /// Opens the zone menu for zone `index`, whose band is under screen point `at`: its colors,
-    /// Dissolve and Delete. The selection stays.
+    /// Opens the zone menu for zone `index`, whose band is under screen point `at`: Rename, its
+    /// colors, Dissolve and Delete. The selection stays.
     pub(super) fn open_zone_menu(&mut self, at: Point, index: usize) {
         self.stop_editing();
         let z = &self.doc.zones[index];
@@ -167,8 +169,9 @@ impl Session {
                 destructive,
             })
         };
-        // Rename (#75) goes first, above its own separator.
         let entries = vec![
+            plain(MenuAction::Rename, "Rename", false),
+            MenuEntry::Separator,
             MenuEntry::Heading("Color", None),
             MenuEntry::Colors {
                 current: Some(current),
@@ -223,6 +226,12 @@ impl Session {
             MenuAction::Duplicate => self.duplicate(),
             MenuAction::SelectChain => self.select_chain(),
             MenuAction::CreateZone => self.create_zone(),
+            MenuAction::Rename => {
+                if let Some(id) = menu.zone {
+                    self.stop_editing();
+                    self.rename_zone(id);
+                }
+            }
             MenuAction::Dissolve => {
                 if let Some(id) = menu.zone {
                     self.dissolve_zone(&id);

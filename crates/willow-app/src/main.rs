@@ -315,6 +315,9 @@ impl Willow {
             let pos = self.local(e.position);
             let mods = mods(&e.modifiers);
             self.input(Input::PointerDown { pos, button, mods }, cx);
+            if button == Button::Left && e.click_count == 2 {
+                self.input(Input::DoubleClick { pos }, cx);
+            }
         }
     }
 
@@ -592,6 +595,21 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
         )
 }
 
+/// The caret `c` (canvas units) at zoom `z` and opacity `k`; its width is screen pixels at
+/// any zoom.
+fn paint_caret(
+    window: &mut Window,
+    origin: gpui::Point<Pixels>,
+    c: willow_core::CaretView,
+    t: &Theme,
+    z: f32,
+    k: f32,
+) {
+    let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
+    let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
+    window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
+}
+
 /// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
 fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut Window) {
     let (vp, t) = (session.viewport(), session.theme());
@@ -669,16 +687,32 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             Default::default(),
         ));
     }
+    let sel = &t.selection;
     for v in frame.zones.iter().filter(|v| v.show_title) {
-        let size = v.title_size * z;
+        for (a, c) in &v.selection {
+            window.paint_quad(gpui::fill(
+                Bounds::from_corners(at(*a), at(*c)),
+                color(sel.text),
+            ));
+        }
         text::paint_line(
             window,
             at(v.title_at),
             &v.zone.title,
             t,
             zt.title_weight,
-            size,
+            v.title_size * z,
         );
+        if let Some((a, c)) = v.marked {
+            let b = Bounds::new(
+                at(a),
+                size(px((c.x - a.x) * z), px(t.caret.marked_underline)),
+            );
+            window.paint_quad(gpui::fill(b, color(t.ink)));
+        }
+        if let Some(c) = v.caret {
+            paint_caret(window, origin, c, t, z, 1.0);
+        }
     }
     let width = frame.connector_width * z;
     let ink = color(t.connector.color);
@@ -693,7 +727,6 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
     }
 
-    let sel = &t.selection;
     for v in &frame.shapes {
         // A pushed shape paints off its place while it slides there.
         let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
@@ -763,10 +796,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }
         }
         if let Some(c) = v.caret {
-            // The caret's width is screen pixels at any zoom.
-            let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
-            let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-            window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
+            paint_caret(window, origin, c, t, z, k);
         }
     }
 

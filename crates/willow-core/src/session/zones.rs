@@ -30,7 +30,8 @@ impl Session {
     }
 
     /// Wraps the selected shapes in a new neutral zone, padded like the loader's, joining their
-    /// shared parent zone if any. One undo step; does nothing when `can_create_zone` is false.
+    /// shared parent zone if any, and edits its empty title. One undo step with that first
+    /// edit; does nothing when `can_create_zone` is false.
     pub(super) fn create_zone(&mut self) {
         let Some(parent) = self.zone_parent() else {
             return;
@@ -59,12 +60,23 @@ impl Session {
             height: ((hi.1 + pad).ceil() - y) as u32,
             members: members.iter().map(|s| s.id.clone()).collect(),
         };
+        // `stop_editing`'s end closes the step.
+        self.history.begin();
         self.history.step(&mut self.doc, |h, doc| {
             h.add_zone(doc, zone);
             if let Some(p) = &parent {
                 h.join_zone(doc, p, &id);
             }
         });
+        self.rename_zone(id);
+    }
+
+    /// Starts editing zone `id`'s title, caret at its end; callers end any editing first. Zones
+    /// are never selected: the shape selection clears. One undo step with the ops of an open
+    /// group, none if nothing changed.
+    pub(super) fn rename_zone(&mut self, id: ShapeId) {
+        self.select([]);
+        self.start_editing(id);
     }
 
     /// Paints zone `id` `color`, as one undo step; its members keep theirs.
