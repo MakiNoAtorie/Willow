@@ -313,7 +313,7 @@ Goal: group sections of the canvas (arcs, episodes) into containers. Zones nest 
 
 ### The title band
 
-- A zone's **title band** is the strip along its top edge where the title sits, a constant height on screen, there even when the title is empty or hidden. It is the only part of a zone the mouse grabs: drag it to move the zone, double-click it to rename, right-click it for the zone menu. A shape drawn over it wins the hit.
+- A zone's **title band** is the strip along its top edge where the title sits, a constant height on screen at 100% zoom and below (zoomed in, it grows with the title it holds), there even when the title is empty or hidden. It is the only part of a zone the mouse grabs: drag it to move the zone, double-click it to rename, right-click it for the zone menu. A shape drawn over it wins the hit.
 - The rest of a zone acts like empty canvas: dragging pans, a click deselects, Shift+drag draws a marquee, and right-click opens the empty-space menu (whose New shape joins the zone). Shift+drag starting on the band also draws a marquee; Shift+click on it does nothing.
 - Zones are never selected, like connectors. A press on the band clears the shape selection, like a click on empty space.
 - Hovering the band draws the zone's edge in the hovered-connector accent (Paper `#8b7760`), 2 px, following its corner radius. Cursors are those for moving a shape.
@@ -326,7 +326,7 @@ Goal: group sections of the canvas (arcs, episodes) into containers. Zones nest 
 - When a drag ends, each dropped shape (each shape of a multi-selection too) joins the innermost zone under its own center, or no zone. Where sibling zones overlap, the one drawn on top wins: the innermost zone under a point is always the one drawn on top there, and every rule that puts a shape in a zone uses it. So a member of a nested zone dropped inside the parent but outside the nested zone joins the parent.
 - Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The exceptions are new shapes: paste and duplicate place copies as in Phase 4, the empty-space New shape and Ctrl/Cmd+Shift+N join the innermost zone under them, and a new linked shape (midpoint creation, insert-and-push, Tab) joins its source shape's zone even when it lands outside the zone's rectangle. From Phase 8, a shape moved by the spacing pass is also judged as if dropped where it ends up.
 - A dropped zone is judged by its center too: it nests in the top-level zone under its center (nested zones are never targets), or becomes top-level when there is none. A zone that holds nested zones never nests, since that would make two levels; it just moves.
-- While shapes or a zone are being dragged, the zone the drop would join shows the hover ring, but only when the drop would change membership.
+- While shapes or a zone are being dragged, the zone the drop would join shows the hover ring, but only when the drop would change membership. For a multi-selection that is the pressed shape's target, or, when the pressed shape's zone would not change, the target of the first shape in story order whose zone would.
 - A dropped zone draws above any sibling zones it overlaps, and a zone always draws above its parent. Draw order is not saved: after a load, zones stack in story order, like shapes.
 
 ### Zone menu
