@@ -9,7 +9,10 @@ cache=${TMPDIR:-/tmp}/willow-drive
 mkdir -p "$cache"
 [ "$cache/click" -nt "$here/click.swift" ] || swiftc -O "$here/click.swift" -o "$cache/click"
 if (cd "$repo" && cargo build -q --release -p willow-app) 2>&1 | grep -E '^error'; then exit 1; fi
-"$repo/target/release/willow" ${WILLOW_ARGS:---generate 5} >"${out%.png}.log" 2>&1 &
+# Preferences and recovery files land here, never in the user's own app data.
+[ -n "$WILLOW_KEEP_HOME" ] || rm -rf "$cache/home"
+mkdir -p "$cache/home"
+HOME=$cache/home "$repo/target/release/willow" ${WILLOW_ARGS---generate 5} >"${out%.png}.log" 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null' EXIT
 sleep 3
@@ -24,6 +27,12 @@ for step in "$@"; do
   case $step in
     sleep:*) sleep "${step#sleep:}" ;;
     type:*) osa "keystroke \"${step#type:}\"" ;;
+    open:*)
+      osa 'keystroke "o" using {command down}'; sleep 1
+      osa 'keystroke "g" using {command down, shift down}'; sleep 0.5
+      osa "keystroke \"${step#open:}\""; sleep 0.5
+      osa 'key code 36'; sleep 0.8
+      osa 'key code 36'; sleep 1.5 ;;
     click:*|rclick:*|dclick:*|move:*|down:*|drag:*|up:*)
       xy=${step#*:}; x=$((wx + ${xy%,*})); y=$((wy + ${xy#*,}))
       case ${step%%:*} in click) b=left ;; rclick) b=right ;; dclick) b=double ;; *) b=${step%%:*} ;; esac
@@ -53,5 +62,6 @@ for step in "$@"; do
 done
 sleep 0.5
 screencapture -x -C -R"$wx,$wy,$ww,$wh" "$out"
-sips -Z 1200 "$out" >/dev/null
+# One image pixel per window point, so screenshot coordinates are click coordinates.
+sips -Z "$((ww > wh ? ww : wh))" "$out" >/dev/null
 echo "$out (window at $wx,$wy ${ww}x$wh points)"

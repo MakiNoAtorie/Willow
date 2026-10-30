@@ -30,11 +30,11 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
 
-7. Once all tickets are complete, call the Skill tool with `code-review` on the integration branch. Fix all issues raised by the code review in a single **implementer subagent**.
+7. Once all tickets are complete, call the Skill tool with `code-review` on the integration branch. While its reviewers run, run every macOS hand check in the tickets with the `drive-app` skill, Reading each screenshot. Fix everything both raise in a single **implementer subagent**, so hand-check findings land with the review's.
 
-8. Fold the scratchpad's convention bullets into `docs/CONVENTIONS.md` in one commit, keeping only rules a later phase must follow and pruning so `ci.sh`'s 8 KB check passes.
+8. After that implementer merges, run the hand checks its fixes touched, and rerun bench mode if they touched a measured path. Done means each check is passed, fixed through the same implementer, or listed in the PR body as needing a human (feel, smoothness, Windows). Phase 4's menus shipped invisible because these checks were left for later.
 
-9. Run every macOS hand check in the tickets with the `drive-app` skill, Reading each screenshot. Done means each check is passed, fixed through the review-fix implementer, or listed in the PR body as needing a human (feel, smoothness, Windows). Phase 4's menus shipped invisible because these checks were left for later.
+9. Fold the scratchpad's convention bullets in one commit, last, so they name the code as merged: rules every ticket needs into `docs/CONVENTIONS.md`, rules one subsystem needs into `docs/conventions/<area>.md` behind a one-line pointer, keeping only rules a later phase must follow and pruning so `ci.sh`'s 8 KB check passes.
 
 10. If a draft PR exists, mark it ready for review. Otherwise, resolve each ticket the way the issue tracker closes work, and report the integration branch.
 
