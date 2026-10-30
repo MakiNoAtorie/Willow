@@ -31,3 +31,12 @@ First run on the cold/warm split from #65 and the first since Phase 5. Every tar
 
 - The first run of the scenario showed a 2.05 s frame: the drop. `History::order_zones` looked up each zone's parent by scanning every zone's member list, inside a loop over all zone pairs. It now hashes the parents once; the drop is milliseconds.
 - The same first run pressed 15 px into the band, which probably hit a member shape, so its p95 (5.2–5.6 ms) was a shape drag's. The bench now picks the press point with `Session::band_at` and fails if none hits the zone.
+
+## Code panel, 10,000 shapes (`mba-m4`, #88, rows at `2d7ea6a`)
+
+The panel text of the generated document is about 1 MB. Every target holds: panel typing `draw_p95` 5.0 ms (target ≤ 8 ms), no late frames, each keystroke handled in ≤ 0.33 ms; applying text: `check` 19 ms off the UI thread plus `apply` 5.4 ms on it (target ≤ 100 ms); regeneration `run` 5.9 ms off the UI thread (target ≤ 50 ms), `take` 2.2 ms on it; `idle_panel_open` 0 renders, 0.57% CPU, the same as the canvas idle rows. The other scenarios are unchanged (draw p95 ≤ 6.3 ms).
+
+- Before the fix each panel keystroke wrapped the whole text again: about 11 ms per key, outside `draw`. Typing now rewraps only the lines it touches (about 0.3 ms per key). A full rewrap (new text from a regeneration, or a panel width step) is about 3 ms, since lines that fit skip wrapping and ASCII lines skip the grapheme segmenter.
+- The first run with #86 merged showed `apply` at 189 ms: the direction-word check scanned every link once per shape. The links are hashed once now.
+- `undo` (Undo in the panel after an applied edit) is 10.7 ms on the UI thread: it checks the 1 MB text it brings back. No target covers it; it is one late frame per Undo.
+- `dirty_to_present_p95` while panel typing is 15 ms (canvas typing in the same run: 18 ms), with no late frames.
