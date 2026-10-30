@@ -243,6 +243,15 @@ impl Session {
         since >= c.idle || (since.as_millis() / c.blink.as_millis()) % 2 == 0
     }
 
+    /// Where `shape`'s text starts as drawn, in canvas units.
+    fn text_origin(&self, shape: &Shape) -> Point {
+        let (x, y) = self.drawn_at(shape);
+        Point {
+            x: x as f32 + self.theme.shape.pad_x,
+            y: y as f32 + self.theme.shape.pad_y,
+        }
+    }
+
     /// The caret to draw at `now`, while editing.
     pub fn caret(&self, now: Duration) -> Option<CaretView> {
         let (e, t) = (self.editing.as_ref()?, self.theme);
@@ -250,10 +259,13 @@ impl Session {
             (self.title_point(e.caret.offset)?, self.title_line())
         } else {
             let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
-            let p = self.layout(shape).caret_point(e.caret);
+            let (p, o) = (
+                self.layout(shape).caret_point(e.caret),
+                self.text_origin(shape),
+            );
             let pos = Point {
-                x: shape.x as f32 + t.shape.pad_x + p.x,
-                y: shape.y as f32 + t.shape.pad_y + p.y,
+                x: o.x + p.x,
+                y: o.y + p.y,
             };
             (pos, t.line_height())
         };
@@ -276,11 +288,10 @@ impl Session {
             offset,
             upstream: false,
         };
-        let p = self.layout(shape).caret_point(c);
-        let pad = &self.theme.shape;
+        let (p, o) = (self.layout(shape).caret_point(c), self.text_origin(shape));
         Some(Point {
-            x: shape.x as f32 + pad.pad_x + p.x,
-            y: shape.y as f32 + pad.pad_y + p.y,
+            x: o.x + p.x,
+            y: o.y + p.y,
         })
     }
 
@@ -306,7 +317,7 @@ impl Session {
     fn nearest_view_center(&self) -> Option<ShapeId> {
         let c = self.viewport.center();
         let dist = |s: &Shape| {
-            let p = s.center(self.shape_height(s));
+            let p = self.drawn(s).center();
             (p.x - c.x).hypot(p.y - c.y)
         };
         (self.doc.shapes.iter())
@@ -399,11 +410,8 @@ impl Session {
         let Some((shape, _)) = self.edited() else {
             return Caret::default();
         };
-        let (c, pad) = (self.viewport.to_canvas(p), &self.theme.shape);
-        self.layout(shape).caret_at(Point {
-            x: c.x - shape.x as f32 - pad.pad_x,
-            y: c.y - shape.y as f32 - pad.pad_y,
-        })
+        self.layout(shape)
+            .caret_at(self.viewport.to_canvas(p) - self.text_origin(shape))
     }
 
     /// Puts the caret at `c` with nothing selected, and restarts the blink.
@@ -439,10 +447,10 @@ impl Session {
         let Some((shape, _)) = self.edited() else {
             return Vec::new();
         };
-        let (pad, lh) = (&self.theme.shape, self.theme.line_height());
+        let (origin, lh) = (self.text_origin(shape), self.theme.line_height());
         let o = |p: Point| Point {
-            x: shape.x as f32 + pad.pad_x + p.x,
-            y: shape.y as f32 + pad.pad_y + p.y,
+            x: origin.x + p.x,
+            y: origin.y + p.y,
         };
         let rects = self.layout(shape).selection_rects(sel, lh);
         rects.into_iter().map(|(a, b)| (o(a), o(b))).collect()

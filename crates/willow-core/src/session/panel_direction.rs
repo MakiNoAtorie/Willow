@@ -53,7 +53,7 @@ impl Session {
         let linked = |a, b| links.contains(&(a, b)) || links.contains(&(b, a));
         let was = |s: &Shape, a: &Shape| match self.panel.words.get(&s.id) {
             Some((anchor, side)) if *anchor == a.id => *side,
-            _ => side(a.center(height(a)), s.center(height(s))),
+            _ => side(self.drawn(a).center(), self.drawn(s).center()),
         };
         let index: HashMap<&ShapeId, usize> = (new.shapes.iter().enumerate())
             .map(|(i, s)| (&s.id, i))

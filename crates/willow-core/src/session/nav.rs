@@ -6,12 +6,17 @@ use std::time::Duration;
 use super::Session;
 use crate::{Document, Link, Point, ShapeId, Side, side};
 
-/// The shape (index into `doc.shapes`) an arrow toward `dir` goes to from shape `from`; each
-/// shape is `heights` tall. A shape lies toward `dir` by the link-side rule on centers. Linked
+/// The shape (index into `doc.shapes`) an arrow toward `dir` goes to from shape `from`, by the
+/// shapes' drawn `centers`. A shape lies toward `dir` by the link-side rule on centers. Linked
 /// shapes that way win, else any shape that way; the nearest by center, ties by ID.
-pub(crate) fn next_shape(doc: &Document, heights: &[f32], from: usize, dir: Side) -> Option<usize> {
+pub(crate) fn next_shape(
+    doc: &Document,
+    centers: &[Point],
+    from: usize,
+    dir: Side,
+) -> Option<usize> {
     let shapes = &doc.shapes;
-    let center = |i: usize| shapes[i].center(heights[i]);
+    let center = |i: usize| centers[i];
     let at = center(from);
     let distance = |i: usize| {
         let c = center(i);
@@ -62,21 +67,14 @@ impl Session {
         let Some(i) = self.index_of(id) else {
             return;
         };
-        let s = &self.doc.shapes[i];
-        let (h, vp) = (self.shape_height(s), self.viewport);
+        let (r, vp) = (self.drawn(&self.doc.shapes[i]), self.viewport);
         let rest = self.follow.map_or(Point::default(), |f| Point {
             x: f.delta.x * (1.0 - f.done),
             y: f.delta.y * (1.0 - f.done),
         });
         let (z, m) = (vp.zoom, self.theme.follow_margin / vp.zoom);
-        let (x, y) = (s.x as f32, s.y as f32);
-        let dx = shift(
-            x,
-            x + s.width as f32,
-            (vp.origin.x + rest.x, vp.size.x / z),
-            m,
-        );
-        let dy = shift(y, y + h, (vp.origin.y + rest.y, vp.size.y / z), m);
+        let dx = shift(r.x, r.right(), (vp.origin.x + rest.x, vp.size.x / z), m);
+        let dy = shift(r.y, r.bottom(), (vp.origin.y + rest.y, vp.size.y / z), m);
         let delta = Point {
             x: rest.x + dx,
             y: rest.y + dy,
@@ -119,7 +117,10 @@ impl Session {
             self.key_pan_down(dir);
             return true;
         };
-        let Some(to) = next_shape(&self.doc, &heights, from, dir) else {
+        let centers: Vec<Point> = (self.doc.shapes.iter())
+            .map(|s| self.drawn(s).center())
+            .collect();
+        let Some(to) = next_shape(&self.doc, &centers, from, dir) else {
             // Nothing that way: a multi-selection still collapses, the view stays.
             self.select([self.doc.shapes[from].id.clone()]);
             return self.selected != old;

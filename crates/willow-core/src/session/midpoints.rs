@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::{Gesture, Session};
+use super::{DrawnRect, Gesture, Session};
 use crate::input::Point;
 use crate::{Shape, ShapeId, Side};
 
@@ -21,9 +21,14 @@ pub(super) struct Midpoints {
     created: Option<(ShapeId, Duration)>,
 }
 
-/// The midpoint of `side` of shape `s`, `h` tall, in canvas units.
-pub(super) fn edge_midpoint(s: &Shape, h: f32, side: Side) -> Point {
-    let (x, y, w) = (s.x as f32, s.y as f32, s.width as f32);
+/// The midpoint of `side` of a drawn rectangle, in canvas units.
+pub(super) fn edge_midpoint(r: DrawnRect, side: Side) -> Point {
+    let DrawnRect {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = r;
     match side {
         Side::Top => Point { x: x + w / 2.0, y },
         Side::Bottom => Point {
@@ -47,7 +52,8 @@ impl Session {
             MIDPOINT_HIT / self.viewport.zoom,
         );
         let i = self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = (s.x as f32, s.y as f32);
+            let (x, y) = self.drawn_at(s);
+            let (x, y) = (x as f32, y as f32);
             (x - r..=x + s.width as f32 + r).contains(&c.x)
                 && (y - r..=y + self.shape_height(s) + r).contains(&c.y)
         })?;
@@ -58,10 +64,9 @@ impl Session {
     /// The midpoint under screen point `p`: its shape's index and side.
     pub(super) fn midpoint_at(&self, p: Point) -> Option<(usize, Side)> {
         let i = self.near(p)?;
-        let (s, vp) = (&self.doc.shapes[i], self.viewport);
-        let h = self.shape_height(s);
+        let (r, vp) = (self.drawn(&self.doc.shapes[i]), self.viewport);
         let hit = |&side: &Side| {
-            let m = vp.to_screen(edge_midpoint(s, h, side));
+            let m = vp.to_screen(edge_midpoint(r, side));
             (m.x - p.x).hypot(m.y - p.y) <= MIDPOINT_HIT
         };
         SIDES.into_iter().find(hit).map(|side| (i, side))
@@ -87,8 +92,8 @@ impl Session {
         let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
             return Vec::new();
         };
-        let h = self.shape_height(s);
-        SIDES.map(|side| edge_midpoint(s, h, side)).to_vec()
+        let r = self.drawn(s);
+        SIDES.map(|side| edge_midpoint(r, side)).to_vec()
     }
 
     /// Creates an empty shape linked to `id` on `side`, one creation gap away (placed as the

@@ -6,6 +6,9 @@ mod beside;
 mod clipboard;
 mod color_picker;
 mod delete;
+mod drawn;
+#[cfg(test)]
+mod drawn_tests;
 mod drop;
 mod editing;
 mod file;
@@ -42,6 +45,7 @@ use crate::layout::{Align, Layout, Measure, layout};
 use crate::zoom::{ZOOM_NOTCH_PX, Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
+pub use drawn::DrawnRect;
 pub use editing::{CaretView, Editing};
 pub use panel::{Panel, PanelRow, Regenerated, Regeneration, Span};
 pub use panel_apply::{TextCheck, TextChecked};
@@ -111,7 +115,7 @@ enum Gesture {
         click: Option<Point>,
     },
     /// Left press on the shape at `index`. Once dragged past `DRAG_START`, `to` is the
-    /// previewed top-left; release then moves the shape there instead of selecting it.
+    /// previewed top-left; release then moves the shape as far instead of selecting it.
     Press {
         index: usize,
         from: Point,
@@ -256,6 +260,9 @@ pub struct Session {
     key_pan: Vec<keypan::Press>,
     /// The code panel.
     panel: panel::Panel,
+    /// Offsets tests set by hand, so that a read of the placed position shows.
+    #[cfg(test)]
+    drawn_offsets: HashMap<ShapeId, (i32, i32)>,
 }
 
 impl Session {
@@ -301,6 +308,8 @@ impl Session {
             links: Default::default(),
             pointer: None,
             now: Duration::ZERO,
+            #[cfg(test)]
+            drawn_offsets: HashMap::new(),
         }
     }
 
@@ -620,10 +629,10 @@ impl Session {
             y: height,
         };
         if first && let Some(s) = self.doc.shapes.first() {
-            let (w, h) = (s.width as f32, self.shape_height(s));
+            let r = self.drawn(s);
             self.viewport.origin = Point {
-                x: s.x as f32 - ((width - w) / 2.0).round(),
-                y: s.y as f32 - ((height - h) / 2.0).round(),
+                x: r.x - ((width - r.width) / 2.0).round(),
+                y: r.y - ((height - r.height) / 2.0).round(),
             };
         }
         self.respond(true)
@@ -837,6 +846,12 @@ impl Session {
                 self.respond(true)
             }
             Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::Press { .. })) =>
+            {
+                let dragged = self.drag_to(pos);
+                self.respond(dragged)
+            }
+            Input::PointerMove { pos, .. }
                 if matches!(self.gesture, Some(Gesture::ZoneResize { .. })) =>
             {
                 self.zone_resize_to(pos);
@@ -858,18 +873,6 @@ impl Session {
                     self.viewport.pan(d);
                     self.respond(true)
                 }
-                Some(Gesture::Press { index, from, to }) => {
-                    let d = pos - *from;
-                    if to.is_none() && d.x.hypot(d.y) < DRAG_START {
-                        return self.respond(false);
-                    }
-                    let (s, z) = (&self.doc.shapes[*index], self.viewport.zoom);
-                    *to = Some((
-                        (s.x as f32 + d.x / z).round() as i32,
-                        (s.y as f32 + d.y / z).round() as i32,
-                    ));
-                    self.respond(true)
-                }
                 Some(Gesture::Band { index, from, to }) => {
                     let d = pos - *from;
                     if to.is_none() && d.x.hypot(d.y) < DRAG_START {
@@ -887,7 +890,9 @@ impl Session {
                     self.extend_to(caret, None);
                     self.respond(true)
                 }
-                Some(Gesture::Resize { .. } | Gesture::ZoneResize { .. }) => self.respond(false),
+                Some(
+                    Gesture::Press { .. } | Gesture::Resize { .. } | Gesture::ZoneResize { .. },
+                ) => self.respond(false),
                 Some(Gesture::Midpoint { from, dragged, .. }) => {
                     let d = pos - *from;
                     *dragged |= d.x.hypot(d.y) >= DRAG_START;
@@ -932,9 +937,8 @@ impl Session {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
-                            Some((x, y)) => {
-                                let s = &self.doc.shapes[index];
-                                let (dx, dy) = (x - s.x, y - s.y);
+                            Some(to) => {
+                                let (dx, dy) = self.dragged(index, to);
                                 self.drop_shapes(&[id], dx, dy);
                             }
                             None if mods.shift => self.toggle_selected(id),
@@ -1195,6 +1199,25 @@ impl Session {
         self.zoom.pill(self.theme, now)
     }
 
+    /// Updates the previewed top-left of the press gesture for the pointer at `pos`; false
+    /// while it hasn't become a drag.
+    fn drag_to(&mut self, pos: Point) -> bool {
+        let Some(Gesture::Press { index, from, to }) = self.gesture else {
+            return false;
+        };
+        let (d, z) = (pos - from, self.viewport.zoom);
+        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+            return false;
+        }
+        let (x, y) = self.drawn_at(&self.doc.shapes[index]);
+        let to = Some((
+            (x as f32 + d.x / z).round() as i32,
+            (y as f32 + d.y / z).round() as i32,
+        ));
+        self.gesture = Some(Gesture::Press { index, from, to });
+        true
+    }
+
     /// Updates the previewed size of the resize gesture for the pointer at `pos`.
     fn resize_to(&mut self, pos: Point) {
         let Some(Gesture::Resize {
@@ -1243,12 +1266,10 @@ impl Session {
     fn edge_at(&self, p: Point) -> Option<(usize, Edge)> {
         let g = EDGE_GRAB;
         for (i, s) in self.doc.shapes.iter().enumerate().rev() {
-            let tl = self.viewport.to_screen(Point {
-                x: s.x as f32,
-                y: s.y as f32,
-            });
+            let r = self.drawn(s);
+            let tl = self.viewport.to_screen(Point { x: r.x, y: r.y });
             let z = self.viewport.zoom;
-            let (w, h) = (s.width as f32 * z, self.shape_height(s) * z);
+            let (w, h) = (r.width * z, r.height * z);
             if !(tl.x - g..=tl.x + w + g).contains(&p.x)
                 || !(tl.y - g..=tl.y + h + g).contains(&p.y)
             {
@@ -1274,7 +1295,8 @@ impl Session {
     fn shape_at(&self, p: Point) -> Option<usize> {
         let c = self.viewport.to_canvas(p);
         self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = (s.x as f32, s.y as f32);
+            let (x, y) = self.drawn_at(s);
+            let (x, y) = (x as f32, y as f32);
             (x..=x + s.width as f32).contains(&c.x) && (y..=y + self.shape_height(s)).contains(&c.y)
         })
     }

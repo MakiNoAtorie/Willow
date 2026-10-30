@@ -25,8 +25,8 @@ impl Session {
         if order.is_empty() {
             return;
         }
-        let center: HashMap<ShapeId, Point> = (shapes.iter().zip(&heights))
-            .map(|(s, &h)| (s.id.clone(), s.center(h)))
+        let center: HashMap<ShapeId, Point> = (shapes.iter())
+            .map(|s| (s.id.clone(), self.drawn(s).center()))
             .collect();
         self.history.step(&mut self.doc, |h, doc| {
             for id in &order {

@@ -24,9 +24,9 @@ pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Align, Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{
-    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Panel,
-    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck, TextChecked,
-    Viewport,
+    CaretView, DragPreview, DrawnRect, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind,
+    Panel, PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck,
+    TextChecked, Viewport,
 };
 pub use theme::{
     CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
@@ -140,7 +140,7 @@ impl Shape {
         }
     }
 
-    /// The center of the shape drawn `height` tall, in canvas units.
+    /// The center of the shape `height` tall at its placed position, in canvas units.
     pub fn center(&self, height: f32) -> Point {
         Point {
             x: self.x as f32 + self.width as f32 / 2.0,

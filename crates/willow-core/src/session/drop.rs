@@ -39,7 +39,7 @@ impl Session {
 
     /// The innermost zone under shape `s`'s center moved by (dx, dy).
     fn zone_under_moved(&self, s: &Shape, dx: i32, dy: i32) -> Option<ShapeId> {
-        let c = s.center(self.shape_height(s));
+        let c = self.drawn(s).center();
         self.innermost_zone(Point {
             x: c.x + dx as f32,
             y: c.y + dy as f32,
@@ -58,8 +58,7 @@ impl Session {
         else {
             return None;
         };
-        let s = &self.doc.shapes[index];
-        let (dx, dy) = (x - s.x, y - s.y);
+        let (s, (dx, dy)) = (&self.doc.shapes[index], self.dragged(index, (x, y)));
         let to = match self.drop_change(s, dx, dy) {
             Some((_, Some(to))) => to,
             _ => self.group_drag().and(self.first_drop_target(dx, dy))?,

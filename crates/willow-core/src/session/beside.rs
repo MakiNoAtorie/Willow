@@ -16,12 +16,12 @@ impl Session {
                 let from = &self.doc.shapes[i];
                 let right = (self.doc.chain(&from.id).into_iter())
                     .filter_map(|c| self.doc.shapes.iter().find(|s| &s.id == c))
-                    .map(|s| s.x + s.width as i32)
+                    .map(|s| self.drawn_at(s).0 + s.width as i32)
                     .max()
                     .expect("the chain holds its start");
                 Point {
                     x: right as f32 + self.theme.creation_gap + w / 2.0,
-                    y: from.y as f32 + h / 2.0,
+                    y: self.drawn_at(from).1 as f32 + h / 2.0,
                 }
             }
             None => self.viewport.center(),

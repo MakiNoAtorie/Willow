@@ -107,7 +107,8 @@ pub struct VisibleZone<'a> {
 pub struct Visible<'a> {
     /// The resize preview's shape while the shape is being resized.
     pub shape: Cow<'a, Shape>,
-    /// Top-left in canvas units: the drag preview's while the shape is dragged.
+    /// Drawn top-left in canvas units: the drag preview's while the shape is dragged. Read
+    /// this, not `shape.x` and `shape.y`, which are the placed position.
     pub x: i32,
     pub y: i32,
     /// Drawn height in canvas units.
@@ -150,18 +151,16 @@ impl Session {
             None => (None, HashSet::new()),
         };
         let doc = self.document();
-        // A shape as the gesture in progress previews it: its shape and top-left.
-        let placed = |s: &'a Shape| {
+        // A shape as the gesture in progress previews it: its shape and drawn top-left.
+        let shown = |s: &'a Shape| {
             let s = match &resized {
                 Some(r) if r.id == s.id => Cow::Owned(r.clone()),
                 _ => Cow::Borrowed(s),
             };
-            let (x, y) = match preview {
-                Some(p) if *p.id == s.id => (p.x, p.y),
-                _ => (s.x, s.y),
-            };
-            let (x, y) = match group {
-                Some((dx, dy)) if moved.contains(&s.id) => (s.x + dx, s.y + dy),
+            let (x, y) = self.drawn_at(&s);
+            let (x, y) = match (group, preview) {
+                (Some((dx, dy)), _) if moved.contains(&s.id) => (x + dx, y + dy),
+                (_, Some(p)) if *p.id == s.id => (p.x, p.y),
                 _ => (x, y),
             };
             (s, x, y)
@@ -174,7 +173,7 @@ impl Session {
             let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
                 continue;
             };
-            let ((p, px, py), (q, qx, qy)) = (placed(p), placed(q));
+            let ((p, px, py), (q, qx, qy)) = (shown(p), shown(q));
             // Cull on what's known without layout first.
             let (left, right) = (px.min(qx), (px + p.width as i32).max(qx + q.width as i32));
             if left as f32 > b.x || (right as f32) < a.x || py.min(qy) as f32 > b.y {
@@ -186,10 +185,10 @@ impl Session {
             }
             // A sliding shape's connector end slides with it, a previewed one with the preview.
             let center = |s: &Shape, x: i32, y: i32, h: f32| {
-                let (c, o) = (s.center(h), self.sliding(&s.id, now));
+                let o = self.sliding(&s.id, now);
                 Point {
-                    x: c.x + (x - s.x) as f32 + o.x,
-                    y: c.y + (y - s.y) as f32 + o.y,
+                    x: x as f32 + s.width as f32 / 2.0 + o.x,
+                    y: y as f32 + h / 2.0 + o.y,
                 }
             };
             let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));
@@ -261,7 +260,7 @@ impl Session {
             .collect();
         let shapes = (doc.shapes.iter())
             .filter_map(|s| {
-                let (s, x, y) = placed(s);
+                let (s, x, y) = shown(s);
                 let (fx, fy) = (x as f32, y as f32);
                 // Cull on what's known without layout first: layout is the costly part.
                 if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {

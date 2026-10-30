@@ -14,11 +14,8 @@ impl Session {
         let Some(i) = self.index_of(&id) else {
             return;
         };
-        let s = &self.doc.shapes[i];
-        let at = self.viewport.to_screen(Point {
-            x: s.x as f32,
-            y: s.y as f32,
-        });
+        let r = self.drawn(&self.doc.shapes[i]);
+        let at = self.viewport.to_screen(Point { x: r.x, y: r.y });
         let entries = vec![MenuEntry::Colors {
             current: Some(self.doc.shapes[i].color),
         }];

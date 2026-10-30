@@ -12,6 +12,7 @@ impl Session {
     /// What Copy and Cut put on the clipboard: while the code panel has focus, its selected
     /// text; while editing, the selected text; otherwise the selected shapes as a whole
     /// `willow 1` document with the links among them, their colors and layout, and no zones.
+    /// Its `@layout` lines hold the drawn positions: a copy is what the writer saw.
     pub fn clipboard_text(&self) -> Option<String> {
         if self.panel.focused {
             return self.panel_selected_text();
@@ -27,13 +28,17 @@ impl Session {
         Some(format::save(&doc, &heights))
     }
 
-    /// The shapes `ids` (document order) and the links among them.
+    /// Copies of the shapes `ids` (document order) placed where the originals are drawn, and
+    /// the links among them.
     fn copied(&self, ids: &[ShapeId]) -> Document {
         let set: HashSet<&ShapeId> = ids.iter().collect();
         Document {
             shapes: (self.doc.shapes.iter())
                 .filter(|s| set.contains(&s.id))
-                .cloned()
+                .map(|s| {
+                    let (x, y) = self.drawn_at(s);
+                    Shape { x, y, ..s.clone() }
+                })
                 .collect(),
             links: (self.doc.links.iter())
                 .filter(|Link(a, b)| set.contains(a) && set.contains(b))

@@ -9,7 +9,7 @@ use super::Session;
 use crate::input::Point;
 use crate::{Link, Shape, ShapeId, Side};
 
-/// A shape's drawn rectangle: its edges in canvas units.
+/// A shape's placed rectangle, what pushes work on: its edges in canvas units.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Rect {
     l: f32,
@@ -152,13 +152,13 @@ impl Session {
         }
     }
 
-    /// The drawn rectangle of shape `id`.
+    /// The placed rectangle of shape `id`.
     pub(super) fn rect_of(&self, id: &ShapeId) -> Option<Rect> {
         let s = self.doc.shapes.iter().find(|s| &s.id == id)?;
         Some(self.rect(s))
     }
 
-    /// The drawn rectangle of the shape at index `i`.
+    /// The placed rectangle of the shape at index `i`.
     pub(super) fn rect_at(&self, i: usize) -> Option<Rect> {
         self.doc.shapes.get(i).map(|s| self.rect(s))
     }
@@ -283,11 +283,11 @@ impl Session {
         beyond(self.doc.shapes.len(), &self.link_ends(), root, from)
     }
 
-    /// The shapes linked to `id` on its `side` (by the side rule), nearest center first; ties
-    /// go in generation order.
+    /// The shapes linked to `id` on the `side` the writer sees (the side rule on drawn centers),
+    /// nearest center first; ties go in generation order.
     pub(super) fn linked_on(&self, id: &ShapeId, side: Side) -> Vec<ShapeId> {
         let find = |id: &ShapeId| self.doc.shapes.iter().find(|s| &s.id == id);
-        let center = |s: &Shape| s.center(self.shape_height(s));
+        let center = |s: &Shape| self.drawn(s).center();
         let Some(c) = find(id).map(center) else {
             return Vec::new();
         };

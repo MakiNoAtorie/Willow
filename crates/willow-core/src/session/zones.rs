@@ -37,8 +37,10 @@ impl Session {
         let members: Vec<_> = (self.doc.shapes.iter())
             .filter(|s| self.selected.contains(&s.id))
             .collect();
-        let rects = (members.iter())
-            .map(|s| (s.x as f32, s.y as f32, s.width as f32, self.shape_height(s)));
+        let rects = (members.iter()).map(|s| {
+            let r = self.drawn(s);
+            (r.x, r.y, r.width, r.height)
+        });
         let Some((x, y, width, height)) = crate::format::wrap(rects, self.theme.zone.padding)
         else {
             return;
