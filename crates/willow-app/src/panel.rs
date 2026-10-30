@@ -4,7 +4,7 @@
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, DispatchPhase, Entity, FontWeight, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, ShapedLine, TextAlign,
-    TextRun, Window, canvas, div, point, prelude::*, px,
+    TextRun, UnderlineStyle, Window, canvas, div, fill, point, prelude::*, px,
 };
 use willow_core::{Input, Session};
 
@@ -42,7 +42,10 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
     let entity = cx.entity();
     let rows = canvas(
         move |bounds, window, cx| shape_rows(bounds, &entity.read(cx).session, window),
-        move |_, rows, window, cx| {
+        move |_, (rows, tints), window, cx| {
+            for b in tints {
+                window.paint_quad(fill(b, color(c.invalid_tint)));
+            }
             for (line, at) in rows {
                 // A glyph that fails to paint only loses that glyph.
                 let h = px(c.row_height());
@@ -91,13 +94,14 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
     )
 }
 
-/// Every row in view shaped, with where its line box's top-left goes; line numbers are
-/// right-aligned in the gutter.
+/// Every row in view shaped, with where its line box's top-left goes, and the invalid rows'
+/// tints; line numbers are right-aligned in the gutter.
+#[allow(clippy::type_complexity)]
 fn shape_rows(
     bounds: Bounds<Pixels>,
     session: &Session,
     window: &mut Window,
-) -> Vec<(ShapedLine, gpui::Point<Pixels>)> {
+) -> (Vec<(ShapedLine, gpui::Point<Pixels>)>, Vec<Bounds<Pixels>>) {
     let (t, text) = (session.theme(), session.panel().text());
     let (c, size) = (&t.code, px(t.code.font_size));
     let font = |bold: bool| {
@@ -109,21 +113,32 @@ fn shape_rows(
         };
         f
     };
-    let run = |len: usize, ink, bold| TextRun {
+    let run = |len: usize, ink, bold, invalid: bool| TextRun {
         len,
         font: font(bold),
         color: color(ink),
         background_color: None,
-        underline: None,
+        underline: invalid.then(|| UnderlineStyle {
+            thickness: px(c.invalid_width),
+            color: Some(color(c.invalid)),
+            wavy: true,
+        }),
         strikethrough: None,
     };
     let ts = window.text_system().clone();
-    let mut out = Vec::new();
+    let (mut out, mut tints) = (Vec::new(), Vec::new());
     for r in session.panel_rows() {
         let top = bounds.origin.y + px(r.y);
+        if r.invalid {
+            let at = point(bounds.origin.x, top);
+            tints.push(Bounds::new(
+                at,
+                gpui::size(bounds.size.width, px(c.row_height())),
+            ));
+        }
         if let Some(n) = r.number {
             let n = n.to_string();
-            let runs = [run(n.len(), c.gutter, false)];
+            let runs = [run(n.len(), c.gutter, false, false)];
             let line = ts.shape_line(n.into(), size, &runs, None);
             let x = bounds.origin.x + px(c.gutter_width - c.gutter_gap) - line.width;
             out.push((line, point(x, top)));
@@ -132,13 +147,13 @@ fn shape_rows(
             continue;
         }
         let runs: Vec<TextRun> = (r.spans.iter())
-            .map(|s| run(s.range.len(), s.color, s.bold))
+            .map(|s| run(s.range.len(), s.color, s.bold, r.invalid))
             .collect();
         let line = ts.shape_line(text[r.range].to_string().into(), size, &runs, None);
         let x = bounds.origin.x + px(c.gutter_width);
         out.push((line, point(x, top)));
     }
-    out
+    (out, tints)
 }
 
 /// `button` (the toggle's click area in the title bar) with the panel icon centered in it; a

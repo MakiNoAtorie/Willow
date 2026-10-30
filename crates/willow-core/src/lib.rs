@@ -1,6 +1,7 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
 mod chain;
+mod check;
 mod draw;
 mod edit;
 mod format;
@@ -15,6 +16,7 @@ mod theme;
 mod zoom;
 
 pub use chain::{Link, Side, side};
+pub use check::{LineKind, check};
 pub use draw::{Appear, Connector, Frame, LinkDrag, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;

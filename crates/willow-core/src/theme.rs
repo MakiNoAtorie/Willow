@@ -363,8 +363,9 @@ pub struct CodeStyle {
     pub string: Rgba,
     pub direction: Rgba,
     pub layout: Rgba,
-    /// An invalid line's wavy underline and its line tint.
+    /// An invalid line's wavy underline, its thickness, and the line's tint.
     pub invalid: Rgba,
+    pub invalid_width: f32,
     pub invalid_tint: Rgba,
     pub toggle: ToggleStyle,
 }
@@ -771,6 +772,7 @@ pub const PAPER: Theme = Theme {
         direction: hex(0x8a6fae),
         layout: hex(0xa39b8f),
         invalid: hex(0xd9776c),
+        invalid_width: 1.0,
         invalid_tint: rgba(217, 119, 108, 0.06),
         // The mockup's 16 x 14 SVG: outline inset .75, divider at 10, fill 10..14.6 x 1.4..12.6.
         toggle: ToggleStyle {

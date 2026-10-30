@@ -14,6 +14,8 @@ pub enum Recovery {
         document: Document,
         heights: Vec<f32>,
     },
+    /// Write this text to it: the code panel's, which holds the document.
+    Text(String),
     /// Delete it: the document went back to its saved state.
     Delete,
 }

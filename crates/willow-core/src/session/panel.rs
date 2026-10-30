@@ -9,7 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::Session;
 use crate::input::{Input, Response};
 use crate::syntax::{Token, tokens};
-use crate::{Document, Rgba, format};
+use crate::{Document, LineKind, Rgba, format};
 
 /// The code panel of one window. Starts closed, with no text.
 #[derive(Clone, Debug)]
@@ -24,6 +24,11 @@ pub struct Panel {
     text: String,
     /// The history revision the text was last regenerated for; `None` forces the next.
     regenerated: Option<u64>,
+    /// The history revision whose document the text holds: Save and recovery write the text
+    /// while it is the current one.
+    held: Option<u64>,
+    /// What each line is (`check`); empty while every line is fine.
+    lines: Vec<LineKind>,
     /// Where each line's rows start, for the text and column count it was made for.
     rows: RefCell<Option<Rows>>,
 }
@@ -37,6 +42,8 @@ impl Panel {
             scroll: 0.0,
             text: String::new(),
             regenerated: None,
+            held: None,
+            lines: Vec::new(),
             rows: RefCell::default(),
         }
     }
@@ -66,6 +73,8 @@ pub struct PanelRow {
     pub range: Range<usize>,
     /// Colored runs covering `range` in order.
     pub spans: Vec<Span>,
+    /// The line is invalid: drawn with `CodeStyle.invalid`'s wavy underline and tint.
+    pub invalid: bool,
 }
 
 /// A run of panel text in one color; `bold` is `CodeStyle.id_weight`.
@@ -236,7 +245,17 @@ impl Session {
                 break;
             }
             let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
-            let spans = color_spans(&text[start..end], c, ink);
+            let kind = self.panel.lines.get(n);
+            let invalid = kind == Some(&LineKind::Invalid);
+            let spans = match kind {
+                // An ignored line is all in the `@layout` gray.
+                Some(LineKind::Ignored) => vec![Span {
+                    range: 0..end - start,
+                    color: c.layout,
+                    bold: false,
+                }],
+                _ => color_spans(&text[start..end], c, ink),
+            };
             for (k, r) in wrap(&text[start..end], rows.cols).into_iter().enumerate() {
                 let y = c.pad_top + (row + k) as f32 * rh - scroll;
                 if y + rh <= 0.0 || y >= height {
@@ -256,6 +275,7 @@ impl Session {
                     y,
                     range,
                     spans,
+                    invalid,
                 });
             }
         }
@@ -283,7 +303,29 @@ impl Session {
     pub fn regenerated(&mut self, r: Regenerated) {
         if r.revision == self.history.revision() {
             self.set_panel_text(r.text);
+            (self.panel.held, self.panel.lines) = (Some(r.revision), Vec::new());
         }
+    }
+
+    /// Opens the panel on `text`, checked as `lines`, as what holds the document now: an
+    /// invalid file loaded. Nothing regenerates it until the document changes.
+    pub(super) fn hold_text(&mut self, text: String, lines: Vec<LineKind>) {
+        let now = Some(self.history.revision());
+        self.set_panel_text(text);
+        let p = &mut self.panel;
+        (p.open, p.lines, p.held, p.regenerated) = (true, lines, now, now);
+    }
+
+    /// Lets go of any held text: the next regeneration is due, and Save and recovery write
+    /// the document.
+    pub(super) fn release_text(&mut self) {
+        let p = &mut self.panel;
+        (p.lines, p.held, p.regenerated) = (Vec::new(), None, None);
+    }
+
+    /// The panel text, while it holds the document as it is now.
+    pub(super) fn held_text(&self) -> Option<&str> {
+        (self.panel.held == Some(self.history.revision())).then_some(&self.panel.text)
     }
 
     /// Keys go to the panel: the shape being edited, a menu and the Tab picker let go.
@@ -302,7 +344,9 @@ impl Session {
             }
             Input::TogglePanel => {
                 self.panel.open = true;
-                self.panel.regenerated = None;
+                if self.held_text().is_none() {
+                    self.panel.regenerated = None;
+                }
                 self.focus_panel();
             }
             Input::FocusPanel => self.focus_panel(),

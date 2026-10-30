@@ -14,7 +14,8 @@ const RECOVERY_MAX: Duration = Duration::from_secs(30);
 
 impl Session {
     /// A session over a loaded file's document, with what had no layout placed; `bytes` are
-    /// what was read. A load that needed repairs starts unsaved.
+    /// what was read. A load that needed repairs starts unsaved, unless a line is invalid: then
+    /// the panel opens on the text as read, which holds the document.
     pub fn open(
         mut loaded: Loaded,
         bytes: Vec<u8>,
@@ -22,10 +23,28 @@ impl Session {
         measure: Box<dyn Measure>,
     ) -> Self {
         let mut s = Session::new(Document::default(), theme, measure);
+        let invalid = loaded.invalid();
         s.place(&mut loaded);
-        s.saved = (!loaded.repaired).then(|| loaded.document.clone());
+        s.saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
         s.doc = loaded.document;
+        if invalid {
+            s.hold_text(String::from_utf8_lossy(&bytes).into(), loaded.lines);
+        }
         s.bytes = bytes;
+        s
+    }
+
+    /// A session over a recovery file's document, read from `bytes`, as `open` makes it but
+    /// marked unsaved, with nothing read from the document's file yet.
+    pub fn recover(
+        loaded: Loaded,
+        bytes: &[u8],
+        theme: &'static Theme,
+        measure: Box<dyn Measure>,
+    ) -> Self {
+        let mut s = Session::open(loaded, bytes.to_vec(), theme, measure);
+        s.saved = None;
+        s.bytes.clear();
         s
     }
 
@@ -46,8 +65,8 @@ impl Session {
         &self.bytes
     }
 
-    /// Writes canonical text through `write`. On success the session is saved; on failure
-    /// nothing changes.
+    /// Writes the text the panel holds, else canonical text, through `write`. On success the
+    /// session is saved; on failure nothing changes.
     /// IME marked text is committed first.
     pub fn save(&mut self, write: impl FnOnce(&[u8]) -> io::Result<()>) -> io::Result<()> {
         let revision = self.history.revision();
@@ -55,7 +74,10 @@ impl Session {
         if self.history.revision() != revision {
             self.changed(self.now);
         }
-        let bytes = format::save(&self.doc, &self.heights()).into_bytes();
+        let bytes = match self.held_text() {
+            Some(text) => text.as_bytes().to_vec(),
+            None => format::save(&self.doc, &self.heights()).into_bytes(),
+        };
         write(&bytes)?;
         (self.unrecovered, self.recovery_written) = (None, false);
         self.saved = Some(self.doc.clone());
@@ -82,8 +104,9 @@ impl Session {
         self.bytes = bytes.to_vec();
         match load(bytes) {
             Ok(mut loaded) if self.is_saved() => {
+                let invalid = loaded.invalid();
                 self.place(&mut loaded);
-                let saved = (!loaded.repaired).then(|| loaded.document.clone());
+                let saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
                 // The same document in other bytes (line endings, indent) is no new step.
                 if loaded.document != self.doc {
                     self.stop_editing();
@@ -92,6 +115,11 @@ impl Session {
                     self.drop_missing_selection();
                 }
                 self.saved = saved;
+                if invalid {
+                    self.hold_text(String::from_utf8_lossy(bytes).into(), loaded.lines);
+                } else {
+                    self.release_text();
+                }
             }
             _ => self.saved = None,
         }
@@ -117,9 +145,9 @@ impl Session {
         Some(due.saturating_sub(now))
     }
 
-    /// What to do with the recovery file, once due at `now`: write the document, or delete
-    /// the file when the document is back to saved. Taking it counts as done: the next one is
-    /// due only after another change.
+    /// What to do with the recovery file, once due at `now`: write the document (the text the
+    /// panel holds, if any), or delete the file when the document is back to saved. Taking it
+    /// counts as done: the next one is due only after another change.
     pub fn take_recovery(&mut self, now: Duration) -> Option<Recovery> {
         if self.recovery_wake(now)? > Duration::ZERO {
             return None;
@@ -128,6 +156,9 @@ impl Session {
         self.recovery_written = !self.is_saved();
         if !self.recovery_written {
             return Some(Recovery::Delete);
+        }
+        if let Some(text) = self.held_text() {
+            return Some(Recovery::Text(text.into()));
         }
         // The IME may still be composing: leave its marked text out rather than commit it.
         let mut document = self.doc.clone();

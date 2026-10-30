@@ -191,7 +191,7 @@ pub(crate) struct Content {
 }
 
 impl Content {
-    /// `loaded` as read from `bytes` at `path`, or reopened from recovery file `recovery`.
+    /// `loaded` as read from `bytes` at `path`, or from recovery file `recovery`'s `bytes`.
     fn new(
         loaded: Loaded,
         bytes: Vec<u8>,
@@ -212,13 +212,17 @@ impl Content {
             document,
             repaired: false,
             unplaced: Default::default(),
+            lines: Vec::new(),
         };
         Content::new(loaded, Vec::new(), None, None)
     }
 
     fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
         let measure = Box::new(text::TextMeasure::new(window.text_system().clone()));
-        let session = Session::open(self.loaded, self.bytes, &PAPER, measure);
+        let session = match self.recovery {
+            Some(_) => Session::recover(self.loaded, &self.bytes, &PAPER, measure),
+            None => Session::open(self.loaded, self.bytes, &PAPER, measure),
+        };
         (session, self.path)
     }
 }
@@ -250,7 +254,7 @@ impl Willow {
         let path;
         (self.session, path) = content.session(window);
         // The panel belongs to the window: still open, it shows the new document.
-        if panel {
+        if panel && !self.session.panel().open {
             self.session
                 .handle(Input::TogglePanel, self.start.elapsed());
             self.regenerate(cx);
