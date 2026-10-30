@@ -5,6 +5,7 @@ use std::io;
 use std::time::Duration;
 
 use super::Session;
+use super::panel_direction::words;
 use crate::{Document, Loaded, Measure, Recovery, Theme, format, load};
 
 /// A recovery write is due this long after the last change…
@@ -17,21 +18,37 @@ impl Session {
     /// what was read. A load that needed repairs starts unsaved, unless a line is invalid: then
     /// the panel opens on the text as read, which holds the document.
     pub fn open(
-        mut loaded: Loaded,
+        loaded: Loaded,
         bytes: Vec<u8>,
         theme: &'static Theme,
         measure: Box<dyn Measure>,
     ) -> Self {
         let mut s = Session::new(Document::default(), theme, measure);
-        let invalid = loaded.invalid();
-        s.place(&mut loaded);
-        s.saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
-        s.doc = loaded.document;
-        if invalid {
-            s.hold_text(String::from_utf8_lossy(&bytes).into(), loaded.lines);
-        }
+        s.take_file(loaded, &bytes, |s, doc| s.doc = doc);
         s.bytes = bytes;
         s
+    }
+
+    /// Makes a file's document, read from `bytes`, this session's through `put`: placed,
+    /// saved unless it needed repairs (an invalid file counts as saved), and held by the
+    /// panel text as read when a line is invalid.
+    fn take_file(
+        &mut self,
+        mut loaded: Loaded,
+        bytes: &[u8],
+        put: impl FnOnce(&mut Self, Document),
+    ) {
+        let invalid = loaded.invalid();
+        self.place(&mut loaded);
+        let saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
+        let words = words(&loaded);
+        put(self, loaded.document);
+        self.saved = saved;
+        if invalid {
+            self.hold_text(String::from_utf8_lossy(bytes).into(), loaded.lines, words);
+        } else {
+            self.release_text();
+        }
     }
 
     /// A session over a recovery file's document, read from `bytes`, as `open` makes it but
@@ -106,25 +123,16 @@ impl Session {
         }
         self.bytes = bytes.to_vec();
         match load(bytes) {
-            Ok(mut loaded) if self.is_saved() => {
-                let invalid = loaded.invalid();
-                self.place(&mut loaded);
-                let saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
+            Ok(loaded) if self.is_saved() => self.take_file(loaded, bytes, |s, doc| {
                 // The same document in other bytes (line endings, indent) is no new step.
-                if loaded.document != self.doc {
-                    self.stop_editing();
-                    self.end_gesture();
-                    self.keep_typing();
-                    self.history.replace(&mut self.doc, loaded.document);
-                    self.drop_missing_selection();
+                if doc != s.doc {
+                    s.stop_editing();
+                    s.end_gesture();
+                    s.keep_typing();
+                    s.history.replace(&mut s.doc, doc);
+                    s.drop_missing_selection();
                 }
-                self.saved = saved;
-                if invalid {
-                    self.hold_text(String::from_utf8_lossy(bytes).into(), loaded.lines);
-                } else {
-                    self.release_text();
-                }
-            }
+            }),
             _ => self.saved = None,
         }
         self.changed(self.now);

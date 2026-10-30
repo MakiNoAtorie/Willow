@@ -33,12 +33,12 @@ fn panel_of(text: &str) -> Session {
     s
 }
 
-/// Pastes `to` over the first `from` in the panel text and lets the check and apply run.
+/// Types `to` (one line) over the first `from` in the panel text and lets the check and
+/// apply run.
 fn edit(s: &mut Session, from: &str, to: &str, now: Duration) {
     let at = s.panel().text().find(from).expect("in the text");
-    let (text, replace) = (String::new(), Some(at..at + from.len()));
+    let (text, replace) = (to.to_owned(), Some(at..at + from.len()));
     s.handle(Input::Text { text, replace }, now);
-    s.handle(Input::Paste(to.into()), now);
     settle(s);
     if let Some(job) = s.take_text_check(now + ms(150)) {
         s.text_checked(job.run());
@@ -118,4 +118,36 @@ fn one_undo_restores_the_old_word_and_positions() {
     assert_eq!(*s.document(), before);
     settle(&mut s);
     assert!(s.panel().text().contains("b: \"B\" below a"));
+}
+
+#[test]
+fn a_word_the_writer_left_unchanged_moves_nothing_though_the_layout_disagrees() {
+    let mut s = panel_of(CHAIN);
+    // `b`'s layout puts it right of `a`; its word still says below.
+    edit(&mut s, "@layout b 0,200", "@layout b 258,0", ms(1000));
+    assert_eq!(spot(&s, "b"), (258, 0));
+    // Something else changes: the word is as it was, so `b` stays.
+    edit(&mut s, "\"C\"", "\"Cee\"", ms(3000));
+    assert_eq!(spot(&s, "b"), (258, 0));
+    // Changing the word now re-places it.
+    edit(&mut s, "below a", "above a", ms(5000));
+    assert_ne!(spot(&s, "b"), (258, 0));
+}
+
+#[test]
+fn an_invalid_files_words_are_the_ones_compared() {
+    // As read: `b` sits right of `a` but says below; the last line is invalid.
+    let file = CHAIN.replace("@layout b 0,200", "@layout b 258,0") + "@layout zz\n";
+    let loaded = willow_core::load(file.as_bytes()).unwrap();
+    assert!(loaded.invalid());
+    let mut s = Session::open(
+        loaded,
+        file.clone().into(),
+        &willow_core::PAPER,
+        Box::new(common::Fake),
+    );
+    s.resize(1000.0, 800.0);
+    s.handle(Input::FocusPanel, ms(0));
+    edit(&mut s, "@layout zz\n", "", ms(1000));
+    assert_eq!(spot(&s, "b"), (258, 0));
 }

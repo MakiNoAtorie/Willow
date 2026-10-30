@@ -173,7 +173,7 @@ fn remap(shapes: &mut [Shape], links: &mut [Link], fresh: Vec<ShapeId>) {
 }
 
 /// Clipboard text as shape text: line breaks normalized, other control characters dropped.
-fn clean(text: &str) -> String {
+pub(super) fn clean(text: &str) -> String {
     (text.replace("\r\n", "\n").replace('\r', "\n").chars())
         .filter(|&c| c == '\n' || !c.is_control())
         .collect()

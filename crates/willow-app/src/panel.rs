@@ -114,26 +114,33 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
     .cursor(CursorStyle::IBeam);
     Some(
         div()
+            .relative()
             .flex_none()
             .w(px(p.width))
             .h_full()
-            .overflow_hidden()
-            .bg(color(c.bg))
-            .border_l(px(c.border_width))
-            .border_color(color(c.border))
-            // Canvas-relative like any press: the core finds the panel past the canvas's edge.
-            .on_mouse_down(MouseButton::Left, cx.listener(Willow::mouse_down))
-            .on_scroll(cx.listener(|w, e: &ScrollEvent, _, cx| {
-                let d = e.delta.pixel_delta(px(WHEEL_LINE));
-                w.input(Input::ScrollPanel(d.y.into()), cx)
-            }))
-            .child(rows)
-            // The hairline's grab area, over the panel's left edge.
+            .child(
+                div()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(color(c.bg))
+                    .border_l(px(c.border_width))
+                    .border_color(color(c.border))
+                    // Canvas-relative like any press: the core finds the panel past the
+                    // canvas's edge.
+                    .on_mouse_down(MouseButton::Left, cx.listener(Willow::mouse_down))
+                    .on_scroll(cx.listener(|w, e: &ScrollEvent, _, cx| {
+                        let d = e.delta.pixel_delta(px(WHEEL_LINE));
+                        w.input(Input::ScrollPanel(d.y.into()), cx)
+                    }))
+                    .child(rows),
+            )
+            // The hairline's grab area, centered on it, outside the clipped panel so it can
+            // reach over the canvas's edge; painted last, it takes the press first.
             .child(
                 div()
                     .absolute()
                     .top_0()
-                    .left_0()
+                    .left(px((c.border_width - c.grab_width) / 2.0))
                     .h_full()
                     .w(px(c.grab_width))
                     .cursor(CursorStyle::ResizeLeftRight)
@@ -157,20 +164,12 @@ fn overlays(bounds: Bounds<Pixels>, session: &Session) -> (Vec<PaintQuad>, Vec<P
     let under = (session.panel_rects(p.selection()).into_iter())
         .map(|(a, b)| fill(Bounds::from_corners(at(a), at(b)), color(t.selection.text)))
         .collect();
-    let mut over: Vec<PaintQuad> = Vec::new();
-    // Just under the em box, centered in the row, as in a shape.
-    let below = (t.code.row_height() + t.code.font_size) / 2.0;
-    for (a, b) in p
-        .marked()
-        .map(|m| session.panel_rects(m))
-        .unwrap_or_default()
-    {
-        let line = size(px(b.x - a.x), px(t.caret.marked_underline));
-        over.push(fill(
-            Bounds::new(at(a) + point(px(0.0), px(below)), line),
-            color(t.ink),
-        ));
-    }
+    let over = (session.panel_underlines().into_iter())
+        .map(|(a, b)| {
+            let line = size(px(b.x - a.x), px(t.caret.marked_underline));
+            fill(Bounds::new(at(a), line), color(t.ink))
+        })
+        .collect();
     (under, over)
 }
 
@@ -201,7 +200,7 @@ fn shape_rows(
         underline: invalid.then(|| UnderlineStyle {
             thickness: px(c.invalid_width),
             color: Some(color(c.invalid)),
-            wavy: true,
+            wavy: c.invalid_wavy,
         }),
         strikethrough: None,
     };

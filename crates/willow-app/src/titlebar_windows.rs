@@ -11,11 +11,27 @@ use gpui::{
 };
 use willow_core::{MenuStyle, Session};
 
+/// The submenus beside the top menu.
+#[derive(Clone, Copy, PartialEq)]
+enum Cascade {
+    Edit,
+    View,
+}
+
+impl Cascade {
+    fn label(self) -> &'static str {
+        match self {
+            Cascade::Edit => "Edit",
+            Cascade::View => "View",
+        }
+    }
+}
+
 #[derive(Default)]
 struct MenuState {
     open: bool,
-    /// The cascade showing: `"Edit"` or `"View"`.
-    cascade: Option<&'static str>,
+    /// The cascade showing.
+    cascade: Option<Cascade>,
 }
 
 pub fn title_bar(
@@ -68,7 +84,7 @@ pub fn title_bar(
                 .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                     if !open {
                         toggle.update(cx, |s, cx| {
-                            (s.open, s.cascade) = (true, Some("Edit"));
+                            (s.open, s.cascade) = (true, Some(Cascade::Edit));
                             cx.notify();
                         });
                     }
@@ -124,10 +140,10 @@ type Item = (&'static str, &'static str, Box<dyn Action>);
 fn app_menu(
     m: &MenuStyle,
     state: &Entity<MenuState>,
-    cascade: Option<&'static str>,
+    cascade: Option<Cascade>,
     session: &Session,
 ) -> AnyElement {
-    let set = |open: bool, cascade: Option<&'static str>| {
+    let set = |open: bool, cascade: Option<Cascade>| {
         let state = state.clone();
         move |cx: &mut App| {
             state.update(cx, |s, cx| {
@@ -157,10 +173,11 @@ fn app_menu(
         })
     };
     // A row that shows its cascade while hovered.
-    let opens = |name: &'static str| {
-        let show = set(true, Some(name));
+    let opens = |shows: Cascade| {
+        let show = set(true, Some(shows));
+        let name = shows.label();
         row(m, name, name, "\u{203a}", true)
-            .when(cascade == Some(name), |d| d.bg(color(m.hover)))
+            .when(cascade == Some(shows), |d| d.bg(color(m.hover)))
             .on_hover(move |&h, _, cx| {
                 if h {
                     show(cx)
@@ -169,8 +186,8 @@ fn app_menu(
     };
     let top = (panel(m).children(file_items.map(command)))
         .child(separator(m))
-        .child(opens("Edit"))
-        .child(opens("View"))
+        .child(opens(Cascade::Edit))
+        .child(opens(Cascade::View))
         .child(separator(m))
         .children(window_items.map(command));
     let edit_items: [Item; 5] = [
@@ -180,9 +197,9 @@ fn app_menu(
         ("Copy", "Ctrl+C", Box::new(Copy)),
         ("Paste", "Ctrl+V", Box::new(Paste)),
     ];
-    let cascade = cascade.map(|name| {
+    let cascade = cascade.map(|shown| {
         let mut p = panel(m);
-        if name == "View" {
+        if shown == Cascade::View {
             let it: Item = ("Code Panel", "Ctrl+E", Box::new(TogglePanel));
             return p.child(item(m, it, true, set(false, None)));
         }

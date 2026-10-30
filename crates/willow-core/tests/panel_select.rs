@@ -163,3 +163,20 @@ fn a_shape_the_text_gains_scrolls_into_view_once_the_text_catches_up() {
     settle(&mut s);
     assert!(shown(&s, number_of(&s, &format!("{copy}:"))));
 }
+
+#[test]
+fn a_newly_typed_shape_line_selects_its_shape_once_checked() {
+    let mut s = open(b"willow 1\n\na: \"A\"\n\n@layout a 0,0 w210\n");
+    s.handle(Input::TogglePanel, T);
+    settle(&mut s);
+    let at = s.panel().text().find("\"A\"").unwrap() + 3;
+    let (text, replace) = (String::new(), Some(at..at));
+    s.handle(Input::Text { text, replace }, T);
+    s.handle(Input::Enter, T);
+    let (text, replace) = ("b: \"B\" below a".to_owned(), None);
+    s.handle(Input::Text { text, replace }, T);
+    assert!(s.selection().is_empty());
+    let job = s.take_text_check(Duration::from_millis(150)).unwrap();
+    s.text_checked(job.run());
+    assert_eq!(ids(&s), ["b"]);
+}

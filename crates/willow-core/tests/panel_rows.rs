@@ -46,6 +46,14 @@ fn piece(r: &mut Rng) -> String {
         .collect()
 }
 
+/// Each row's line number, top and text. (Colors follow the last check, which a paste or a
+/// line change runs at once and a fresh panel hasn't.)
+fn rows(s: &Session) -> Vec<(Option<usize>, f32, std::ops::Range<usize>)> {
+    (s.panel_rows().into_iter())
+        .map(|r| (r.number, r.y, r.range))
+        .collect()
+}
+
 #[test]
 fn rows_after_any_edit_are_the_rows_of_the_text_shown_fresh() {
     let mut r = Rng(0x9e37_79b9_7f4a_7c15);
@@ -85,11 +93,7 @@ fn rows_after_any_edit_are_the_rows_of_the_text_shown_fresh() {
             }
             let text = s.panel().text().to_owned();
             let fresh = panel(&text);
-            assert_eq!(
-                s.panel_rows(),
-                fresh.panel_rows(),
-                "case {case} step {step}: {text:?}"
-            );
+            assert_eq!(rows(&s), rows(&fresh), "case {case} step {step}: {text:?}");
             for (i, _) in text.char_indices().chain([(text.len(), ' ')]) {
                 assert_eq!(
                     s.panel_point(i),

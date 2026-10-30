@@ -55,6 +55,23 @@ impl Rect {
 /// The sides a shape grows toward: its top never moves.
 const GROWING: [Side; 3] = [Side::Bottom, Side::Left, Side::Right];
 
+/// Shape `root` and every shape linked beyond it, not through `from`, of `n` shapes linked at
+/// `ends` (index pairs; ends out of range are skipped).
+pub(super) fn beyond(n: usize, ends: &[(usize, usize)], root: usize, from: usize) -> Vec<usize> {
+    let mut next = vec![Vec::new(); n];
+    for &(a, b) in ends.iter().filter(|&&(a, b)| a < n && b < n) {
+        next[a].push(b);
+        next[b].push(a);
+    }
+    let (mut out, mut seen) = (vec![root], HashSet::from([root, from]));
+    let mut i = 0;
+    while let Some(&s) = out.get(i) {
+        out.extend(next[s].iter().filter(|&&k| seen.insert(k)));
+        i += 1;
+    }
+    out
+}
+
 /// A move of `d` units toward `side`.
 fn toward(side: Side, d: i32) -> (i32, i32) {
     let (x, y) = side.unit();
@@ -263,19 +280,7 @@ impl Session {
     /// `root` and every shape linked beyond it, not through `from` (shape indices): the
     /// subtree a push moves as one block.
     pub(super) fn subtree(&self, root: usize, from: usize) -> Vec<usize> {
-        let n = self.doc.shapes.len();
-        let mut next = vec![Vec::new(); n];
-        for &(a, b) in self.link_ends().iter().filter(|&&(a, b)| a < n && b < n) {
-            next[a].push(b);
-            next[b].push(a);
-        }
-        let (mut out, mut seen) = (vec![root], HashSet::from([root, from]));
-        let mut i = 0;
-        while let Some(&s) = out.get(i) {
-            out.extend(next[s].iter().filter(|&&k| seen.insert(k)));
-            i += 1;
-        }
-        out
+        beyond(self.doc.shapes.len(), &self.link_ends(), root, from)
     }
 
     /// The shapes linked to `id` on its `side` (by the side rule), nearest center first; ties

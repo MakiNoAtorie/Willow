@@ -262,8 +262,7 @@ impl Willow {
         (self.text_wake, self.text_check, self.regeneration) = (None, None, None);
         // The panel belongs to the window: still open, it shows the new document.
         if panel && !self.session.panel().open {
-            self.session
-                .handle(Input::TogglePanel, self.start.elapsed());
+            self.session.show_panel();
             self.regenerate(cx);
         }
         self.set_path(path, window);

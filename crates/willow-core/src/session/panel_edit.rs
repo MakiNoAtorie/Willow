@@ -7,8 +7,9 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::Session;
+use super::clipboard::clean;
 use super::editing::CaretView;
-use super::panel::{Panel, columns, wrap};
+use super::panel::{Panel, columns, line_end, wrap};
 use crate::edit::{next_cluster, prev_cluster, word_left, word_right};
 use crate::input::{Button, Input, Motion, Point, Response};
 use crate::layout::Caret;
@@ -81,7 +82,7 @@ impl Session {
                 mods,
             } => {
                 let (row, col) = self.panel_hit(pos);
-                let c = self.panel_stop(row, col, true);
+                let c = self.panel_caret_at(row, col, true);
                 let e = &mut self.panel.edit;
                 (e.caret, e.goal, e.drag) = (c, None, true);
                 if !mods.shift {
@@ -92,7 +93,7 @@ impl Session {
             }
             Input::DoubleClick { pos } | Input::TripleClick { pos } => {
                 let (row, col) = self.panel_hit(pos);
-                let i = self.panel_stop(row, col, false).offset;
+                let i = self.panel_caret_at(row, col, false).offset;
                 let s = self.panel.text();
                 let start = s[..i].rfind('\n').map_or(0, |n| n + 1);
                 let end = line_end(s, start);
@@ -123,7 +124,7 @@ impl Session {
     // selecting more than a screenful by mouse is missed.
     pub(super) fn panel_drag(&mut self, pos: Point) -> Response {
         let (row, col) = self.panel_hit(pos);
-        self.panel.edit.caret = self.panel_stop(row, col, true);
+        self.panel.edit.caret = self.panel_caret_at(row, col, true);
         self.panel.edit.since = self.now;
         self.panel_follow_caret(self.panel.edit.caret.offset);
         self.respond(true)
@@ -132,10 +133,10 @@ impl Session {
     /// The row (unclamped) and column at canvas-relative `pos`.
     fn panel_hit(&self, pos: Point) -> (usize, f32) {
         let c = &self.theme.code;
-        let scroll = self.panel.scroll.min(self.max_scroll());
+        let scroll = self.panel_scroll();
         let x = pos.x - self.viewport.size.x - c.border_width - c.gutter_width;
         let row = (pos.y + scroll - c.pad_top) / c.row_height();
-        (row.max(0.0) as usize, x / (c.advance * c.font_size))
+        (row.max(0.0) as usize, x / c.column())
     }
 
     /// A key or text input while the panel has focus.
@@ -164,10 +165,7 @@ impl Session {
             // The app has put `clipboard_text` on the clipboard.
             Input::Cut => self.panel_replace(self.panel.selection(), ""),
             Input::Paste(text) => {
-                let text = text.replace("\r\n", "\n").replace('\r', "\n");
-                let text: String = (text.replace('\t', "  ").chars())
-                    .filter(|&c| c == '\n' || !c.is_control())
-                    .collect();
+                let text = clean(&text.replace('\t', "  "));
                 self.panel_replace(self.panel.selection(), &text);
             }
             Input::Tab => self.panel_replace(self.panel.selection(), "  "),
@@ -214,7 +212,7 @@ impl Session {
 
     /// Scrolls the least that shows the caret's row between the top and bottom padding.
     fn panel_reveal(&mut self) {
-        self.panel_show_row(self.panel_spot(self.panel.edit.caret).0);
+        self.panel_show_row(self.panel_row_col(self.panel.edit.caret).0);
     }
 
     /// The panel caret to draw at `now` while the panel has focus, in `PanelRow`
@@ -238,7 +236,7 @@ impl Session {
     /// per row, as `panel_caret`. A line break in the range is one more column.
     pub fn panel_rects(&self, range: Range<usize>) -> Vec<(Point, Point)> {
         let (c, s) = (&self.theme.code, self.panel.text());
-        let cw = c.advance * c.font_size;
+        let cw = c.column();
         let cols = |a: usize, b: usize| s[a..b].graphemes(true).map(columns).sum::<usize>();
         let mut out = Vec::new();
         for r in self.panel_rows() {
@@ -261,13 +259,29 @@ impl Session {
         out
     }
 
+    /// The IME marked text's underline on the rows in view, one (from, to) per row, as
+    /// `panel_caret`: `Theme.caret.marked_underline` thick, hanging below.
+    pub fn panel_underlines(&self) -> Vec<(Point, Point)> {
+        let c = &self.theme.code;
+        // Just under the em box, centered in the row, as in a shape.
+        let below = (c.row_height() + c.font_size) / 2.0;
+        (self.panel.marked().map(|m| self.panel_rects(m)))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(a, b)| {
+                let y = a.y + below;
+                (Point { y, ..a }, Point { y, ..b })
+            })
+            .collect()
+    }
+
     /// Where caret `c` is drawn, as `panel_caret`.
     fn panel_xy(&self, c: Caret) -> Point {
         let code = &self.theme.code;
-        let (row, col) = self.panel_spot(c);
-        let scroll = self.panel.scroll.min(self.max_scroll());
+        let (row, col) = self.panel_row_col(c);
+        let scroll = self.panel_scroll();
         Point {
-            x: code.gutter_width + col as f32 * code.advance * code.font_size,
+            x: code.gutter_width + col as f32 * code.column(),
             y: code.pad_top + row as f32 * code.row_height() - scroll,
         }
     }
@@ -280,13 +294,13 @@ impl Session {
         let sel = self.panel.selection();
         let i = c.offset;
         if let Motion::Up | Motion::Down = m {
-            let (row, col) = self.panel_spot(c);
+            let (row, col) = self.panel_row_col(c);
             let goal = self.panel.edit.goal.unwrap_or(col as f32);
             let c = match m {
                 Motion::Up if row == 0 => downstream(0),
-                Motion::Up => self.panel_stop(row - 1, goal, true),
+                Motion::Up => self.panel_caret_at(row - 1, goal, true),
                 _ if row + 1 == self.rows().total => downstream(s.len()),
-                _ => self.panel_stop(row + 1, goal, true),
+                _ => self.panel_caret_at(row + 1, goal, true),
             };
             return (c, Some(goal));
         }
@@ -297,15 +311,15 @@ impl Session {
             Motion::Right => downstream(next_cluster(s, i)),
             Motion::WordLeft => downstream(word_left(s, i)),
             Motion::WordRight => downstream(word_right(s, i)),
-            Motion::LineStart => self.panel_stop(self.panel_spot(c).0, 0.0, true),
-            Motion::LineEnd => self.panel_stop(self.panel_spot(c).0, f32::INFINITY, true),
+            Motion::LineStart => self.panel_caret_at(self.panel_row_col(c).0, 0.0, true),
+            Motion::LineEnd => self.panel_caret_at(self.panel_row_col(c).0, f32::INFINITY, true),
             Motion::Up | Motion::Down => c,
         };
         (c, None)
     }
 
     /// The soft-wrapped row caret `c` is on, counted over the whole text, and its column.
-    fn panel_spot(&self, c: Caret) -> (usize, usize) {
+    fn panel_row_col(&self, c: Caret) -> (usize, usize) {
         let (s, rows) = (self.panel.text(), self.rows());
         let n = rows.lines.partition_point(|&(start, _)| start <= c.offset) - 1;
         let (start, first) = rows.lines[n];
@@ -322,7 +336,7 @@ impl Session {
 
     /// The caret stop on row `row` (clamped to the text's rows) `nearest` column `col`, else
     /// before the character there. A stop at the end of a row that wraps stays on that row.
-    fn panel_stop(&self, row: usize, col: f32, nearest: bool) -> Caret {
+    fn panel_caret_at(&self, row: usize, col: f32, nearest: bool) -> Caret {
         let (s, rows) = (self.panel.text(), self.rows());
         let row = row.min(rows.total - 1);
         let n = rows.lines.partition_point(|&(_, first)| first <= row) - 1;
@@ -377,11 +391,6 @@ impl Session {
             e.typed = Some(self.now);
         }
     }
-}
-
-/// The end of the line starting at byte `start`, line break excluded.
-fn line_end(s: &str, start: usize) -> usize {
-    s[start..].find('\n').map_or(s.len(), |i| start + i)
 }
 
 fn downstream(offset: usize) -> Caret {

@@ -363,9 +363,10 @@ pub struct CodeStyle {
     pub string: Rgba,
     pub direction: Rgba,
     pub layout: Rgba,
-    /// An invalid line's wavy underline, its thickness, and the line's tint.
+    /// An invalid line's underline, its thickness, whether it is wavy, and the line's tint.
     pub invalid: Rgba,
     pub invalid_width: f32,
+    pub invalid_wavy: bool,
     pub invalid_tint: Rgba,
     pub toggle: ToggleStyle,
 }
@@ -392,6 +393,11 @@ impl CodeStyle {
     /// One row of text.
     pub fn row_height(&self) -> f32 {
         self.font_size * self.line_height
+    }
+
+    /// One column of text.
+    pub fn column(&self) -> f32 {
+        self.advance * self.font_size
     }
 }
 
@@ -773,6 +779,7 @@ pub const PAPER: Theme = Theme {
         layout: hex(0xa39b8f),
         invalid: hex(0xd9776c),
         invalid_width: 1.0,
+        invalid_wavy: true,
         invalid_tint: rgba(217, 119, 108, 0.06),
         // The mockup's 16 x 14 SVG: outline inset .75, divider at 10, fill 10..14.6 x 1.4..12.6.
         toggle: ToggleStyle {

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use super::Session;
+use super::panel_direction::words;
 use crate::input::Input;
 use crate::{Document, LineKind, Link, Loaded, ShapeId, Zone, check, format};
 
@@ -92,8 +93,9 @@ impl Session {
         }
     }
 
-    /// Checks and applies pending panel text now, on the UI thread: when focus leaves the
-    /// panel, on Undo, Redo and Save. IME text being composed is committed first.
+    /// Checks and applies pending panel text now, on the UI thread: at a step boundary, when
+    /// focus leaves the panel, on Undo, Redo and Save. IME text being composed is committed
+    /// first.
     pub(super) fn flush_text(&mut self) {
         self.panel_unmark();
         if self.text_pending() {
@@ -131,27 +133,28 @@ impl Session {
     }
 
     /// Focus leaves the panel: pending text applies, and text typed since the last
-    /// regeneration is regenerated unless a line is invalid.
+    /// regeneration is regenerated unless a line is invalid, as is text behind the document
+    /// (its regeneration was dropped when focus came).
     pub(super) fn leave_panel(&mut self) {
         self.panel.focused = false;
-        // Pending text joins the step text edits merge into, which ends here.
-        self.flush_text();
-        self.panel.merge = None;
+        self.end_step();
         self.keep_typing();
         let v = &self.panel.versions;
-        if v.now != v.shown && !self.panel.lines.contains(&LineKind::Invalid) {
+        let typed = v.now != v.shown && !self.panel.lines.contains(&LineKind::Invalid);
+        if typed || self.held_text().is_none() {
             self.panel.regenerated = None;
         }
     }
 
     /// `loaded` is the panel text as it is now: its lines, and the text applied when valid.
+    /// The caret's line, newly typed perhaps, selects its shape while the panel has focus.
     fn text_lines_checked(&mut self, loaded: Loaded) {
         self.panel.lines = loaded.lines.clone();
         if !loaded.invalid() {
             self.apply_text(loaded);
-            if std::mem::take(&mut self.panel.alone) {
-                self.panel.merge = None;
-            }
+        }
+        if self.panel.focused {
+            self.panel_follow_caret(self.panel.caret());
         }
     }
 
@@ -160,6 +163,7 @@ impl Session {
     /// order, new ones go on top in text order. Shapes and zones the text gives no layout keep
     /// theirs, or are placed as a loaded file's are. Nothing is pushed and no zone grows.
     pub(super) fn apply_text(&mut self, mut loaded: Loaded) {
+        let words = words(&loaded);
         let new = &mut loaded.document;
         let at: HashMap<_, _> = (self.doc.shapes.iter().enumerate())
             .map(|(i, s)| (&s.id, i))
@@ -222,6 +226,7 @@ impl Session {
             .sort_by_cached_key(|z| zat.get(&z.id).copied().unwrap_or(usize::MAX));
         new.zones = parents_first(&new);
         self.apply_document(new);
+        self.panel.words = words;
     }
 
     /// Replaces the document with `new` as one undo step, if it differs; joined to the last
@@ -249,38 +254,49 @@ impl Session {
         self.changed(self.now);
     }
 
-    /// Before a panel key: after a 1 s pause in typing, or for a paste or cut, the next
-    /// update starts a step. (Updates are never split: what applies together is one.)
+    /// Before a panel key: after a 1 s pause in typing the next update starts a step; a paste
+    /// or cut first applies what is pending, so it lands in a step of its own.
     pub(super) fn before_text_key(&mut self, input: &Input) {
         let paused = (self.panel.edit.typed).is_some_and(|t| self.now >= t + MERGE_PAUSE);
-        if paused || matches!(input, Input::Paste(_) | Input::Cut) {
+        if matches!(input, Input::Paste(_) | Input::Cut) {
+            self.end_step();
+        } else if paused {
             self.panel.merge = None;
         }
     }
 
-    /// After a panel key that was at caret `at`: the update holding a paste or cut is a step
-    /// of its own, and after a caret moved to another line the next update starts a step.
+    /// After a panel key that was at caret `at`: a paste or cut applies at once as a step of
+    /// its own, and a caret moved to another line ends the step.
     pub(super) fn after_text_key(&mut self, input: &Input, at: usize) {
         match input {
-            Input::Paste(_) | Input::Cut => self.panel.alone = true,
+            Input::Paste(_) | Input::Cut => self.end_step(),
             Input::Move(_) | Input::Select(_) => self.caret_moved(at),
             _ => {}
         }
     }
 
-    /// The caret moved from `at`, the text unchanged: onto another line, the next update
-    /// starts a step.
+    /// The caret moved from `at`, the text unchanged: onto another line, the step ends.
     pub(super) fn caret_moved(&mut self, at: usize) {
         let to = self.panel.caret();
         if self.panel.text()[at.min(to)..at.max(to)].contains('\n') {
-            self.panel.merge = None;
+            self.end_step();
         }
+    }
+
+    /// Pending text applies now, into the step text edits merge into, which ends: what is
+    /// typed next starts another.
+    fn end_step(&mut self) {
+        self.flush_text();
+        self.panel.merge = None;
     }
 
     /// The panel text as it is now is the document's (`plain`: regenerated): what the next
     /// undo step records, and what undo and redo bring back.
     pub(super) fn settle_text(&mut self, plain: bool) {
         self.history.text = (!plain).then(|| self.panel.text().to_owned());
+        if plain {
+            self.panel.words.clear();
+        }
         self.panel.versions.state = self.panel.versions.now;
     }
 
@@ -309,11 +325,12 @@ impl Session {
         let Some(text) = self.history.text.clone() else {
             return;
         };
-        let lines = check(&text).lines;
+        let checked = check(&text);
         let saved = text.as_bytes() == self.bytes;
         self.set_panel_text(text);
         let p = &mut self.panel;
-        (p.lines, p.regenerated) = (lines, Some(self.history.revision()));
+        p.words = words(&checked);
+        (p.lines, p.regenerated) = (checked.lines, Some(self.history.revision()));
         let v = &mut p.versions;
         (v.checked, v.state) = (v.now, v.now);
         if saved {

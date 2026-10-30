@@ -31,6 +31,18 @@ fn opening_the_panel_regenerates_canonical_text() {
 }
 
 #[test]
+fn showing_the_panel_regenerates_and_leaves_the_canvas_the_keys() {
+    let mut s = common::session_of(Document::new());
+    s.show_panel();
+    settle(&mut s);
+    assert!(s.panel().open && !s.panel().focused);
+    assert_eq!(
+        s.panel().text(),
+        "willow 1\n\na: \"\"\n\n@layout a 0,0 w210\n"
+    );
+}
+
+#[test]
 fn canvas_shortcuts_dont_fire_while_the_panel_has_focus() {
     let mut s = common::session_of(Document::new());
     let a = ShapeId("a".into());

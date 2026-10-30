@@ -5,19 +5,17 @@ use super::Session;
 use crate::LineKind;
 
 impl Session {
-    /// What each panel line is, as last checked or regenerated.
-    fn panel_kinds(&self) -> &[LineKind] {
-        &self.panel.lines
-    }
-
     /// The caret has moved to byte `offset`: selects the shape whose line or `@layout` line
-    /// it is on. Zone, invalid and ignored lines leave the selection alone.
+    /// it is on. Zone, invalid and ignored lines, and lines of shapes not applied yet, leave
+    /// the selection alone.
     pub(super) fn panel_follow_caret(&mut self, offset: usize) {
         let text = self.panel.text();
         let n = text[..text.floor_char_boundary(offset)]
             .matches('\n')
             .count();
-        if let Some(LineKind::Shape(id)) = self.panel_kinds().get(n) {
+        if let Some(LineKind::Shape(id)) = self.panel.lines.get(n)
+            && self.doc.shapes.iter().any(|s| &s.id == id)
+        {
             let id = id.clone();
             self.select([id]);
         }
@@ -36,7 +34,7 @@ impl Session {
         };
         let id = &self.doc.shapes[i].id;
         let line =
-            (self.panel_kinds().iter()).position(|k| matches!(k, LineKind::Shape(s) if s == id));
+            (self.panel.lines.iter()).position(|k| matches!(k, LineKind::Shape(s) if s == id));
         match line {
             Some(n) => {
                 let row = self.rows().lines[n.min(self.rows().lines.len() - 1)].1;

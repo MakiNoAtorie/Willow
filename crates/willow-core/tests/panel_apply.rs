@@ -26,12 +26,21 @@ fn panel_on(doc: Document) -> Session {
     s
 }
 
-/// Writes `to` over the first `from` in the panel text at `now`: deletes it, then pastes.
+/// Types `to` over the first `from` in the panel text at `now`, line breaks as Enter. (A
+/// paste would apply at once.)
 fn replace(s: &mut Session, from: &str, to: &str, now: Duration) {
     let at = s.panel().text().find(from).expect("in the text");
-    let (text, replace) = (String::new(), Some(at..at + from.len()));
-    s.handle(Input::Text { text, replace }, now);
-    s.handle(Input::Paste(to.into()), now);
+    let mut over = at..at + from.len();
+    for (i, line) in to.split('\n').enumerate() {
+        if i > 0 {
+            s.handle(Input::Enter, now);
+            // Over the indent Enter carried down.
+            let c = s.panel().caret();
+            over = s.panel().text()[..c].rfind('\n').map_or(0, |n| n + 1)..c;
+        }
+        let (text, replace) = (line.to_owned(), Some(over.clone()));
+        s.handle(Input::Text { text, replace }, now);
+    }
     settle(s);
 }
 
@@ -118,16 +127,19 @@ fn ids_stay_put_in_draw_order_and_the_selection() {
     pause(&mut s, ms(150));
     assert_eq!(ids(&s), ["a", "b"]);
     assert_eq!(s.document().shapes[1].text, common::text("Top shape"));
-    assert_eq!(s.selection(), [id("a"), id("b")]);
+    // The checked text selects the shape whose line the caret is on.
+    assert_eq!(s.selection(), [id("b")]);
     assert_eq!(s.document().links, [Link(id("a"), id("b"))]);
     assert_eq!(s.document().zones[0].members, [id("a"), id("b")]);
     // A changed ID token is a new shape: the line naming the old ID is invalid then.
     replace(&mut s, "b: \"Top shape\"", "c: \"Top shape\"", ms(200));
     pause(&mut s, ms(350));
     assert_eq!(ids(&s), ["a", "b"]);
+    // `c` isn't a shape yet: the selection stays.
+    assert_eq!(s.selection(), [id("b")]);
     replace(&mut s, "below b", "below c", ms(400));
     pause(&mut s, ms(550));
-    // The new shape goes on top; the old one is gone, with its selection.
+    // The new shape goes on top; the old one is gone, and the caret's line is `a`'s.
     assert_eq!(ids(&s), ["a", "c"]);
     assert_eq!(s.selection(), [id("a")]);
     assert_eq!(s.document().links, [Link(id("c"), id("a"))]);
@@ -403,4 +415,27 @@ fn colors_and_zone_blocks_typed_reach_the_canvas() {
     pause(&mut s, ms(550));
     assert!(s.document().zones.is_empty());
     assert_eq!(ids(&s), ["a", "b"]);
+}
+
+#[test]
+fn a_regeneration_taken_before_the_panel_had_focus_doesnt_land_under_the_caret() {
+    let mut s = panel_of(SIMPLE);
+    s.handle(Input::Escape, ms(0));
+    s.select([id("a")]);
+    s.handle(Input::Nudge(willow_core::Side::Right), ms(100));
+    let job = s.take_regeneration().expect("due after the nudge");
+    let text = s.panel().text().to_owned();
+    s.handle(Input::FocusPanel, ms(200));
+    s.regenerated(job.run());
+    assert_eq!(s.panel().text(), text);
+    // Leaving without typing, the text catches up.
+    s.handle(Input::Escape, ms(300));
+    settle(&mut s);
+    assert!(s.panel().text().contains("@layout a 24,0"));
+    // Opening the panel, which focuses it, still regenerates.
+    s.handle(Input::TogglePanel, ms(400));
+    s.handle(Input::Nudge(willow_core::Side::Right), ms(500));
+    s.handle(Input::TogglePanel, ms(600));
+    settle(&mut s);
+    assert!(s.panel().text().contains("@layout a 48,0"));
 }

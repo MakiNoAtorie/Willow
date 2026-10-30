@@ -212,7 +212,11 @@ fn the_clipboard_is_the_panel_selection_as_plain_text_not_shapes() {
     s.handle(Input::Paste("willow 1\r\n\tb: \"y\"\u{7}\r".into()), T);
     assert_eq!(s.panel().text(), "willow 1\n  b: \"y\"\n\na: \"x\"\n");
     assert_eq!(s.panel().caret(), 18);
-    assert_eq!(*s.document(), Document::new());
+    // The paste applies as text at once: the shapes its lines name, no copies.
+    let shapes: Vec<_> = (s.document().shapes.iter())
+        .map(|s| (s.id.0.as_str(), s.text.plain().to_owned()))
+        .collect();
+    assert_eq!(shapes, [("a", "x".into()), ("b", "y".into())]);
     assert_eq!(s.selection(), [ShapeId("a".into())]);
 }
 
@@ -334,7 +338,8 @@ fn the_caret_blinks_where_it_stops_on_the_column_grid() {
     assert_eq!(s.next_wake(Duration::from_secs(5)), None);
     // At a wrapped row's end it shows there, not at the next row's start.
     s.handle(Input::Move(Motion::LineEnd), T);
-    assert_eq!(s.panel_caret(T).unwrap().pos, p(400.0, 80.625));
+    let pos = s.panel_caret(T).unwrap().pos;
+    assert_eq!((pos.x.round(), pos.y), (400.0, 80.625));
     // None once the canvas has the keys.
     s.handle(Input::Escape, T);
     assert_eq!(s.panel_caret(T), None);
@@ -451,4 +456,18 @@ fn the_caret_blinks_from_when_the_panel_takes_focus() {
     let t = Duration::from_secs(10);
     s.handle(Input::TogglePanel, t);
     assert_eq!(s.next_wake(t), Some(Duration::from_millis(530)));
+}
+
+#[test]
+fn marked_text_is_underlined_just_under_its_em_box() {
+    let mut s = panel("willow 1\n");
+    assert_eq!(s.panel_underlines(), []);
+    mark(&mut s, "か", None, T);
+    // Row 0 is 60 px down, the text 40 px in; a wide character takes two 7.5 px columns, and
+    // the 12.5 px em box sits centered in the 20.625 px row.
+    let (y, x) = (76.5625, 40.0);
+    assert_eq!(
+        s.panel_underlines(),
+        [(Point { x, y }, Point { x: x + 15.0, y })]
+    );
 }

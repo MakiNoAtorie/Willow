@@ -343,3 +343,39 @@ fn undoing_typing_back_to_an_invalid_files_text_is_saved_again() {
     assert_eq!(s.panel().text(), invalid);
     assert!(s.is_saved());
 }
+
+#[test]
+fn typing_around_a_paste_within_the_pause_is_three_steps() {
+    let mut s = panel_of(TWO);
+    caret_after(&mut s, "Gates", ms(0));
+    type_in(&mut s, "!", ms(0));
+    s.handle(Input::Paste("X".into()), ms(50));
+    type_in(&mut s, "?", ms(100));
+    pause(&mut s, ms(250));
+    let mut seen = vec![shape_text(&s, "a")];
+    for n in 0..3 {
+        undo(&mut s, ms(300 + n * 100));
+        seen.push(shape_text(&s, "a"));
+    }
+    assert_eq!(seen, ["Gates!X?", "Gates!X", "Gates!", "Gates"]);
+    assert!(!s.can_undo());
+}
+
+#[test]
+fn typing_on_two_lines_within_the_pause_is_two_steps() {
+    let mut s = panel_of(TWO);
+    caret_after(&mut s, "Fences", ms(0));
+    type_in(&mut s, "?", ms(0));
+    // Up to the end of `a`'s line, then back inside its quotes.
+    s.handle(Input::Move(Motion::Up), ms(50));
+    s.handle(Input::Move(Motion::LineEnd), ms(50));
+    s.handle(Input::Move(Motion::Left), ms(50));
+    type_in(&mut s, "!", ms(100));
+    pause(&mut s, ms(250));
+    assert_eq!(texts(&s), pair("Gates!", "Fences?"));
+    undo(&mut s, ms(300));
+    assert_eq!(texts(&s), pair("Gates", "Fences?"));
+    undo(&mut s, ms(400));
+    assert_eq!(texts(&s), pair("Gates", "Fences"));
+    assert!(!s.can_undo());
+}

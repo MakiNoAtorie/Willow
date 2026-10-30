@@ -8,6 +8,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::Session;
 use super::panel_apply::{Versions, canonical_lines};
+use super::panel_direction::Words;
 use super::panel_edit::PanelEdit;
 use crate::input::{Input, Response};
 use crate::syntax::{Token, tokens};
@@ -40,8 +41,9 @@ pub struct Panel {
     /// The history revision just after the last applied text edit, while later ones join its
     /// undo step.
     pub(super) merge: Option<u64>,
-    /// A paste or cut waits to apply: as an undo step of its own.
-    pub(super) alone: bool,
+    /// The direction words of the text that last held the document: each shape's stated
+    /// anchor and side. Empty for regenerated text, whose words are the sides shapes sit on.
+    pub(super) words: Words,
 }
 
 impl Panel {
@@ -60,7 +62,7 @@ impl Panel {
             edit: PanelEdit::default(),
             versions: Versions::default(),
             merge: None,
-            alone: false,
+            words: Words::new(),
         }
     }
 
@@ -86,8 +88,7 @@ impl Rows {
         let (a, b) = (line(range.start), line(range.end));
         let (start, first) = self.lines[a];
         let rows_after = self.lines.get(b + 1).map_or(self.total, |l| l.1);
-        let end = range.start + len;
-        let end = text[end..].find('\n').map_or(text.len(), |i| end + i);
+        let end = line_end(text, range.start + len);
         let (mut new, mut at, mut row) = (Vec::new(), start, first);
         for l in text[start..end].split('\n') {
             new.push((at, row));
@@ -157,6 +158,11 @@ fn color_spans(line: &str, c: &crate::CodeStyle, ink: Rgba) -> Vec<Span> {
     out
 }
 
+/// The end of the line that byte `from` is on, line break excluded.
+pub(super) fn line_end(s: &str, from: usize) -> usize {
+    s[from..].find('\n').map_or(s.len(), |i| from + i)
+}
+
 /// Columns a grapheme takes: 2 for East Asian wide characters and emoji, else 1.
 pub(super) fn columns(g: &str) -> usize {
     let c = g.chars().next().map_or(0, u32::from);
@@ -210,6 +216,8 @@ pub struct Regeneration {
     heights: Vec<f32>,
     revision: u64,
     version: u64,
+    /// The panel had focus when it was taken.
+    focused: bool,
 }
 
 impl Regeneration {
@@ -220,6 +228,7 @@ impl Regeneration {
             text,
             revision: self.revision,
             version: self.version,
+            focused: self.focused,
         }
     }
 }
@@ -230,6 +239,7 @@ pub struct Regenerated {
     lines: Vec<LineKind>,
     revision: u64,
     version: u64,
+    focused: bool,
 }
 
 impl Session {
@@ -246,6 +256,15 @@ impl Session {
 
     pub fn panel(&self) -> &Panel {
         &self.panel
+    }
+
+    /// Opens the panel, the canvas keeping the keys: a window's open panel carried over to
+    /// the document that replaces it. Regenerates unless the text holds the document.
+    pub fn show_panel(&mut self) {
+        self.panel.open = true;
+        if self.held_text().is_none() {
+            self.panel.regenerated = None;
+        }
     }
 
     /// Replaces the panel text: what regeneration lands through, and what typing in the panel
@@ -273,10 +292,10 @@ impl Session {
     }
 
     /// Text columns in a row at the panel's width.
-    fn columns(&self) -> usize {
+    fn row_columns(&self) -> usize {
         let c = &self.theme.code;
         let room = self.panel.width - c.border_width - c.gutter_width - c.pad_right;
-        (room / (c.advance * c.font_size)).floor().max(1.0) as usize
+        (room / c.column()).floor().max(1.0) as usize
     }
 
     /// Where each line's rows start, made again after the width changed or new text was set;
@@ -284,7 +303,7 @@ impl Session {
     // ponytail: new text and each width step wrap the whole text (about 3 ms at 10,000
     // shapes); wrap off the UI thread with the regeneration if that shows in frame times.
     pub(super) fn rows(&self) -> Ref<'_, Rows> {
-        let cols = self.columns();
+        let cols = self.row_columns();
         if self
             .panel
             .rows
@@ -312,11 +331,16 @@ impl Session {
         (content - self.viewport.size.y).max(0.0)
     }
 
+    /// How far the text is scrolled now: the writer's scroll, kept within what the text allows.
+    pub(super) fn panel_scroll(&self) -> f32 {
+        self.panel.scroll.min(self.max_scroll())
+    }
+
     /// The rows in view, top to bottom, colored. The panel is as tall as the canvas.
     pub fn panel_rows(&self) -> Vec<PanelRow> {
         let (c, ink, text) = (&self.theme.code, self.theme.ink, &self.panel.text);
         let (rh, height) = (c.row_height(), self.viewport.size.y);
-        let scroll = self.panel.scroll.min(self.max_scroll());
+        let scroll = self.panel_scroll();
         let rows = self.rows();
         let first = ((scroll - c.pad_top) / rh).floor().max(0.0) as usize;
         let from = rows.lines.partition_point(|&(_, r)| r <= first) - 1;
@@ -325,7 +349,7 @@ impl Session {
             if c.pad_top + row as f32 * rh - scroll >= height {
                 break;
             }
-            let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+            let end = line_end(text, start);
             let kind = self.panel.lines.get(n);
             let invalid = kind == Some(&LineKind::Invalid);
             let spans = match kind {
@@ -377,13 +401,20 @@ impl Session {
             heights: self.heights(),
             revision,
             version: self.panel.versions.now,
+            focused: self.panel.focused,
         })
     }
 
     /// Shows a regeneration's text, unless the document has changed since it was taken (a
-    /// newer one is due) or the panel text has (nothing rewrites what the writer typed).
+    /// newer one is due), the panel text has (nothing rewrites what the writer typed), or the
+    /// panel has taken focus since (nothing moves the text under a caret just placed; the
+    /// first key regenerates).
     pub fn regenerated(&mut self, r: Regenerated) {
-        if r.revision == self.history.revision() && r.version == self.panel.versions.now {
+        let focus_taken = self.panel.focused && !r.focused;
+        if r.revision == self.history.revision()
+            && r.version == self.panel.versions.now
+            && !focus_taken
+        {
             self.set_panel_text(r.text);
             self.panel.lines = r.lines;
             self.text_shown();
@@ -392,13 +423,14 @@ impl Session {
         }
     }
 
-    /// Opens the panel on `text`, checked as `lines`, as what holds the document now: an
-    /// invalid file loaded. Nothing regenerates it until the document changes.
-    pub(super) fn hold_text(&mut self, text: String, lines: Vec<LineKind>) {
+    /// Opens the panel on `text`, checked as `lines` and stating `words`, as what holds the
+    /// document now: an invalid file loaded. Nothing regenerates it until the document changes.
+    pub(super) fn hold_text(&mut self, text: String, lines: Vec<LineKind>, words: Words) {
         let now = Some(self.history.revision());
         self.set_panel_text(text);
         let p = &mut self.panel;
         (p.open, p.lines, p.held, p.regenerated) = (true, lines, now, now);
+        p.words = words;
         self.text_shown();
         self.settle_text(false);
     }
@@ -434,10 +466,7 @@ impl Session {
                 self.panel.open = false;
             }
             Input::TogglePanel => {
-                self.panel.open = true;
-                if self.held_text().is_none() {
-                    self.panel.regenerated = None;
-                }
+                self.show_panel();
                 self.focus_panel();
             }
             Input::FocusPanel => self.focus_panel(),
