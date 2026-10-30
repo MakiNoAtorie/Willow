@@ -21,6 +21,7 @@ mod panel;
 mod panel_apply;
 #[cfg(test)]
 mod panel_apply_tests;
+mod panel_direction;
 mod panel_edit;
 mod panel_select;
 mod push;

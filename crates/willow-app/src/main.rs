@@ -217,6 +217,7 @@ impl Content {
             repaired: false,
             unplaced: Default::default(),
             lines: Vec::new(),
+            sides: Vec::new(),
         };
         Content::new(loaded, Vec::new(), None, None)
     }

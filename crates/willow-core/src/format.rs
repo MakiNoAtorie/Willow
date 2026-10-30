@@ -20,6 +20,9 @@ pub struct Loaded {
     pub unplaced: Unplaced,
     /// One per line of the text (`str::lines`), the header first; `check` gives at least one.
     pub lines: Vec<LineKind>,
+    /// For each shape (by index in `document`), the shape its line links to and the side of
+    /// it the shape is stated to sit on: the line's direction word.
+    pub sides: Vec<Option<(usize, Side)>>,
 }
 
 impl Loaded {

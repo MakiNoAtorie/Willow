@@ -171,6 +171,7 @@ impl Session {
             }
             None => true,
         });
+        self.replace_by_word(&mut loaded.document, &loaded.sides, &at);
         self.place(&mut loaded);
         let mut new = loaded.document;
         let old = &self.doc;

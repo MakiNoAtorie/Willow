@@ -172,6 +172,7 @@ pub fn check(text: &str) -> Loaded {
         repaired,
         unplaced,
         lines,
+        sides: anchor,
     }
 }
 

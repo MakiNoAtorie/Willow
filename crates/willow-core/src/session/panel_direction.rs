@@ -1,0 +1,90 @@
+//! Typed direction words: changing only a link's word (`below a` to `right of a`), with the
+//! shape's `@layout` line untouched, re-places the shape one creation gap from its anchor on
+//! the new side, carrying the part of its chain beyond it as one block.
+
+use std::collections::{HashMap, HashSet};
+
+use super::Session;
+use crate::{Document, Shape, ShapeId, Side, chain, side};
+
+/// Where a shape sits and how big it is: what its `@layout` line says.
+fn layout(s: &Shape) -> (i32, i32, u32, u32) {
+    (s.x, s.y, s.width, s.extra_height)
+}
+
+impl Session {
+    /// Re-places shapes of `new` (the document typed text makes, positions as the text or the
+    /// document gives them) whose line states another side of the shape it links to than the
+    /// document shows, when their layout is the document's. `sides` is each shape's stated
+    /// link and side; `at` finds a shape of the document by ID.
+    pub(super) fn replace_by_word(
+        &self,
+        new: &mut Document,
+        sides: &[Option<(usize, Side)>],
+        at: &HashMap<&ShapeId, usize>,
+    ) {
+        let old = &self.doc;
+        let height = |s: &Shape| self.shape_height(s);
+        // Shapes whose layout the text leaves as the document has it.
+        let kept: Vec<Option<usize>> = (new.shapes.iter())
+            .map(|s| {
+                at.get(&s.id)
+                    .copied()
+                    .filter(|&j| layout(&old.shapes[j]) == layout(s))
+            })
+            .collect();
+        let linked = |a: &ShapeId, b: &ShapeId| {
+            (old.links.iter()).any(|l| (&l.0, &l.1) == (a, b) || (&l.0, &l.1) == (b, a))
+        };
+        for (i, stated) in sides.iter().enumerate() {
+            let (Some((a, to)), Some(j)) = (*stated, kept[i]) else {
+                continue;
+            };
+            let Some(&k) = at.get(&new.shapes[a].id) else {
+                continue;
+            };
+            let (os, oa) = (&old.shapes[j], &old.shapes[k]);
+            if !linked(&os.id, &oa.id) || side(oa.center(height(oa)), os.center(height(os))) == to {
+                continue;
+            }
+            let (s, anchor) = (&new.shapes[i], &new.shapes[a]);
+            let (x, y) = chain::beside(
+                anchor,
+                height(anchor),
+                s.width,
+                height(s),
+                to,
+                self.theme.creation_gap,
+            );
+            let (dx, dy) = (x - s.x, y - s.y);
+            for m in beyond(new, i, a) {
+                if kept[m].is_some() {
+                    new.shapes[m].x += dx;
+                    new.shapes[m].y += dy;
+                }
+            }
+        }
+    }
+}
+
+/// Shape `root` and every shape linked beyond it, not through `from` (indices into
+/// `doc.shapes`).
+fn beyond(doc: &Document, root: usize, from: usize) -> Vec<usize> {
+    let at: HashMap<&ShapeId, usize> = (doc.shapes.iter().enumerate())
+        .map(|(i, s)| (&s.id, i))
+        .collect();
+    let mut next = vec![Vec::new(); doc.shapes.len()];
+    for l in &doc.links {
+        if let (Some(&a), Some(&b)) = (at.get(&l.0), at.get(&l.1)) {
+            next[a].push(b);
+            next[b].push(a);
+        }
+    }
+    let (mut out, mut seen) = (vec![root], HashSet::from([root, from]));
+    let mut n = 0;
+    while let Some(&s) = out.get(n) {
+        out.extend(next[s].iter().filter(|&&k| seen.insert(k)));
+        n += 1;
+    }
+    out
+}
