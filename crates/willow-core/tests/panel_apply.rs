@@ -323,6 +323,7 @@ fn undo_in_the_panel_applies_pending_text_first_then_takes_it_back_as_one_step()
     let mut s = panel_of(SIMPLE);
     let before = s.document().clone();
     replace(&mut s, "\"Gates\"\n", "\"Fences\"\nb: \"B\"\n", ms(0));
+    let typed = s.panel().text().to_owned();
     s.handle(Input::Undo, ms(10));
     settle(&mut s);
     assert_eq!(*s.document(), before);
@@ -331,7 +332,8 @@ fn undo_in_the_panel_applies_pending_text_first_then_takes_it_back_as_one_step()
     s.handle(Input::Redo, ms(20));
     settle(&mut s);
     assert_eq!(ids(&s), ["a", "b"]);
-    assert_eq!(s.panel().text(), canonical(&s));
+    // Never regenerated, the text comes back as typed.
+    assert_eq!(s.panel().text(), typed);
 }
 
 #[test]

@@ -573,7 +573,8 @@ impl Session {
 
     /// Whether there is a document change to undo; the Undo menu item enables from it.
     pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
+        // Typed panel text Undo would apply or keep as a step first.
+        self.history.can_undo() || self.typed_since_step()
     }
 
     pub fn can_redo(&self) -> bool {
@@ -1036,11 +1037,13 @@ impl Session {
                 self.respond(true)
             }
             Input::Undo | Input::Redo => {
+                self.keep_typing();
                 if input == Input::Undo {
                     self.history.undo(&mut self.doc);
                 } else {
                     self.history.redo(&mut self.doc);
                 }
+                self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
                 // Undone pushes jump back; a slide still running would draw them off.

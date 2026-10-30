@@ -114,6 +114,7 @@ impl Session {
                 if loaded.document != self.doc {
                     self.stop_editing();
                     self.end_gesture();
+                    self.keep_typing();
                     self.history.replace(&mut self.doc, loaded.document);
                     self.drop_missing_selection();
                 }

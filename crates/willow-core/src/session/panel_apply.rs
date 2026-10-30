@@ -6,10 +6,14 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use super::Session;
+use crate::input::Input;
 use crate::{Document, LineKind, Link, Loaded, ShapeId, Zone, check, format};
 
 /// How long after the last keystroke the panel text is checked.
 const PAUSE: Duration = Duration::from_millis(150);
+
+/// A pause in typing this long ends the undo step applied text edits merge into.
+const MERGE_PAUSE: Duration = Duration::from_secs(1);
 
 /// Versions of the panel text: `now` counts every change to it; the others are the version
 /// last checked, last saved (or loaded or regenerated) and last loaded or regenerated.
@@ -19,6 +23,8 @@ pub(super) struct Versions {
     pub(super) checked: u64,
     pub(super) saved: u64,
     pub(super) shown: u64,
+    /// The version `History.text` describes: the text the document's undo steps know.
+    pub(super) state: u64,
 }
 
 /// Panel text to check: built on the UI thread by `Session::take_text_check`, `run` anywhere,
@@ -128,7 +134,10 @@ impl Session {
     /// regeneration is regenerated unless a line is invalid.
     pub(super) fn leave_panel(&mut self) {
         self.panel.focused = false;
+        // Pending text joins the step text edits merge into, which ends here.
         self.flush_text();
+        self.panel.merge = None;
+        self.keep_typing();
         let v = &self.panel.versions;
         if v.now != v.shown && !self.panel.lines.contains(&LineKind::Invalid) {
             self.panel.regenerated = None;
@@ -140,6 +149,9 @@ impl Session {
         self.panel.lines = loaded.lines.clone();
         if !loaded.invalid() {
             self.apply_text(loaded);
+            if std::mem::take(&mut self.panel.alone) {
+                self.panel.merge = None;
+            }
         }
     }
 
@@ -212,21 +224,101 @@ impl Session {
         self.apply_document(new);
     }
 
-    /// Replaces the document with `new` as one undo step, if it differs.
+    /// Replaces the document with `new` as one undo step, if it differs; joined to the last
+    /// step while `Panel.merge` is that step's revision.
     fn apply_document(&mut self, new: Document) {
         if new == self.doc {
+            self.settle_text(false);
             return;
         }
         self.stop_editing();
         self.end_gesture();
-        self.history.replace(&mut self.doc, new);
+        if self.panel.merge == Some(self.history.revision()) {
+            self.history.amend(&mut self.doc, new);
+        } else {
+            self.history.replace(&mut self.doc, new);
+        }
         self.drop_missing_selection();
         let revision = Some(self.history.revision());
         self.panel.held = revision;
+        self.panel.merge = revision;
         if self.panel.focused {
             self.panel.regenerated = revision;
         }
+        self.settle_text(false);
         self.changed(self.now);
+    }
+
+    /// Before a panel key: after a 1 s pause in typing, or for a paste or cut, the next
+    /// update starts a step. (Updates are never split: what applies together is one.)
+    pub(super) fn before_text_key(&mut self, input: &Input) {
+        let paused = (self.panel.edit.typed).is_some_and(|t| self.now >= t + MERGE_PAUSE);
+        if paused || matches!(input, Input::Paste(_) | Input::Cut) {
+            self.panel.merge = None;
+        }
+    }
+
+    /// After a panel key that was at caret `at`: the update holding a paste or cut is a step
+    /// of its own, and after a caret moved to another line the next update starts a step.
+    pub(super) fn after_text_key(&mut self, input: &Input, at: usize) {
+        match input {
+            Input::Paste(_) | Input::Cut => self.panel.alone = true,
+            Input::Move(_) | Input::Select(_) => self.caret_moved(at),
+            _ => {}
+        }
+    }
+
+    /// The caret moved from `at`, the text unchanged: onto another line, the next update
+    /// starts a step.
+    pub(super) fn caret_moved(&mut self, at: usize) {
+        let to = self.panel.caret();
+        if self.panel.text()[at.min(to)..at.max(to)].contains('\n') {
+            self.panel.merge = None;
+        }
+    }
+
+    /// The panel text as it is now is the document's (`plain`: regenerated): what the next
+    /// undo step records, and what undo and redo bring back.
+    pub(super) fn settle_text(&mut self, plain: bool) {
+        self.history.text = (!plain).then(|| self.panel.text().to_owned());
+        self.panel.versions.state = self.panel.versions.now;
+    }
+
+    /// Text was typed into the document's panel text that no undo step knows yet.
+    pub(super) fn typed_since_step(&self) -> bool {
+        let v = &self.panel.versions;
+        self.panel.held == Some(self.history.revision()) && v.now != v.state
+    }
+
+    /// Typed text with an invalid line, which no edit applied, becomes an undo step of its
+    /// own: Undo takes it back to the last valid text, Redo brings it again, and a canvas edit
+    /// that regenerates it away can be undone. Before Undo, Redo and leaving the panel.
+    pub(super) fn keep_typing(&mut self) {
+        if !self.typed_since_step() || !self.panel.lines.contains(&LineKind::Invalid) {
+            return;
+        }
+        self.history.text_step(&self.doc);
+        let revision = Some(self.history.revision());
+        (self.panel.held, self.panel.regenerated) = (revision, revision);
+        self.settle_text(false);
+    }
+
+    /// After undo or redo: the step's panel text shows again, holding the document, unless it
+    /// was plain regenerated text, which regenerates as after any step.
+    pub(super) fn restore_text(&mut self) {
+        let Some(text) = self.history.text.clone() else {
+            return;
+        };
+        let lines = check(&text).lines;
+        let saved = text.as_bytes() == self.bytes;
+        self.set_panel_text(text);
+        let p = &mut self.panel;
+        (p.lines, p.regenerated) = (lines, Some(self.history.revision()));
+        let v = &mut p.versions;
+        (v.checked, v.state) = (v.now, v.now);
+        if saved {
+            v.saved = v.now;
+        }
     }
 }
 

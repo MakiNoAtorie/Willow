@@ -37,6 +37,11 @@ pub struct Panel {
     rows: RefCell<Option<Rows>>,
     pub(super) edit: PanelEdit,
     pub(super) versions: Versions,
+    /// The history revision just after the last applied text edit, while later ones join its
+    /// undo step.
+    pub(super) merge: Option<u64>,
+    /// A paste or cut waits to apply: as an undo step of its own.
+    pub(super) alone: bool,
 }
 
 impl Panel {
@@ -54,6 +59,8 @@ impl Panel {
             rows: RefCell::default(),
             edit: PanelEdit::default(),
             versions: Versions::default(),
+            merge: None,
+            alone: false,
         }
     }
 
@@ -325,6 +332,7 @@ impl Session {
             self.set_panel_text(r.text);
             self.panel.lines = r.lines;
             self.text_shown();
+            self.settle_text(true);
             self.panel_seek_selection();
         }
     }
@@ -337,6 +345,7 @@ impl Session {
         let p = &mut self.panel;
         (p.open, p.lines, p.held, p.regenerated) = (true, lines, now, now);
         self.text_shown();
+        self.settle_text(false);
     }
 
     /// Lets go of any held text: the next regeneration is due, and Save and recovery write
@@ -344,6 +353,7 @@ impl Session {
     pub(super) fn release_text(&mut self) {
         let p = &mut self.panel;
         (p.lines, p.held, p.regenerated) = (Vec::new(), None, None);
+        self.settle_text(true);
     }
 
     /// The panel text, while it holds the document as it is now.
@@ -383,10 +393,16 @@ impl Session {
                 if self.panel.open && pos.x >= self.viewport.size.x =>
             {
                 self.focus_panel();
-                return Some(self.panel_press(input));
+                let at = self.panel.caret();
+                let r = self.panel_press(input);
+                self.caret_moved(at);
+                return Some(r);
             }
             Input::PointerMove { pos, .. } if self.panel.edit.drag => {
-                return Some(self.panel_drag(*pos));
+                let at = self.panel.caret();
+                let r = self.panel_drag(*pos);
+                self.caret_moved(at);
+                return Some(r);
             }
             Input::PointerUp { .. } if self.panel.edit.drag => self.panel.edit.drag = false,
             &Input::ScrollPanel(dy) => {
@@ -418,7 +434,11 @@ impl Session {
             // Canvas commands and text input: the panel's keys.
             _ => {
                 self.fresh_text();
-                return Some(self.panel_key(input));
+                self.before_text_key(input);
+                let at = self.panel.caret();
+                let r = self.panel_key(input);
+                self.after_text_key(input, at);
+                return Some(r);
             }
         }
         Some(self.respond(true))
