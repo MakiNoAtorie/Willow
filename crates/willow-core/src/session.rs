@@ -19,6 +19,7 @@ mod nav;
 mod nudge;
 mod panel;
 mod panel_edit;
+mod panel_select;
 mod push;
 mod select;
 mod tab_picker;
@@ -464,6 +465,7 @@ impl Session {
         // Drop rings that have finished fading out.
         self.rings.retain(|_, r| r.to > 0.0 || !r.done(now, fade));
         self.selected = ids;
+        self.panel_follow_selection();
     }
 
     /// The shape being dragged and its previewed top-left; the document still holds the old one.

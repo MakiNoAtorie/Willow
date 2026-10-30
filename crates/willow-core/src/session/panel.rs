@@ -29,7 +29,9 @@ pub struct Panel {
     /// while it is the current one.
     held: Option<u64>,
     /// What each line is (`check`); empty while every line is fine.
-    lines: Vec<LineKind>,
+    pub(super) lines: Vec<LineKind>,
+    /// The selection has no line in the text yet: show it once regenerated.
+    pub(super) seek: bool,
     /// Where each line's rows start, for the text and column count it was made for.
     rows: RefCell<Option<Rows>>,
     pub(super) edit: PanelEdit,
@@ -46,6 +48,7 @@ impl Panel {
             regenerated: None,
             held: None,
             lines: Vec::new(),
+            seek: false,
             rows: RefCell::default(),
             edit: PanelEdit::default(),
         }
@@ -308,6 +311,7 @@ impl Session {
         if r.revision == self.history.revision() {
             self.set_panel_text(r.text);
             (self.panel.held, self.panel.lines) = (Some(r.revision), Vec::new());
+            self.panel_seek_selection();
         }
     }
 

@@ -73,6 +73,7 @@ impl Session {
     /// the caret there (Shift: extends the selection) and starts a drag; double-click selects
     /// the word there, triple-click its line.
     pub(super) fn panel_press(&mut self, input: &Input) -> Response {
+        let mut on = None;
         match *input {
             Input::PointerDown {
                 pos,
@@ -87,6 +88,7 @@ impl Session {
                     e.anchor = c.offset;
                 }
                 e.since = self.now;
+                on = Some(c.offset);
             }
             Input::DoubleClick { pos } | Input::TripleClick { pos } => {
                 let (row, col) = self.panel_hit(pos);
@@ -105,8 +107,13 @@ impl Session {
                 let e = &mut self.panel.edit;
                 (e.anchor, e.caret, e.goal) = (range.start, downstream(range.end), None);
                 e.since = self.now;
+                // A triple-click's caret is on the next line.
+                on = Some(i);
             }
             _ => {}
+        }
+        if let Some(at) = on {
+            self.panel_follow_caret(at);
         }
         self.respond(true)
     }
@@ -118,6 +125,7 @@ impl Session {
         let (row, col) = self.panel_hit(pos);
         self.panel.edit.caret = self.panel_stop(row, col, true);
         self.panel.edit.since = self.now;
+        self.panel_follow_caret(self.panel.edit.caret.offset);
         self.respond(true)
     }
 
@@ -197,17 +205,16 @@ impl Session {
         }
         self.panel.edit.since = self.now;
         self.panel_reveal();
+        // Typing waits for the next check, which `lines` is stale until.
+        if matches!(input, Input::Move(_) | Input::Select(_)) {
+            self.panel_follow_caret(self.panel.edit.caret.offset);
+        }
         self.respond(true)
     }
 
     /// Scrolls the least that shows the caret's row between the top and bottom padding.
     fn panel_reveal(&mut self) {
-        let (c, height) = (&self.theme.code, self.viewport.size.y);
-        let top = self.panel_spot(self.panel.edit.caret).0 as f32 * c.row_height();
-        let low = c.pad_top + top + c.row_height() + c.pad_bottom - height;
-        let max = self.max_scroll();
-        let scroll = self.panel.scroll.min(max).max(low).min(top);
-        self.panel.scroll = scroll.clamp(0.0, max);
+        self.panel_show_row(self.panel_spot(self.panel.edit.caret).0);
     }
 
     /// The panel caret to draw at `now` while the panel has focus, in `PanelRow`
