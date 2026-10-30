@@ -30,4 +30,8 @@ if [ "$(wc -c < docs/CONVENTIONS.md)" -gt 8192 ]; then
   echo "error: docs/CONVENTIONS.md is over 8 KB: prune it"
   exit 1
 fi
+# Vouches for this tree to the pre-push hook; only a clean checkout tested exactly that tree.
+if [ -z "$(git status --porcelain)" ]; then
+  git rev-parse 'HEAD^{tree}' >>"$(git rev-parse --git-common-dir)/ci-passed"
+fi
 echo "CI checks passed."
