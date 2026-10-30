@@ -38,7 +38,7 @@ use std::time::Duration;
 use crate::Side;
 use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
-use crate::layout::{Layout, Measure, layout};
+use crate::layout::{Align, Layout, Measure, layout};
 use crate::zoom::{ZOOM_NOTCH_PX, Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
@@ -193,6 +193,7 @@ impl Ring {
 struct Cached {
     text: RichText,
     width: u32,
+    align: Align,
     layout: Rc<Layout>,
 }
 
@@ -200,6 +201,8 @@ pub struct Session {
     doc: Document,
     history: History,
     theme: &'static Theme,
+    /// App-wide, never in the document or history; see `set_align`.
+    align: Align,
     pub(crate) measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
     /// Where `measure_ahead` goes on: a shape index.
@@ -270,6 +273,7 @@ impl Session {
             doc,
             history: History::default(),
             theme,
+            align: Align::default(),
             measure,
             layouts: RefCell::default(),
             ahead: Cell::default(),
@@ -321,6 +325,16 @@ impl Session {
         }
     }
 
+    pub fn align(&self) -> Align {
+        self.align
+    }
+
+    /// Sets how every shape's words sit in their lines. Moves words only: line breaks and
+    /// heights stay, and the document, its saved state and the undo history are untouched.
+    pub fn set_align(&mut self, align: Align) {
+        self.align = align;
+    }
+
     /// `shape`'s text layout, positioned from the text's top-left inside the padding. Cached
     /// per shape; recomputed only when its text or width changed.
     pub fn layout(&self, shape: &Shape) -> Rc<Layout> {
@@ -328,17 +342,25 @@ impl Session {
         if let Some(c) = cache.get(&shape.id)
             && c.text == shape.text
             && c.width == shape.width
+            && c.align == self.align
         {
             return c.layout.clone();
         }
         let width = (shape.width as f32 - 2.0 * self.theme.shape.pad_x).max(0.0);
-        let l = Rc::new(layout(&shape.text, width, self.theme, &*self.measure));
+        let l = Rc::new(layout(
+            &shape.text,
+            width,
+            self.theme,
+            self.align,
+            &*self.measure,
+        ));
         let (text, width, layout) = (shape.text.clone(), shape.width, l.clone());
         cache.insert(
             shape.id.clone(),
             Cached {
                 text,
                 width,
+                align: self.align,
                 layout,
             },
         );
@@ -532,7 +554,7 @@ impl Session {
     fn min_width(&self, shape: &Shape) -> u32 {
         let t = self.theme;
         // Wide enough that only paragraph breaks wrap.
-        let l = layout(&shape.text, 1e6, t, &*self.measure);
+        let l = layout(&shape.text, 1e6, t, Align::Left, &*self.measure);
         let widest = (l.lines.iter().flat_map(|l| &l.clusters))
             .map(|c| c.width)
             .fold(0.0, f32::max);

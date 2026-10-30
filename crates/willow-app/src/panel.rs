@@ -328,12 +328,7 @@ pub(crate) fn drag_panel(entity: &Entity<Willow>, window: &mut Window, cx: &mut 
     let e = entity.clone();
     window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
         if phase == DispatchPhase::Bubble && e.update(cx, |w, _| w.panel_drag.take()).is_some() {
-            let (prefs, file) = (cx.global::<Prefs>().clone(), prefs::file());
-            if let Some(file) = file {
-                cx.background_executor()
-                    .spawn(async move { prefs.save(&file) })
-                    .detach();
-            }
+            prefs::save_later(cx);
         }
     });
 }

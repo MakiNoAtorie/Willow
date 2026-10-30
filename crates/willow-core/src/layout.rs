@@ -18,6 +18,16 @@ pub trait Measure {
     fn advances(&self, para: &Paragraph, clusters: &[Range<usize>], theme: &Theme) -> Vec<f32>;
 }
 
+/// Where words sit in a line. It never changes where lines break.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    /// Non-last lines of a paragraph fill the width.
+    #[default]
+    Justified,
+    Left,
+    Centered,
+}
+
 /// One grapheme cluster where it is drawn. Justified spaces are wider than measured.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cluster {
@@ -187,8 +197,9 @@ fn cjk(s: &str) -> bool {
 
 /// Lays `text` out in `width` canvas units: greedy breaks at UAX #14 opportunities (so CJK
 /// breaks between characters, with kinsoku), between clusters inside a word wider than the
-/// line; non-last lines of a paragraph justified over spaces and CJK break gaps.
-pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> Layout {
+/// line; with `Justified`, non-last lines of a paragraph are stretched over spaces and CJK
+/// break gaps; with `Centered`, each line's ink is centered.
+pub fn layout(text: &RichText, width: f32, theme: &Theme, align: Align, m: &dyn Measure) -> Layout {
     let lh = theme.line_height();
     let empty = [Paragraph::default()];
     let paras = match text.paragraphs.as_slice() {
@@ -257,12 +268,15 @@ pub fn layout(text: &RichText, width: f32, theme: &Theme, m: &dyn Measure) -> La
             };
             let gaps = (a..ink_end).filter(|&i| stretch(i)).count();
             let natural: f32 = adv[a..ink_end].iter().sum();
-            let extra = if end < n && gaps > 0 {
+            let extra = if align == Align::Justified && end < n && gaps > 0 {
                 ((width - natural) / gaps as f32).max(0.0)
             } else {
                 0.0
             };
-            let mut x = 0.0;
+            let mut x = match align {
+                Align::Centered => ((width - natural) / 2.0).max(0.0),
+                _ => 0.0,
+            };
             let clusters: Vec<Cluster> = (a..end)
                 .map(|i| {
                     let w = adv[i]

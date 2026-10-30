@@ -210,7 +210,7 @@ fn app_menu(
     let choices = cascade.and_then(|shown| {
         let entries = match shown {
             Cascade::Theme => view_menu::themes(session.theme()),
-            Cascade::Alignment => view_menu::alignments(),
+            Cascade::Alignment => view_menu::alignments(session.align()),
             _ => return None,
         };
         let close = &set;

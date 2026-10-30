@@ -381,6 +381,8 @@ impl Willow {
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         panel::apply_width(&mut self.session, window, cx);
+        self.session
+            .set_align(cx.global::<prefs::Prefs>().alignment());
         let theme = self.session.theme();
         bench::step(self, window);
         let now = self.start.elapsed();
@@ -1025,6 +1027,7 @@ pub(crate) fn shadows(
 /// The native menu bar: app menu, File, Edit, View and Window (no Help). Items enable while their action has a handler.
 #[cfg(target_os = "macos")]
 fn set_menus(theme: &Theme, cx: &mut App) {
+    let align = cx.global::<prefs::Prefs>().alignment();
     use gpui::{Menu, MenuItem, OsAction};
     /// A submenu of checkable entries.
     fn choices(name: &'static str, entries: Vec<view_menu::Choice>) -> Menu {
@@ -1063,7 +1066,7 @@ fn set_menus(theme: &Theme, cx: &mut App) {
             MenuItem::action("Actual Size", ResetZoom),
             MenuItem::separator(),
             MenuItem::submenu(choices("Theme", view_menu::themes(theme))),
-            MenuItem::submenu(choices("Text Alignment", view_menu::alignments())),
+            MenuItem::submenu(choices("Text Alignment", view_menu::alignments(align))),
             MenuItem::separator(),
             MenuItem::action("Enter Full Screen", ToggleFullScreen),
         ]),
@@ -1273,15 +1276,15 @@ fn main() {
                 Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice()),
             ])
             .expect("bundled fonts");
-        #[cfg(target_os = "macos")]
-        set_menus(&PAPER, cx);
-        view_menu::register(cx);
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
         // Preferences are the same in every window; a bench run keeps the defaults.
         let prefs = prefs::file().filter(|_| bench.is_none());
         cx.set_global(prefs.map_or_else(Default::default, |f| prefs::Prefs::load(&f)));
+        #[cfg(target_os = "macos")]
+        set_menus(&PAPER, cx);
+        view_menu::register(cx);
         cx.set_quit_mode(QuitMode::LastWindowClosed);
         // A plain launch applies the recovery files instead of opening a new document.
         if recover {
