@@ -7,6 +7,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::Session;
+use super::panel_edit::PanelEdit;
 use crate::input::{Input, Response};
 use crate::syntax::{Token, tokens};
 use crate::{Document, LineKind, Rgba, format};
@@ -20,7 +21,7 @@ pub struct Panel {
     /// Screen pixels. The app gives the canvas the window's width less this while open.
     pub width: f32,
     /// How far the text is scrolled up, screen pixels.
-    scroll: f32,
+    pub(super) scroll: f32,
     text: String,
     /// The history revision the text was last regenerated for; `None` forces the next.
     regenerated: Option<u64>,
@@ -31,6 +32,7 @@ pub struct Panel {
     lines: Vec<LineKind>,
     /// Where each line's rows start, for the text and column count it was made for.
     rows: RefCell<Option<Rows>>,
+    pub(super) edit: PanelEdit,
 }
 
 impl Panel {
@@ -45,6 +47,7 @@ impl Panel {
             held: None,
             lines: Vec::new(),
             rows: RefCell::default(),
+            edit: PanelEdit::default(),
         }
     }
 
@@ -56,10 +59,10 @@ impl Panel {
 
 /// Each logical line's start (byte) and first row, and the row count, at `cols` columns.
 #[derive(Clone, Debug)]
-struct Rows {
-    cols: usize,
-    lines: Vec<(usize, usize)>,
-    total: usize,
+pub(super) struct Rows {
+    pub(super) cols: usize,
+    pub(super) lines: Vec<(usize, usize)>,
+    pub(super) total: usize,
 }
 
 /// One soft-wrapped row of panel text in view.
@@ -116,7 +119,7 @@ fn color_spans(line: &str, c: &crate::CodeStyle, ink: Rgba) -> Vec<Span> {
 }
 
 /// Columns a grapheme takes: 2 for East Asian wide characters and emoji, else 1.
-fn columns(g: &str) -> usize {
+pub(super) fn columns(g: &str) -> usize {
     let c = g.chars().next().map_or(0, u32::from);
     let wide = matches!(c, 0x1100..=0x115f | 0x2e80..=0xa4cf | 0xac00..=0xd7a3 | 0xf900..=0xfaff
         | 0xfe30..=0xfe4f | 0xff00..=0xff60 | 0xffe0..=0xffe6 | 0x1f300..=0x1faff
@@ -126,7 +129,7 @@ fn columns(g: &str) -> usize {
 
 /// Byte ranges of the rows `line` wraps into at `cols` columns: after the last space that
 /// fits, else after the last grapheme that fits. An empty line is one empty row.
-fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
+pub(super) fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
     let mut rows = Vec::new();
     let (mut start, mut col, mut space) = (0, 0, None);
     for (i, g) in line.grapheme_indices(true) {
@@ -190,6 +193,7 @@ impl Session {
     pub fn set_panel_text(&mut self, text: String) {
         self.panel.text = text;
         *self.panel.rows.get_mut() = None;
+        self.panel.edit.fit(&self.panel.text);
     }
 
     /// Text columns in a row at the panel's width.
@@ -202,7 +206,7 @@ impl Session {
     /// Where each line's rows start, made again after the text or width changed.
     // ponytail: wraps the whole text after every change; per-line row counts if typing in
     // a 10,000-shape document misses its frame budget.
-    fn rows(&self) -> Ref<'_, Rows> {
+    pub(super) fn rows(&self) -> Ref<'_, Rows> {
         let cols = self.columns();
         if self
             .panel
@@ -225,7 +229,7 @@ impl Session {
     }
 
     /// The scroll that keeps the last row above the bottom padding, or 0 when all fits.
-    fn max_scroll(&self) -> f32 {
+    pub(super) fn max_scroll(&self) -> f32 {
         let c = &self.theme.code;
         let content = c.pad_top + self.rows().total as f32 * c.row_height() + c.pad_bottom;
         (content - self.viewport.size.y).max(0.0)
@@ -333,10 +337,12 @@ impl Session {
         self.stop_editing();
         (self.menu, self.tab_picker) = (None, false);
         self.panel.focused = true;
+        self.panel.edit.since = self.now;
     }
 
     /// `input` as the panel takes it first: `None` goes on to the canvas. While the panel has
-    /// focus, only pointer input, view changes, undo and redo reach the canvas.
+    /// focus, only pointer input and view changes reach the canvas; undo and redo do nothing
+    /// yet.
     pub(super) fn panel_input(&mut self, input: &Input) -> Option<Response> {
         match input {
             Input::TogglePanel if self.panel.open => {
@@ -350,6 +356,19 @@ impl Session {
                 self.focus_panel();
             }
             Input::FocusPanel => self.focus_panel(),
+            // Positions past the canvas's right edge are in the panel.
+            Input::PointerDown { pos, .. }
+            | Input::DoubleClick { pos }
+            | Input::TripleClick { pos }
+                if self.panel.open && pos.x >= self.viewport.size.x =>
+            {
+                self.focus_panel();
+                return Some(self.panel_press(input));
+            }
+            Input::PointerMove { pos, .. } if self.panel.edit.drag => {
+                return Some(self.panel_drag(*pos));
+            }
+            Input::PointerUp { .. } if self.panel.edit.drag => self.panel.edit.drag = false,
             &Input::ScrollPanel(dy) => {
                 let max = self.max_scroll();
                 self.panel.scroll = (self.panel.scroll.min(max) - dy).clamp(0.0, max);
@@ -367,15 +386,13 @@ impl Session {
             | Input::Wheel { .. }
             | Input::Pinch { .. }
             | Input::ResetZoom
-            | Input::Undo
-            | Input::Redo
             | Input::FocusLost
             | Input::ModifiersChanged
             | Input::KeyUp(_)
             | Input::MenuChoose(_)
             | Input::CloseMenu => return None,
             // Canvas commands and text input: the panel's keys.
-            _ => return Some(self.respond(false)),
+            _ => return Some(self.panel_key(input)),
         }
         Some(self.respond(true))
     }

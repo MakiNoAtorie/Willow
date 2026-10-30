@@ -2,14 +2,15 @@
 //! the title-bar toggle, and regeneration off the UI thread.
 
 use gpui::{
-    Action, App, Bounds, Context, CursorStyle, DispatchPhase, Entity, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, ShapedLine, TextAlign,
-    TextRun, UnderlineStyle, Window, canvas, div, fill, point, prelude::*, px,
+    Action, App, Bounds, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
+    FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    ScrollEvent, ShapedLine, TextAlign, TextRun, UnderlineStyle, Window, canvas, div, fill, point,
+    prelude::*, px, size,
 };
 use willow_core::{Input, Session};
 
 use crate::prefs::{self, Prefs};
-use crate::{TogglePanel, WHEEL_LINE, Willow, color};
+use crate::{TogglePanel, WHEEL_LINE, Willow, color, paint_caret};
 
 impl Willow {
     /// Runs the session's due regeneration off the UI thread. A newer one drops this one's
@@ -39,21 +40,41 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
         return None;
     }
     let c = session.theme().code;
-    let entity = cx.entity();
+    let (entity, keys) = (cx.entity(), cx.entity());
     let rows = canvas(
-        move |bounds, window, cx| shape_rows(bounds, &entity.read(cx).session, window),
-        move |_, (rows, tints), window, cx| {
+        move |bounds, window, cx| {
+            let session = &entity.read(cx).session;
+            (
+                overlays(bounds, session),
+                shape_rows(bounds, session, window),
+            )
+        },
+        move |bounds, ((under, over), (rows, tints)), window, cx| {
             for b in tints {
                 window.paint_quad(fill(b, color(c.invalid_tint)));
             }
+            under.into_iter().for_each(|q| window.paint_quad(q));
             for (line, at) in rows {
                 // A glyph that fails to paint only loses that glyph.
                 let h = px(c.row_height());
                 let _ = line.paint(at, h, TextAlign::Left, None, window, cx);
             }
+            over.into_iter().for_each(|q| window.paint_quad(q));
+            let w = keys.read(cx);
+            let caret = w.session.panel_caret(w.start.elapsed());
+            if let Some(c) = caret.filter(|c| c.visible) {
+                paint_caret(window, bounds.origin, c, w.session.theme(), 1.0, 1.0);
+            }
+            // Typing and the IME go to the panel while it has the keys.
+            if w.session.panel().focused {
+                let focus = w.focus.clone();
+                let handler = ElementInputHandler::new(bounds, keys.clone());
+                window.handle_input(&focus, handler, cx);
+            }
         },
     )
-    .size_full();
+    .size_full()
+    .cursor(CursorStyle::IBeam);
     Some(
         div()
             .flex_none()
@@ -63,10 +84,8 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
             .bg(color(c.bg))
             .border_l(px(c.border_width))
             .border_color(color(c.border))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|w, _, _, cx| w.input(Input::FocusPanel, cx)),
-            )
+            // Canvas-relative like any press: the core finds the panel past the canvas's edge.
+            .on_mouse_down(MouseButton::Left, cx.listener(Willow::mouse_down))
             .on_scroll(cx.listener(|w, e: &ScrollEvent, _, cx| {
                 let d = e.delta.pixel_delta(px(WHEEL_LINE));
                 w.input(Input::ScrollPanel(d.y.into()), cx)
@@ -92,6 +111,30 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
                     ),
             ),
     )
+}
+
+/// The selection highlight to paint under the text, and the IME underline over it.
+fn overlays(bounds: Bounds<Pixels>, session: &Session) -> (Vec<PaintQuad>, Vec<PaintQuad>) {
+    let (t, p) = (session.theme(), session.panel());
+    let at = |q: willow_core::Point| bounds.origin + point(px(q.x), px(q.y));
+    let under = (session.panel_rects(p.selection()).into_iter())
+        .map(|(a, b)| fill(Bounds::from_corners(at(a), at(b)), color(t.selection.text)))
+        .collect();
+    let mut over: Vec<PaintQuad> = Vec::new();
+    // Just under the em box, centered in the row, as in a shape.
+    let below = (t.code.row_height() + t.code.font_size) / 2.0;
+    for (a, b) in p
+        .marked()
+        .map(|m| session.panel_rects(m))
+        .unwrap_or_default()
+    {
+        let line = size(px(b.x - a.x), px(t.caret.marked_underline));
+        over.push(fill(
+            Bounds::new(at(a) + point(px(0.0), px(below)), line),
+            color(t.ink),
+        ));
+    }
+    (under, over)
 }
 
 /// Every row in view shaped, with where its line box's top-left goes, and the invalid rows'

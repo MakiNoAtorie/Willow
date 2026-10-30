@@ -337,6 +337,8 @@ impl Willow {
             self.input(Input::PointerDown { pos, button, mods }, cx);
             if button == Button::Left && e.click_count == 2 {
                 self.input(Input::DoubleClick { pos }, cx);
+            } else if button == Button::Left && e.click_count == 3 {
+                self.input(Input::TripleClick { pos }, cx);
             }
         }
     }
@@ -1024,6 +1026,7 @@ fn set_menus(cx: &mut App) {
             MenuItem::os_action("Cut", Cut, OsAction::Cut),
             MenuItem::os_action("Copy", Copy, OsAction::Copy),
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
+            MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
         ]),
         Menu::new("View").items([MenuItem::action("Code Panel", TogglePanel)]),
     ]);

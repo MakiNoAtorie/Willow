@@ -1,6 +1,7 @@
 //! Shape text on the GPUI side: the text-measuring function the core lays out with, glyphs
 //! painted one by one where the core put their clusters, and the platform text input adapter.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -265,9 +266,24 @@ fn from16(s: &str, u: usize) -> usize {
 }
 
 impl Willow {
-    /// The edited shape's plain text or zone's title; empty when not editing.
-    fn edited_text(&self) -> String {
-        self.session.edited_text().unwrap_or_default()
+    /// The code panel's text while it has focus, else the edited shape's plain text or zone's
+    /// title; empty when not editing.
+    // ponytail: hands the IME the whole panel text; slice around the caret if a 10,000-shape
+    // document makes IME keystrokes slow.
+    fn edited_text(&self) -> Cow<'_, str> {
+        if self.session.panel().focused {
+            return Cow::Borrowed(self.session.panel().text());
+        }
+        Cow::Owned(self.session.edited_text().unwrap_or_default())
+    }
+
+    /// The caret and the selection's other end, bytes into `edited_text`.
+    fn caret_anchor(&self) -> (usize, usize) {
+        let p = self.session.panel();
+        if p.focused {
+            return (p.caret(), p.anchor());
+        }
+        (self.session.editing()).map_or((0, 0), |e| (e.caret.offset, e.anchor))
     }
 }
 
@@ -292,8 +308,8 @@ impl EntityInputHandler for Willow {
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         let s = self.edited_text();
-        let (caret, anchor) = (self.session.editing())
-            .map_or((0, 0), |e| (to16(&s, e.caret.offset), to16(&s, e.anchor)));
+        let (caret, anchor) = self.caret_anchor();
+        let (caret, anchor) = (to16(&s, caret), to16(&s, anchor));
         Some(UTF16Selection {
             range: caret.min(anchor)..caret.max(anchor),
             reversed: caret < anchor,
@@ -301,7 +317,11 @@ impl EntityInputHandler for Willow {
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        let m = self.session.editing()?.marked.clone()?;
+        let m = if self.session.panel().focused {
+            self.session.panel().marked()?
+        } else {
+            self.session.editing()?.marked.clone()?
+        };
         let s = self.edited_text();
         Some(to16(&s, m.start)..to16(&s, m.end))
     }
@@ -351,12 +371,22 @@ impl EntityInputHandler for Willow {
     fn bounds_for_range(
         &mut self,
         range: Range<usize>,
-        _: Bounds<Pixels>,
+        element: Bounds<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let s = self.edited_text();
         let (a, b) = (from16(&s, range.start), from16(&s, range.end));
+        // The panel registers its text area as the element: its points are relative to it.
+        if self.session.panel().focused {
+            let (a, b) = (self.session.panel_point(a), self.session.panel_point(b));
+            let width = if a.y == b.y { b.x - a.x } else { 0.0 };
+            let height = self.session.theme().code.row_height();
+            return Some(Bounds::new(
+                element.origin + point(px(a.x), px(a.y)),
+                size(px(width.max(1.0)), px(height)),
+            ));
+        }
         let (a, b) = (self.session.text_point(a)?, self.session.text_point(b)?);
         let vp = self.session.viewport();
         let width = if a.y == b.y {

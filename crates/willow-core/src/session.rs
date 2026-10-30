@@ -18,6 +18,7 @@ mod midpoints;
 mod nav;
 mod nudge;
 mod panel;
+mod panel_edit;
 mod push;
 mod select;
 mod tab_picker;
@@ -638,7 +639,10 @@ impl Session {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
             Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
-            _ => self.unmark(),
+            _ => {
+                self.unmark();
+                self.panel_unmark();
+            }
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
             self.pointer = Some(pos);
@@ -1052,6 +1056,7 @@ impl Session {
             Input::PickSide(_) | Input::TogglePanel | Input::FocusPanel | Input::ScrollPanel(_) => {
                 self.respond(false)
             }
+            Input::TripleClick { .. } => self.respond(false),
             Input::SelectChain => {
                 self.select_chain();
                 self.respond(true)

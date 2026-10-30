@@ -81,6 +81,11 @@ pub enum Input {
     DoubleClick {
         pos: Point,
     },
+    /// The third press of a left triple-click, sent after its `PointerDown`: in the code
+    /// panel, selects the line.
+    TripleClick {
+        pos: Point,
+    },
     /// The pointer left the window: Paste goes to the view center until it is back.
     PointerLeft,
     /// Wheel or trackpad scroll at `pos`: how far the content should move, in screen pixels.
@@ -190,7 +195,8 @@ pub enum Input {
     /// Ctrl/Cmd+E, the title-bar toggle or View > Code Panel: opens the code panel and
     /// focuses it, or closes it when open.
     TogglePanel,
-    /// A press in the open code panel: keys go to it until Esc or a click on the canvas.
+    /// Gives the open code panel the keys, caret unmoved, until Esc or a click on the canvas.
+    /// A press in it comes as `PointerDown` past the canvas's right edge instead.
     FocusPanel,
     /// Wheel or trackpad scroll over the code panel: how far its text should move down,
     /// in screen pixels.

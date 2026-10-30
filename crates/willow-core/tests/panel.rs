@@ -58,7 +58,7 @@ fn canvas_shortcuts_dont_fire_while_the_panel_has_focus() {
         assert_eq!(s.selection(), std::slice::from_ref(&a), "{i:?}");
     }
     // The Edit menu's clipboard items don't take the selected shapes either.
-    assert!(!s.can_cut() && !s.can_copy() && !s.can_paste());
+    assert!(!s.can_cut() && !s.can_copy() && s.clipboard_text().is_none());
     // Esc hands the keys back to the canvas; the panel stays open.
     input(&mut s, Input::Escape);
     assert!(s.panel().open && !s.panel().focused);
