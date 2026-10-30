@@ -33,9 +33,8 @@ impl Session {
                     .filter(|&j| layout(&old.shapes[j]) == layout(s))
             })
             .collect();
-        let linked = |a: &ShapeId, b: &ShapeId| {
-            (old.links.iter()).any(|l| (&l.0, &l.1) == (a, b) || (&l.0, &l.1) == (b, a))
-        };
+        let links: HashSet<(&ShapeId, &ShapeId)> = old.links.iter().map(|l| (&l.0, &l.1)).collect();
+        let linked = |a, b| links.contains(&(a, b)) || links.contains(&(b, a));
         for (i, stated) in sides.iter().enumerate() {
             let (Some((a, to)), Some(j)) = (*stated, kept[i]) else {
                 continue;

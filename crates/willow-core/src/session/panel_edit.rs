@@ -152,7 +152,7 @@ impl Session {
             } => {
                 let text: String = text.chars().filter(|c| !c.is_control()).collect();
                 let range = self.panel_typing(replace);
-                self.panel_splice(range.clone(), &text);
+                self.splice_panel_text(range.clone(), &text);
                 let at = |i: usize| range.start + text.floor_char_boundary(i);
                 let sel = selected.clone().unwrap_or(text.len()..text.len());
                 let e = &mut self.panel.edit;
@@ -365,18 +365,11 @@ impl Session {
         }
     }
 
-    /// Replaces `range` of the panel text with `text`.
-    fn panel_splice(&mut self, range: Range<usize>, text: &str) {
-        let mut all = self.panel.text().to_owned();
-        all.replace_range(range, text);
-        self.set_panel_text(all);
-    }
-
     /// Replaces `range` of the panel text with `text`, caret after it: a change the writer
     /// typed, unless both are empty.
     fn panel_replace(&mut self, range: Range<usize>, text: &str) {
         let changed = !range.is_empty() || !text.is_empty();
-        self.panel_splice(range.clone(), text);
+        self.splice_panel_text(range.clone(), text);
         let at = range.start + text.len();
         let e = &mut self.panel.edit;
         (e.caret, e.anchor, e.marked, e.goal) = (downstream(at), at, None, None);

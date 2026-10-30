@@ -78,6 +78,32 @@ pub(super) struct Rows {
     pub(super) total: usize,
 }
 
+impl Rows {
+    /// `text` is the text these rows were made for with `range` replaced by `len` bytes:
+    /// wraps again the lines the replacement touches and shifts the ones after it.
+    fn splice(&mut self, text: &str, range: Range<usize>, len: usize) {
+        let line = |at: usize| self.lines.partition_point(|&(s, _)| s <= at) - 1;
+        let (a, b) = (line(range.start), line(range.end));
+        let (start, first) = self.lines[a];
+        let rows_after = self.lines.get(b + 1).map_or(self.total, |l| l.1);
+        let end = range.start + len;
+        let end = text[end..].find('\n').map_or(text.len(), |i| end + i);
+        let (mut new, mut at, mut row) = (Vec::new(), start, first);
+        for l in text[start..end].split('\n') {
+            new.push((at, row));
+            row += wrap(l, self.cols).len();
+            at += l.len() + 1;
+        }
+        let shift = |v: usize, by: (usize, usize)| v + by.0 - by.1;
+        let (bytes, rows) = ((len, range.len()), (row, rows_after));
+        for l in &mut self.lines[b + 1..] {
+            *l = (shift(l.0, bytes), shift(l.1, rows));
+        }
+        self.total = shift(self.total, rows);
+        self.lines.splice(a..=b, new);
+    }
+}
+
 /// One soft-wrapped row of panel text in view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelRow {
@@ -143,14 +169,29 @@ pub(super) fn columns(g: &str) -> usize {
 /// Byte ranges of the rows `line` wraps into at `cols` columns: after the last space that
 /// fits, else after the last grapheme that fits. An empty line is one empty row.
 pub(super) fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
+    // No grapheme takes more columns than bytes.
+    if line.len() <= cols {
+        return std::iter::once(0..line.len()).collect();
+    }
+    // An ASCII line is a column per byte: skip the grapheme segmenter.
+    let ascii = line.is_ascii();
+    let graphemes: Box<dyn Iterator<Item = (usize, &str)>> = if ascii {
+        Box::new((0..line.len()).map(|i| (i, &line[i..i + 1])))
+    } else {
+        Box::new(line.grapheme_indices(true))
+    };
     let mut rows = Vec::new();
     let (mut start, mut col, mut space) = (0, 0, None);
-    for (i, g) in line.grapheme_indices(true) {
+    for (i, g) in graphemes {
         let w = columns(g);
         if col + w > cols && i > start {
             let end = space.filter(|&s| s > start).unwrap_or(i);
             rows.push(start..end);
-            col = line[end..i].graphemes(true).map(columns).sum();
+            col = if ascii {
+                i - end
+            } else {
+                line[end..i].graphemes(true).map(columns).sum()
+            };
             (start, space) = (end, None);
         }
         col += w;
@@ -218,6 +259,19 @@ impl Session {
         self.panel.edit.fit(&self.panel.text);
     }
 
+    /// Replaces `range` of the panel text with `text` as `set_panel_text` does, wrapping again
+    /// only the lines it touches.
+    pub(super) fn splice_panel_text(&mut self, range: Range<usize>, text: &str) {
+        let rows = self.panel.rows.get_mut().take();
+        let mut all = std::mem::take(&mut self.panel.text);
+        all.replace_range(range.clone(), text);
+        self.set_panel_text(all);
+        if let Some(mut rows) = rows {
+            rows.splice(&self.panel.text, range, text.len());
+            *self.panel.rows.get_mut() = Some(rows);
+        }
+    }
+
     /// Text columns in a row at the panel's width.
     fn columns(&self) -> usize {
         let c = &self.theme.code;
@@ -225,9 +279,10 @@ impl Session {
         (room / (c.advance * c.font_size)).floor().max(1.0) as usize
     }
 
-    /// Where each line's rows start, made again after the text or width changed.
-    // ponytail: wraps the whole text after every change; per-line row counts if typing in
-    // a 10,000-shape document misses its frame budget.
+    /// Where each line's rows start, made again after the width changed or new text was set;
+    /// typing (`splice_panel_text`) keeps them.
+    // ponytail: new text and each width step wrap the whole text (about 3 ms at 10,000
+    // shapes); wrap off the UI thread with the regeneration if that shows in frame times.
     pub(super) fn rows(&self) -> Ref<'_, Rows> {
         let cols = self.columns();
         if self

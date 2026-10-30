@@ -25,6 +25,17 @@
 //!
 //! `recovery_take` times, in milliseconds, `Session::take_recovery` once the typing has made a
 //! recovery write due: autosave's UI-thread part (clone the document, every shape's height).
+//!
+//! Last, the code panel opens on the document's canonical text. `panel_typing_10k` types into
+//! the first shape's text through the platform path: frame rows, and `keystroke_*`, the time
+//! to dispatch each key (its handling, before any draw). `panel_apply_10k` types one more
+//! character and times, in milliseconds, its `check` (parse and check; off the UI thread in
+//! the app) and `apply` (update the model and record the text in the history, on the UI
+//! thread), then `undo` (Undo in the panel: the typed text comes back and is checked, on the UI
+//! thread). `panel_regen_10k` nudges a shape
+//! with the panel open and times the regeneration's `take` (clone the document and heights, UI
+//! thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
+//! `idle_panel_open` is idle with the panel focused, once its caret has stopped blinking.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -43,6 +54,8 @@ const PAN_FRAMES: usize = 240;
 /// Frames per zoom sweep leg (100% to 10%, then back).
 const SWEEP_FRAMES: usize = 150;
 const KEYSTROKES: usize = 200;
+/// What the typing scenarios type, again and again. ASCII, so every byte is one key.
+const PHRASE: &str = "the quiet harbour remembers everything ";
 /// Pointer moves in the zone drag: out for half, back for half.
 const DRAG_FRAMES: usize = 240;
 const IDLE: Duration = Duration::from_secs(5);
@@ -247,10 +260,14 @@ fn process_stats() -> (f64, f64) {
     }
 }
 
-/// Waits for animations to end, then 1 s more, then records CPU and renders over `IDLE`.
+/// Waits for animations and the caret's blink to end, then 1 s more, then records CPU and
+/// renders over `IDLE`.
 async fn idle(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext, scenario: &str) {
     while this
-        .update(cx, |w, _| w.session.animating(w.start.elapsed()))
+        .update(cx, |w, _| {
+            let now = w.start.elapsed();
+            w.session.animating(now) || w.session.next_wake(now).is_some()
+        })
         .unwrap_or(false)
     {
         wait(cx, Duration::from_millis(50)).await;
@@ -305,6 +322,131 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     .unwrap();
     let _ = std::fs::remove_file(&path);
     scripted(this, cx, "open_first_frame", None, Vec::new()).await;
+}
+
+/// Milliseconds `f` takes, and what it returns.
+fn timed<T>(f: impl FnOnce() -> T) -> (f64, T) {
+    let t = Instant::now();
+    let out = f();
+    (t.elapsed().as_secs_f64() * 1e3, out)
+}
+
+/// The `panel_*` and `idle_panel_open` rows; see the module docs.
+async fn code_panel(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    // Open the panel and wait for its first regeneration to land.
+    (this.update(cx, |w, cx| w.input(Input::TogglePanel, cx))).unwrap();
+    while this
+        .update(cx, |w, _| w.session.panel().text().is_empty())
+        .unwrap_or(false)
+    {
+        wait(cx, Duration::from_millis(50)).await;
+    }
+    // The caret inside the first shape's text, so what is typed stays valid and applies.
+    let (before, len0) = this
+        .update_in(cx, |w, window, cx| {
+            let now = w.start.elapsed();
+            let text = w.session.panel().text();
+            let at = text
+                .find(": \"")
+                .expect("bench: no shape line in the panel")
+                + 3;
+            for _ in 0..text[..at].chars().count() {
+                w.session
+                    .handle(Input::Move(willow_core::Motion::Right), now);
+            }
+            cx.notify();
+            (
+                window.frame_duration_snapshot(),
+                w.session.panel().text().len(),
+            )
+        })
+        .unwrap();
+    wait(cx, Duration::from_millis(300)).await;
+    let mut keys = Vec::new();
+    for i in 0..KEYSTROKES {
+        let j = i % PHRASE.len();
+        let key = match &PHRASE[j..j + 1] {
+            " " => "space",
+            k => k,
+        };
+        let key = Keystroke::parse(key).unwrap();
+        let (ms, _) = timed(|| cx.update(|window, cx| window.dispatch_keystroke(key, cx)));
+        keys.push(ms);
+        wait(cx, Duration::from_millis(40)).await;
+    }
+    keys.sort_by(f64::total_cmp);
+    wait(cx, Duration::from_millis(300)).await;
+    this.update_in(cx, |w, window, _| {
+        let after = window.frame_duration_snapshot();
+        let typed = (w.session.panel().text().len() - len0) as f64;
+        let b = w.bench.as_mut().unwrap();
+        b.row("panel_typing_10k", "chars_typed", typed, "count");
+        let p95 = keys[keys.len() * 95 / 100];
+        b.row("panel_typing_10k", "keystroke_p95", p95, "ms");
+        b.row(
+            "panel_typing_10k",
+            "keystroke_max",
+            keys[keys.len() - 1],
+            "ms",
+        );
+        frame_rows(b, "panel_typing_10k", &before, &after);
+    })
+    .ok();
+
+    // One more character after a pause, so it is an undo step of its own: its check (off the
+    // UI thread in the app), its apply, and the undo that brings back the typed text.
+    wait(cx, Duration::from_millis(1100)).await;
+    this.update(cx, |w, cx| {
+        let s = &mut w.session;
+        let now = w.start.elapsed();
+        let doc = s.document().clone();
+        let (text, replace) = ("x".to_string(), None);
+        s.handle(Input::Text { text, replace }, now);
+        let job = s.take_text_check(now + Duration::from_secs(1));
+        let job = job.expect("bench: no panel text check due after typing");
+        let (check, done) = timed(|| job.run());
+        let (apply, _) = timed(|| s.text_checked(done));
+        assert!(*s.document() != doc, "bench: the typed text didn't apply");
+        let (undo, _) = timed(|| s.handle(Input::Undo, now));
+        assert!(
+            *s.document() == doc,
+            "bench: undo didn't take the character back"
+        );
+        let b = w.bench.as_mut().unwrap();
+        b.row("panel_apply_10k", "check", check, "ms");
+        b.row("panel_apply_10k", "apply", apply, "ms");
+        b.row("panel_apply_10k", "undo", undo, "ms");
+        cx.notify();
+    })
+    .ok();
+
+    // A canvas step with the panel open: leave the panel, nudge a shape, regenerate.
+    this.update(cx, |w, cx| {
+        let s = &mut w.session;
+        let now = w.start.elapsed();
+        s.handle(Input::Escape, now);
+        // Leaving regenerates what was typed; land that first.
+        if let Some(job) = s.take_regeneration() {
+            s.regenerated(job.run());
+        }
+        let id = s.document().shapes[0].id.clone();
+        s.select([id]);
+        s.handle(Input::Nudge(willow_core::Side::Right), now);
+        let (take, job) = timed(|| s.take_regeneration());
+        let job = job.expect("bench: no regeneration due after a nudge");
+        let (run, done) = timed(|| job.run());
+        let (land, _) = timed(|| s.regenerated(done));
+        let b = w.bench.as_mut().unwrap();
+        b.row("panel_regen_10k", "take", take, "ms");
+        b.row("panel_regen_10k", "run", run, "ms");
+        b.row("panel_regen_10k", "land", land, "ms");
+        cx.notify();
+    })
+    .ok();
+
+    // Back in the panel, its caret blinking, then nothing.
+    (this.update(cx, |w, cx| w.input(Input::FocusPanel, cx))).ok();
+    idle(this, cx, "idle_panel_open").await;
 }
 
 fn at(zoom: f32, origin: Point, size: Point) -> Option<Viewport> {
@@ -441,8 +583,6 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         })
         .unwrap();
     wait(cx, Duration::from_millis(300)).await;
-    // ASCII, so every byte is one key.
-    const PHRASE: &str = "the quiet harbour remembers everything ";
     for i in 0..KEYSTROKES {
         let j = i % PHRASE.len();
         let key = match &PHRASE[j..j + 1] {
@@ -487,6 +627,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     })
     .ok();
     idle(&this, cx, "idle_after_anim").await;
+    code_panel(&this, cx).await;
     this.update(cx, |w, cx| {
         w.bench.as_ref().unwrap().write_csv();
         cx.quit();
