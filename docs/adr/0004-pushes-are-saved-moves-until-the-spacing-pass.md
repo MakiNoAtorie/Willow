@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0006
+---
+
 # Pushes are saved moves until the spacing pass
 
 From Phase 4, a shape that grows or is created pushes its linked subtree (keeping the creation gap) and any other chain it crowds (keeping the minimum gap) out of the way, and those pushes change the saved positions and fold into the undo step that caused them. Phase 8's spacing pass works the other way: positions stay as the writer set them, the pass computes where shapes are drawn, and pushes are never saved or undone. We chose saved moves for Phase 4 because the spacing pass is a large piece of work and writers need a trunk that makes room as they type long before Phase 8; saved moves fit the existing command and undo model with no draw-time layout. The cost: Phase 8 replaces this code rather than extending it, and documents edited before then hold pushed positions as if the writer had placed them.

@@ -49,12 +49,24 @@ The order of the saved text: blocks by topmost shape, each chain walked depth-fi
 _Avoid_: File order, creation order
 
 **Creation gap**:
-The theme's edge-to-edge distance between a shape and a new or auto-placed shape linked to it.
+The theme's edge-to-edge distance kept between two linked shapes.
 _Avoid_: Spacing, margin
 
 **Minimum gap**:
-The theme's edge-to-edge distance a push keeps between a shape and another chain.
+The theme's edge-to-edge distance kept between two shapes that aren't linked.
 _Avoid_: Margin, padding
+
+**Placed position**:
+Where the writer put a shape; the position saved in the file.
+_Avoid_: Saved position, real position
+
+**Drawn position**:
+Where the spacing pass puts a shape for the current theme; what the writer sees and points at. Never saved.
+_Avoid_: Display position, visual position
+
+**Spacing pass**:
+The process that works out drawn positions from placed positions, sizes, links and the theme's gaps, so no two shapes crowd each other.
+_Avoid_: Layout pass, reflow
 
 **Midpoint**:
 One of the four circles at a hovered shape's edge midpoints; click to create a linked shape, drag to link.
@@ -65,7 +77,7 @@ Creating a shape from a midpoint where a shape is already linked on that side: t
 _Avoid_: Splice
 
 **Push**:
-A saved move the app makes to keep a gap when a shape grows or is created; it moves a linked subtree or a whole other chain as one block.
+A shape's drawn position moved away from its placed position by the spacing pass; it moves a linked subtree or a whole other chain as one block.
 _Avoid_: Nudge, shove, reflow
 
 **Hub**:

@@ -24,7 +24,7 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 - Three themes, all light: **Paper** (the default), **Desk** and **Poster**, fixed in Phase 1. Paper is the one every phase builds and is reviewed against; Desk and Poster are added in Phase 8.
 - A theme sets the look only: font and typography, the pastel and picker value of each of the seven colors, canvas background, shape fill, borders, corner radii, padding, shadows, connector stroke, selection, hover and midpoint styles, and menus. It never changes the model or the file. Color names are shared, so a chain saved as sage is sage in every theme.
 - View > Theme switches it. The choice is an app preference, the same in every open window and remembered across launches; documents don't store it.
-- Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink, and neighbors make room through the spacing pass (Phase 8; before it, shapes may overlap). Spacing never changes the saved positions, so the document stays saved, and the switch is not undoable.
+- Switching reflows. Each theme keeps its own font, so shapes keep their position, width and extra height, and their text is re-measured: a shape can grow or shrink, and neighbors make room through the spacing pass (Phase 8; before it, shapes may overlap). Spacing never changes placed positions, so the document stays saved, and the switch is not undoable.
 - New shapes use one default width in every theme (Paper's), so the model never depends on the theme.
 
 ## Text alignment
@@ -38,7 +38,7 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 
 - The canvas fills the window. No toolbar: every action lives in right-click menus and shortcuts.
 - One window per document. Ctrl/Cmd+N opens a new window; several documents can be open at once.
-- **macOS**: traffic lights over a transparent title bar, plus the native menu bar (File, Edit, View). The Edit menu carries Undo, Redo, Cut, Copy, Paste so the system shortcuts route correctly.
+- **macOS**: traffic lights over a transparent title bar, plus the native menu bar (File, Edit, View, and Window from Phase 8). The Edit menu carries Undo, Redo, Cut, Copy, Paste so the system shortcuts route correctly.
 - **Windows**: a slim custom title bar with the document name, a quiet saved/unsaved dot, and one small menu button holding the same menus. It must behave like a native title bar: drag region, double-click to maximize, Windows 11 snap layouts on the maximize button, correct on mixed-DPI monitors. The owner verifies mixed DPI by hand with a second monitor at a different scale.
 - A small toggle on the title bar shows/hides the code panel (Phase 7).
 - While zooming, the zoom level appears briefly and fades.
@@ -46,7 +46,7 @@ A minimal, polished desktop app for planning stories as diagrams. It is delibera
 ## Core model
 
 - **Shape**: rounded rectangle with rich text (plain, bold, italic), a position, a width and an optional extra height. Positions and sizes are whole canvas units; mouse drags at any zoom round to the nearest unit.
-- **Link**: connects two shapes. Which side of each shape the connector leaves from (top, bottom, left, right) is **derived from the shapes' relative positions at draw time**, never stored: compare the two shapes' centers; if |dy| ≥ |dx| the link is vertical (above/below), otherwise horizontal, so an exact diagonal is vertical. So a link's direction follows the shapes when they move, and "the shape below b" always means the one that is actually below. Drawing, the saved text and story order all use this one rule.
+- **Link**: connects two shapes. Which side of each shape the connector leaves from (top, bottom, left, right) is **derived from the shapes' relative positions at draw time**, never stored: compare the two shapes' centers; if |dy| ≥ |dx| the link is vertical (above/below), otherwise horizontal, so an exact diagonal is vertical. So a link's direction follows the shapes when they move, and "the shape below b" always means the one that is actually below. Drawing, the saved text and story order all use this one rule, on drawn positions from Phase 8.
 - **Chain**: the set of shapes reachable through links. A chain is a tree: a shape may have any number of links, but a link that would close a cycle is refused. An unlinked shape is a chain of one. **Color belongs to the chain**, not the shape; every shape in a chain shows the chain's color. When a chain splits (a removed link or a deleted shape), every resulting chain keeps the original color.
 - **Zone**: a titled, colored container holding shapes. Membership is **explicit** (stored in the file), not geometric: a shape is in a zone because it was put there, and it stays a member even if it is later moved, grown or resized outside the zone's rectangle. Zones can nest one level deep. A chain may span zones.
 - One canvas per file.
@@ -98,7 +98,7 @@ Done when: the owner has approved the mockups and the visual-language document e
 Goal: an infinite canvas where shapes can be created, moved and written in, inside the final window, already looking like the Phase 1 mockups.
 
 - Window chrome as described above, on both platforms.
-- Drawing takes every visual value from one theme definition (Paper for now), so adding Desk and Poster in Phase 8 is new values, not new drawing code.
+- Drawing takes every visual value from one theme definition (Paper for now), so adding Desk and Poster in Phase 8 is mostly new values. What only they have (linen, card tabs, lifted selection, hard offset shadows, title pills) is new drawing code then.
 - Infinite canvas: pan and zoom.
   - Plain left-drag on empty space pans.
   - Middle-drag always pans.
@@ -324,7 +324,7 @@ Goal: group sections of the canvas (arcs, episodes) into containers. Zones nest 
 - Zones resize from all four edges and all four corners, with the same hit width as shape edges; the top and left edges move the zone's position. On the top edge, resizing wins over the title band, as a shape's resize edges win over moving it; a press on an edge clears the shape selection, like the band. The minimum size is the theme's shape minimum width in both directions. A zone may be smaller than its contents: members never move and stay members.
 - Zones never grow by themselves: when members grow, are pushed or are created past an edge, the zone keeps its size and the writer resizes it.
 - When a drag ends, each dropped shape (each shape of a multi-selection too) joins the innermost zone under its own center, or no zone. Where sibling zones overlap, the one drawn on top wins: the innermost zone under a point is always the one drawn on top there, and every rule that puts a shape in a zone uses it. So a member of a nested zone dropped inside the parent but outside the nested zone joins the parent.
-- Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The exceptions are new shapes: paste and duplicate place copies as in Phase 4, the empty-space New shape and Ctrl/Cmd+Shift+N join the innermost zone under them, and a new linked shape (midpoint creation, insert-and-push, Tab) joins its source shape's zone even when it lands outside the zone's rectangle. From Phase 8, a shape moved by the spacing pass is also judged as if dropped where it ends up.
+- Only a mouse drop changes membership: keyboard moves, text growth, insert-and-push and zone resizing never do. The exceptions are new shapes: paste and duplicate place copies as in Phase 4, the empty-space New shape and Ctrl/Cmd+Shift+N join the innermost zone under them, and a new linked shape (midpoint creation, insert-and-push, Tab) joins its source shape's zone even when it lands outside the zone's rectangle.
 - A dropped zone is judged by its center too: it nests in the top-level zone under its center (nested zones are never targets), or becomes top-level when there is none. A zone that holds nested zones never nests, since that would make two levels; it just moves.
 - While shapes or a zone are being dragged, the zone the drop would join shows the hover ring, but only when the drop would change membership. For a multi-selection that is the pressed shape's target, or, when the pressed shape's zone would not change, the target of the first shape in story order whose zone would.
 - A dropped zone draws above any sibling zones it overlaps, and a zone always draws above its parent. Draw order is not saved: after a load, zones stack in story order, like shapes.
@@ -392,18 +392,70 @@ Goal: edit the diagram as text, live, alongside the canvas. The file is the text
 
 ## Phase 8 — Polish pass
 
-Goal: the whole app feels finished and matches the Phase 1 visual language.
+Goal: shapes never crowd each other, Desk and Poster arrive, and the whole app feels finished and matches the Phase 1 visual language.
 
-- Review every interaction on both platforms against the approved mockups: animation timing, hover states, cursor changes, spacing and text rendering.
-- Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
-- Add View > Text Alignment (Left and Centered next to the default Justified).
-- Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
-- Shapes never overlap: every shape keeps at least the minimum gap (Phase 4) from every other shape. This replaces Phase 4's pushing (saved moves, ADR 0004) and the earlier "may overlap" rules for theme switching, drags, and auto-placement and text edits in Phase 7.
-  - Spacing is its own process, separate from editing. Each shape keeps the position the writer gave it (by moving, creating or placing it, or in the code panel). Where it is drawn is worked out from those positions by the spacing pass, which runs after every change, text edits applied from the code panel included: shapes added or grown in text push their neighbors clear like any other growth.
-  - When a shape grows, by typing or resizing, any shape it would come closer to than the gap is pushed away in whatever direction gets it clear soonest, sideways included. Pushes cascade: a pushed shape pushes what it then crowds.
-  - A shape in another chain (a branch, say) is never pushed alone: its whole chain moves with it as one block, keeping its own layout. Within the growing shape's own chain, the linked subtree beyond the crowded shape moves, as in Phase 4's insert-and-push.
-  - Pushes are never undo steps. Undo reverts only the change the writer made (the text, the resize), and the spacing pass then lets pushed shapes settle back toward their own positions.
-  - Zones: a pushed shape joins or leaves a zone by the same rule as a mouse drop (its center decides).
+### Spacing pass
+
+Every shape keeps a gap from every other shape: the creation gap between two linked shapes, the minimum gap between all others. This replaces Phase 4's pushing and the earlier "may overlap" rules for theme switching, drags, auto-placement and text edits (ADR 0006).
+
+#### Placed and drawn positions
+
+- A shape has a **placed position**, where the writer put it, and a **drawn position**, where it appears. `@layout` saves only the placed position.
+- The **spacing pass** works out every drawn position from the placed positions, sizes and links and the theme's gaps. It reads nothing else, so the same document in the same theme always gives the same picture, on reopening too.
+- It runs after every change: edits, undo and redo, text applied from the code panel, a load and a theme switch. Shapes added or grown in text push their neighbors clear like any other growth.
+- A push is never saved, never an undo step, and never marks the document unsaved. Undo reverts only what the writer changed, and pushed shapes settle back because the pass runs again.
+- Everything the writer sees or points at reads drawn positions: painting, connectors, hit-testing, the marquee, arrow-key navigation, midpoints, keeping a shape in view, drop targets, Copy, Paste, Duplicate and Create zone.
+- A file's direction words and story order read drawn positions too; only `@layout` reads placed ones. T2 linked below a very tall T stays `below T`, even when T's placed center has passed T2's. So the word order of saved text can vary by theme: a switch leaves the document saved, and the code panel and the next save pick up the new order. Load then save stays byte-identical within one theme.
+
+#### Who moves
+
+- The larger chain holds still and the smaller one moves. On equal size, the chain whose top placed shape is highest holds still, then the leftmost, then the lower ID. So a small branch that grows into the trunk moves itself, and the trunk stays.
+- A chain moves as one block, keeping its own layout, by the shortest move that clears it of every shape holding still. Ties go down, right, left, then up. A pushed chain then crowds smaller ones, which move in turn. A chain can change direction when a growing shape makes another way out shorter; that is accepted.
+- Inside a chain, of two shapes that crowd each other, the one farther along the walk from the chain's topmost placed shape moves, with its subtree: along their link if they are linked, otherwise by the shortest way out. The pass compares placed top edges and horizontal centers here, which growth never changes.
+
+#### Changes that write placed positions
+
+- **Insert-and-push stays a saved move**, the one exception to pushes being drawn only: the subtree beyond the new shape moves in the creation's undo step, because only the command knows which shape is below which. Phase 7's direction-word re-placing stays saved too.
+- A new linked shape is placed from its source's placed position, so it appears one creation gap from where the source is drawn. Landing on an unrelated shape saves nothing; the pass clears it.
+- Moving keeps a drop exact. For a mouse drag, Ctrl/Cmd+Arrows or a zone move, each chain touched first takes its drawn positions as its placed positions, then the movement is added, all in the move's undo step. That chain no longer settles back.
+- During a drag nothing makes room: dragged shapes pass over everything, and the pass runs on release. A shape dropped on a larger chain slides off it.
+
+#### What stays the same or goes
+
+- Zones take no part. Shapes pass over zone edges and title bands, a pushed shape keeps its membership wherever it is drawn, and zones never grow.
+- "Nothing moves on delete" (Phase 4) holds for placed positions: shapes the deleted shape pushed settle back.
+- Linked shapes closer than the creation gap are drawn at it, in existing files too; opening such a file doesn't mark it unsaved. Phase 4's rule that shapes left closer than the gap stay where they are is gone.
+- The view doesn't follow a shape that moves while being typed in.
+
+#### Motion and measuring
+
+- Pushed shapes slide with the theme's push transition after every change, undo and text edits included. A change during a slide retargets it. Load, reload and a theme switch are instant.
+- Opening a document or switching theme measures every shape before anything is drawn, so shapes never jump apart just after a file opens. Load stays within its 100 ms target.
+
+### Themes and alignment
+
+- Add Desk and Poster and View > Theme, matching `design/visual-language.md` and their Phase 1 mockups. Both use Paper's gaps, so a switch reflows only through fonts.
+- Bundle Courier Prime and Space Grotesk (Medium and Bold). Space Grotesk has no italic and GPUI doesn't fake one, so slanted Regular and Bold faces are generated once from the font and bundled as TTFs.
+- Add View > Text Alignment (see Text alignment).
+
+### Menus
+
+- The View menu follows `mac-view-menu`: Show Code Panel, Zoom In, Zoom Out, Actual Size, Theme, Text Alignment, Enter Full Screen. The Windows menu button holds the same items.
+- Zoom In and Zoom Out are Ctrl/Cmd+= and Ctrl/Cmd+-, each one eased wheel zoom step around the view center. Actual Size is Ctrl/Cmd+0. Theme and Text Alignment have no shortcuts.
+- macOS gains a standard Window menu. There is no Help menu; the mockups' Help item is dropped.
+
+### Connectors
+
+A connector stays straight while its two shapes overlap on the axis across it, at the middle of that overlap; otherwise it runs midpoint to midpoint. This keeps resized and pushed shapes from slanting their connectors, and a connector may then end away from the midpoint circle.
+
+### Polish review
+
+A fixed list on macOS: every PNG in `design/mockups/png/<theme>/` compared with the running app, plus the timings in `motion.html`. A difference from an approved mockup is a bug and gets a ticket. Anything beyond the mockups is out of scope. The owner's approval closes the review.
+
+### Performance and Windows
+
+- On the MacBook Air with the generated 10,000-shape document: the existing targets still hold, and the ≤ 8 ms per keystroke includes the spacing pass. Bench mode's CSV also records a generated 50,000-shape document and memory use, for information; they have no target.
+- A "Phase 8 check on Windows" issue covers Desk and Poster rendering, the new fonts, the View items in the menu button and full screen. The owner runs it after this phase; it doesn't hold Phase 8 open.
 
 ---
 
@@ -418,3 +470,4 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 - Comments in the file format (lines the writer adds that survive a save).
 - Renaming IDs from the code panel.
 - File associations (opening a `.willow` file from Finder or Explorer), recent files, session restore.
+- Packaging: an app icon, a `.app` or installer, and signing.
