@@ -10,6 +10,7 @@ mod input;
 mod layout;
 mod recovery;
 mod session;
+mod syntax;
 mod theme;
 mod zoom;
 
@@ -21,13 +22,13 @@ pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{
-    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, ResizeTo,
-    Session, Shortcut, Viewport,
+    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Panel,
+    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle, MenuStyle,
-    MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle, TabPickerStyle,
-    Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
+    MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle,
+    TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

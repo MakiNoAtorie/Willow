@@ -17,6 +17,7 @@ mod link;
 mod midpoints;
 mod nav;
 mod nudge;
+mod panel;
 mod push;
 mod select;
 mod tab_picker;
@@ -36,6 +37,7 @@ use crate::zoom::{Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
+pub use panel::{Panel, PanelRow, Regenerated, Regeneration, Span};
 
 /// Which part of the canvas the screen shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -242,6 +244,8 @@ pub struct Session {
     tab_picker: bool,
     /// Arrow presses still panning the view (keyboard pan).
     key_pan: Vec<keypan::Press>,
+    /// The code panel.
+    panel: panel::Panel,
 }
 
 impl Session {
@@ -255,6 +259,7 @@ impl Session {
             follow: None,
             tab_picker: false,
             key_pan: Vec::new(),
+            panel: Session::new_panel(theme),
             doc,
             history: History::default(),
             theme,
@@ -637,6 +642,9 @@ impl Session {
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
             self.pointer = Some(pos);
+        }
+        if let Some(r) = self.panel_input(&input) {
+            return r;
         }
         // The Tab picker closes first: it takes every key, and a click closes it and acts.
         if self.tab_picker
@@ -1040,7 +1048,10 @@ impl Session {
                 self.open_tab_picker();
                 self.respond(true)
             }
-            Input::PickSide(_) => self.respond(false),
+            // The panel took its inputs first (`panel_input`).
+            Input::PickSide(_) | Input::TogglePanel | Input::FocusPanel | Input::ScrollPanel(_) => {
+                self.respond(false)
+            }
             Input::SelectChain => {
                 self.select_chain();
                 self.respond(true)

@@ -274,18 +274,21 @@ impl Session {
     }
 
     /// Whether Cut and Copy have something to act on: text selected in the edited shape, or
-    /// with nothing edited, selected shapes.
+    /// with nothing edited, selected shapes. Neither while the code panel has focus.
     pub fn can_cut(&self) -> bool {
-        !self.text_selection().is_empty() || (self.editing.is_none() && !self.selected.is_empty())
+        let canvas = !self.text_selection().is_empty()
+            || (self.editing.is_none() && !self.selected.is_empty());
+        canvas && !self.panel().focused
     }
 
     pub fn can_copy(&self) -> bool {
         self.can_cut()
     }
 
-    /// Whether Paste has somewhere to go: always, into the edited shape or onto the canvas.
+    /// Whether Paste has somewhere to go: into the edited shape or onto the canvas, unless the
+    /// code panel has focus.
     pub fn can_paste(&self) -> bool {
-        true
+        !self.panel().focused
     }
 
     /// The shape whose center is nearest the view center; ties go in generation order.

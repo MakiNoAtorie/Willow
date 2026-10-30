@@ -194,6 +194,7 @@ impl Willow {
         };
         self.session.disk_changed(bytes.as_deref());
         self.arm_recovery(cx);
+        self.regenerate(cx);
         cx.notify();
     }
 }

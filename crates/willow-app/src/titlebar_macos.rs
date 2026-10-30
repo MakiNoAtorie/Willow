@@ -3,7 +3,7 @@
 use gpui::{App, Window, div, prelude::*, px};
 use willow_core::Session;
 
-use crate::color;
+use crate::{color, panel};
 
 pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
     let c = session.theme().chrome;
@@ -24,4 +24,12 @@ pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> 
         } else {
             format!("{name} — Edited")
         })
+        .child(panel::toggle(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right(px(session.theme().code.toggle.mac_right)),
+            session,
+        ))
 }

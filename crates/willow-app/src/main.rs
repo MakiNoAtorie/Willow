@@ -18,6 +18,7 @@ use willow_core::{
 mod bench;
 mod file;
 mod menu;
+mod panel;
 mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
@@ -60,6 +61,8 @@ actions!(willow, [NavLeft, NavRight, NavUp, NavDown]);
 actions!(willow, [NewBeside]);
 // Cmd/Ctrl+L: select the chains of the selection.
 actions!(willow, [SelectChain]);
+// Cmd/Ctrl+E, the title-bar toggle and View > Code Panel: open (and focus) or close the code panel.
+actions!(willow, [TogglePanel]);
 // Text editing; bound in the `editing` key context except F2, Enter and Esc.
 actions!(
     willow,
@@ -171,6 +174,8 @@ struct Willow {
     recovery: Option<recovery::Autosave>,
     /// A close is settling this window (`file::close`).
     settling: bool,
+    /// The code panel's regeneration running off the UI thread; replacing it drops the old one.
+    regeneration: Option<gpui::Task<()>>,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -238,8 +243,15 @@ impl Willow {
     /// Replaces this window's document with `content`.
     fn show(&mut self, content: Content, window: &mut Window, cx: &mut Context<Self>) {
         // Paint sizes the new session's viewport.
+        let panel = self.session.panel().open;
         let path;
         (self.session, path) = content.session(window);
+        // The panel belongs to the window: still open, it shows the new document.
+        if panel {
+            self.session
+                .handle(Input::TogglePanel, self.start.elapsed());
+            self.regenerate(cx);
+        }
         self.set_path(path, window);
         self.measure_ahead(cx);
         cx.notify();
@@ -264,6 +276,7 @@ impl Willow {
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
         let r = self.session.handle(input, self.start.elapsed());
         self.arm_recovery(cx);
+        self.regenerate(cx);
         self.cursor = r.cursor;
         if r.redraw {
             cx.notify();
@@ -412,8 +425,9 @@ impl Render for Willow {
                 let (session, now) = (&w.session, w.start.elapsed());
                 paint(bounds, session, now, window);
                 // Text input reaches the selected shape too: typing on it starts editing. A
-                // zone title is edited with nothing selected.
-                if !session.selection().is_empty() || session.editing().is_some() {
+                // zone title is edited with nothing selected. None while the panel has the keys.
+                let canvas_keys = !session.panel().focused;
+                if canvas_keys && (!session.selection().is_empty() || session.editing().is_some()) {
                     let handler = ElementInputHandler::new(bounds, entity.clone());
                     window.handle_input(&w.focus, handler, cx);
                 }
@@ -426,7 +440,10 @@ impl Render for Willow {
             .flex_col()
             .relative()
             .bg(color(theme.canvas))
-            .key_context(if self.session.editing().is_some() {
+            // The panel takes the editing keys: the core keeps them off the canvas.
+            .key_context(if self.session.panel().focused {
+                "Willow editing panel"
+            } else if self.session.editing().is_some() {
                 "Willow editing"
             } else if self.session.color_picker_open() {
                 "Willow picker"
@@ -452,6 +469,7 @@ impl Render for Willow {
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
             .on_action(cx.listener(|w, _: &SelectChain, _, cx| w.input(Input::SelectChain, cx)))
+            .on_action(cx.listener(|w, _: &TogglePanel, _, cx| w.input(Input::TogglePanel, cx)))
             .on_action(
                 cx.listener(|w, _: &OpenColorPicker, _, cx| w.input(Input::OpenColorPicker, cx)),
             )
@@ -560,6 +578,13 @@ impl Render for Willow {
             .child(canvas)
             .children(pill)
             .children(menu::menu(&self.session, cx));
+        // The canvas, narrowed by the code panel on its right.
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(body)
+            .children(panel::panel(&self.session, cx));
         // Windows: title bar above the canvas. macOS: title floats over the canvas, so paint it last.
         let name = self.name();
         if cfg!(target_os = "windows") {
@@ -991,6 +1016,7 @@ fn set_menus(cx: &mut App) {
             MenuItem::os_action("Copy", Copy, OsAction::Copy),
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
         ]),
+        Menu::new("View").items([MenuItem::action("Code Panel", TogglePanel)]),
     ]);
 }
 
@@ -1022,6 +1048,12 @@ fn main() {
             "ctrl-0"
         };
         cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
+        let toggle_panel = if cfg!(target_os = "macos") {
+            "cmd-e"
+        } else {
+            "ctrl-e"
+        };
+        cx.bind_keys([KeyBinding::new(toggle_panel, TogglePanel, None)]);
         // Windows has no Quit key: Alt+F4 reaches the OS, which closes the window through
         // `on_window_should_close`.
         if cfg!(target_os = "macos") {
@@ -1164,6 +1196,8 @@ fn main() {
                 Cow::Borrowed(include_bytes!("../assets/Literata-Bold.ttf").as_slice()),
                 Cow::Borrowed(include_bytes!("../assets/Literata-Italic.ttf").as_slice()),
                 Cow::Borrowed(include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice()),
             ])
             .expect("bundled fonts");
         #[cfg(target_os = "macos")]
@@ -1240,6 +1274,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     path,
                     mtime: None,
                     settling: false,
+                    regeneration: None,
                 };
                 w.measure_ahead(cx);
                 w

@@ -187,6 +187,14 @@ pub enum Input {
     PickSide(crate::Side),
     /// Ctrl/Cmd+L with nothing being edited: `Session::select_chain`.
     SelectChain,
+    /// Ctrl/Cmd+E, the title-bar toggle or View > Code Panel: opens the code panel and
+    /// focuses it, or closes it when open.
+    TogglePanel,
+    /// A press in the open code panel: keys go to it until Esc or a click on the canvas.
+    FocusPanel,
+    /// Wheel or trackpad scroll over the code panel: how far its text should move down,
+    /// in screen pixels.
+    ScrollPanel(f32),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
