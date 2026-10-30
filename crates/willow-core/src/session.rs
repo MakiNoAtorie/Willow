@@ -18,6 +18,9 @@ mod midpoints;
 mod nav;
 mod nudge;
 mod panel;
+mod panel_apply;
+#[cfg(test)]
+mod panel_apply_tests;
 mod panel_edit;
 mod panel_select;
 mod push;
@@ -40,6 +43,7 @@ use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
 pub use panel::{Panel, PanelRow, Regenerated, Regeneration, Span};
+pub use panel_apply::{TextCheck, TextChecked};
 
 /// Which part of the canvas the screen shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -604,6 +608,7 @@ impl Session {
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         let revision = self.history.revision();
+        let text = self.panel.versions.now;
         let pointer = matches!(
             input,
             Input::PointerDown { .. } | Input::PointerMove { .. } | Input::PointerUp { .. }
@@ -616,6 +621,9 @@ impl Session {
                 self.end_gesture();
                 r.cursor = self.respond(false).cursor;
             }
+        } else if self.panel.versions.now != text {
+            // Typing in the panel.
+            self.changed(now);
         }
         r
     }

@@ -1,22 +1,13 @@
 //! The code panel and the canvas follow each other's selection: a caret on a shape's line
 //! selects it, and a canvas selection scrolls the unfocused panel to its line.
 
-use std::borrow::Cow;
-
 use super::Session;
-use crate::{LineKind, check};
+use crate::LineKind;
 
 impl Session {
-    /// What each panel line is. `Panel.lines` is empty while every line is fine, as after a
-    /// regeneration; the lines are then read from the text.
-    // ponytail: a full check per use in that case; cache it by revision if a caret move in a
-    // 10,000-shape panel is felt.
-    fn panel_kinds(&self) -> Cow<'_, [LineKind]> {
-        if self.panel.lines.is_empty() {
-            Cow::Owned(check(self.panel.text()).lines)
-        } else {
-            Cow::Borrowed(&self.panel.lines)
-        }
+    /// What each panel line is, as last checked or regenerated.
+    fn panel_kinds(&self) -> &[LineKind] {
+        &self.panel.lines
     }
 
     /// The caret has moved to byte `offset`: selects the shape whose line or `@layout` line

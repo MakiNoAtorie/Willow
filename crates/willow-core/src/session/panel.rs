@@ -7,6 +7,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::Session;
+use super::panel_apply::{Versions, canonical_lines};
 use super::panel_edit::PanelEdit;
 use crate::input::{Input, Response};
 use crate::syntax::{Token, tokens};
@@ -24,17 +25,18 @@ pub struct Panel {
     pub(super) scroll: f32,
     text: String,
     /// The history revision the text was last regenerated for; `None` forces the next.
-    regenerated: Option<u64>,
+    pub(super) regenerated: Option<u64>,
     /// The history revision whose document the text holds: Save and recovery write the text
     /// while it is the current one.
-    held: Option<u64>,
-    /// What each line is (`check`); empty while every line is fine.
+    pub(super) held: Option<u64>,
+    /// What each line is, as last checked or regenerated; empty until then.
     pub(super) lines: Vec<LineKind>,
     /// The selection has no line in the text yet: show it once regenerated.
     pub(super) seek: bool,
     /// Where each line's rows start, for the text and column count it was made for.
     rows: RefCell<Option<Rows>>,
     pub(super) edit: PanelEdit,
+    pub(super) versions: Versions,
 }
 
 impl Panel {
@@ -51,6 +53,7 @@ impl Panel {
             seek: false,
             rows: RefCell::default(),
             edit: PanelEdit::default(),
+            versions: Versions::default(),
         }
     }
 
@@ -158,13 +161,17 @@ pub struct Regeneration {
     document: Document,
     heights: Vec<f32>,
     revision: u64,
+    version: u64,
 }
 
 impl Regeneration {
     pub fn run(self) -> Regenerated {
+        let text = format::save(&self.document, &self.heights);
         Regenerated {
-            text: format::save(&self.document, &self.heights),
+            lines: canonical_lines(&text, &self.document),
+            text,
             revision: self.revision,
+            version: self.version,
         }
     }
 }
@@ -172,7 +179,9 @@ impl Regeneration {
 /// A finished `Regeneration`.
 pub struct Regenerated {
     text: String,
+    lines: Vec<LineKind>,
     revision: u64,
+    version: u64,
 }
 
 impl Session {
@@ -195,6 +204,9 @@ impl Session {
     /// writes.
     pub fn set_panel_text(&mut self, text: String) {
         self.panel.text = text;
+        // The text as it is now is what the document holds.
+        self.panel.versions.now += 1;
+        self.panel.held = Some(self.history.revision());
         *self.panel.rows.get_mut() = None;
         self.panel.edit.fit(&self.panel.text);
     }
@@ -302,15 +314,17 @@ impl Session {
             document: self.doc.clone(),
             heights: self.heights(),
             revision,
+            version: self.panel.versions.now,
         })
     }
 
     /// Shows a regeneration's text, unless the document has changed since it was taken (a
-    /// newer one is due).
+    /// newer one is due) or the panel text has (nothing rewrites what the writer typed).
     pub fn regenerated(&mut self, r: Regenerated) {
-        if r.revision == self.history.revision() {
+        if r.revision == self.history.revision() && r.version == self.panel.versions.now {
             self.set_panel_text(r.text);
-            (self.panel.held, self.panel.lines) = (Some(r.revision), Vec::new());
+            self.panel.lines = r.lines;
+            self.text_shown();
             self.panel_seek_selection();
         }
     }
@@ -322,6 +336,7 @@ impl Session {
         self.set_panel_text(text);
         let p = &mut self.panel;
         (p.open, p.lines, p.held, p.regenerated) = (true, lines, now, now);
+        self.text_shown();
     }
 
     /// Lets go of any held text: the next regeneration is due, and Save and recovery write
@@ -345,12 +360,13 @@ impl Session {
     }
 
     /// `input` as the panel takes it first: `None` goes on to the canvas. While the panel has
-    /// focus, only pointer input and view changes reach the canvas; undo and redo do nothing
-    /// yet.
+    /// focus, only pointer input, view changes, undo and redo (pending text applied first)
+    /// reach the canvas.
     pub(super) fn panel_input(&mut self, input: &Input) -> Option<Response> {
         match input {
             Input::TogglePanel if self.panel.open => {
-                (self.panel.open, self.panel.focused) = (false, false);
+                self.leave_panel();
+                self.panel.open = false;
             }
             Input::TogglePanel => {
                 self.panel.open = true;
@@ -379,10 +395,10 @@ impl Session {
             }
             _ if !self.panel.focused => return None,
             Input::PointerDown { .. } => {
-                self.panel.focused = false;
+                self.leave_panel();
                 return None;
             }
-            Input::Escape => self.panel.focused = false,
+            Input::Escape => self.leave_panel(),
             Input::PointerMove { .. }
             | Input::PointerUp { .. }
             | Input::DoubleClick { .. }
@@ -395,8 +411,15 @@ impl Session {
             | Input::KeyUp(_)
             | Input::MenuChoose(_)
             | Input::CloseMenu => return None,
+            Input::Undo | Input::Redo => {
+                self.flush_text();
+                return None;
+            }
             // Canvas commands and text input: the panel's keys.
-            _ => return Some(self.panel_key(input)),
+            _ => {
+                self.fresh_text();
+                return Some(self.panel_key(input));
+            }
         }
         Some(self.respond(true))
     }

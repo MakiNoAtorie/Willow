@@ -621,7 +621,7 @@ fn escape(out: &mut String, s: &str) {
 
 /// Text inside the quotes: escapes, `\n` between paragraphs, and style markers that toggle
 /// on each change, closed before each `\n` and reopened after.
-fn text(t: &RichText) -> String {
+pub(crate) fn text(t: &RichText) -> String {
     let mut out = String::new();
     for (i, p) in t.paragraphs.iter().enumerate() {
         if i > 0 {

@@ -49,15 +49,16 @@ impl Session {
     }
 
     /// Places what `loaded` had no layout for, measuring with this session.
-    fn place(&self, loaded: &mut Loaded) {
+    pub(super) fn place(&self, loaded: &mut Loaded) {
         let height = |shape: &_| self.shape_height(shape);
         format::place(&mut loaded.document, &loaded.unplaced, self.theme, height);
     }
 
-    /// The document matches what was last read or written (undoing back to it counts).
+    /// The document matches what was last read or written (undoing back to it counts), and
+    /// no panel text was typed since that isn't regenerated yet.
     pub fn is_saved(&self) -> bool {
         // ponytail: compares the whole document per call; a change counter if it shows up in profiles.
-        self.saved.as_ref() == Some(&self.doc)
+        self.saved.as_ref() == Some(&self.doc) && !self.text_unsaved()
     }
 
     /// The bytes last read or written; empty for a document never read or saved.
@@ -66,11 +67,12 @@ impl Session {
     }
 
     /// Writes the text the panel holds, else canonical text, through `write`. On success the
-    /// session is saved; on failure nothing changes.
-    /// IME marked text is committed first.
+    /// session is saved; on failure nothing else changes.
+    /// IME marked text is committed and pending panel text applied first.
     pub fn save(&mut self, write: impl FnOnce(&[u8]) -> io::Result<()>) -> io::Result<()> {
         let revision = self.history.revision();
         self.unmark();
+        self.flush_text();
         if self.history.revision() != revision {
             self.changed(self.now);
         }
@@ -81,6 +83,7 @@ impl Session {
         write(&bytes)?;
         (self.unrecovered, self.recovery_written) = (None, false);
         self.saved = Some(self.doc.clone());
+        self.text_saved();
         self.bytes = bytes;
         Ok(())
     }

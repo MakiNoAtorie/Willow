@@ -177,6 +177,10 @@ struct Willow {
     settling: bool,
     /// The code panel's regeneration running off the UI thread; replacing it drops the old one.
     regeneration: Option<gpui::Task<()>>,
+    /// Waits for the panel text's check to be due; replacing it restarts the wait.
+    text_wake: Option<gpui::Task<()>>,
+    /// The panel text's check running off the UI thread; replacing it drops the old one.
+    text_check: Option<gpui::Task<()>>,
     /// Dragging the panel's hairline: how far left of the pointer the hairline was grabbed.
     panel_drag: Option<f32>,
 }
@@ -253,6 +257,8 @@ impl Willow {
         let panel = self.session.panel().open;
         let path;
         (self.session, path) = content.session(window);
+        // Checks and regenerations of the old document never land in the new one.
+        (self.text_wake, self.text_check, self.regeneration) = (None, None, None);
         // The panel belongs to the window: still open, it shows the new document.
         if panel && !self.session.panel().open {
             self.session
@@ -284,6 +290,7 @@ impl Willow {
         let r = self.session.handle(input, self.start.elapsed());
         self.arm_recovery(cx);
         self.regenerate(cx);
+        self.arm_text_check(cx);
         self.cursor = r.cursor;
         if r.redraw {
             cx.notify();
@@ -1290,6 +1297,8 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     mtime: None,
                     settling: false,
                     regeneration: None,
+                    text_wake: None,
+                    text_check: None,
                     panel_drag: None,
                 };
                 w.measure_ahead(cx);

@@ -33,6 +33,43 @@ impl Willow {
     }
 }
 
+impl Willow {
+    /// Waits for the panel text's check to be due; call after every input. Each keystroke
+    /// restarts the wait.
+    pub(crate) fn arm_text_check(&mut self, cx: &mut Context<Self>) {
+        let now = self.start.elapsed();
+        self.text_wake = self.session.text_wake(now).map(|wait| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                this.update(cx, |w, cx| w.check_text(cx)).ok();
+            })
+        });
+    }
+
+    /// Checks the panel text off the UI thread, then applies it if no line is invalid. A
+    /// newer check drops this one's result, which the session would refuse anyway.
+    fn check_text(&mut self, cx: &mut Context<Self>) {
+        let Some(job) = self.session.take_text_check(self.start.elapsed()) else {
+            // Woken early: wait again.
+            self.arm_text_check(cx);
+            return;
+        };
+        self.text_check = Some(cx.spawn(async move |this, cx| {
+            let done = cx
+                .background_executor()
+                .spawn(async move { job.run() })
+                .await;
+            this.update(cx, |w, cx| {
+                w.session.text_checked(done);
+                w.arm_recovery(cx);
+                w.regenerate(cx);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+}
+
 /// The open panel beside the canvas, or nothing while closed.
 pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl IntoElement> {
     let p = session.panel();

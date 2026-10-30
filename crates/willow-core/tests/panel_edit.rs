@@ -452,21 +452,3 @@ fn the_caret_blinks_from_when_the_panel_takes_focus() {
     s.handle(Input::TogglePanel, t);
     assert_eq!(s.next_wake(t), Some(Duration::from_millis(530)));
 }
-
-#[test]
-fn undo_and_redo_do_nothing_while_the_panel_has_focus() {
-    let mut s = common::session_of(Document::new());
-    s.select([ShapeId("a".into())]);
-    s.handle(Input::DeleteShapes, T);
-    s.handle(Input::TogglePanel, T);
-    let opened = s.take_regeneration().unwrap().run();
-    s.regenerated(opened);
-    s.set_panel_text(String::new());
-    typed(&mut s, "x");
-    for i in [Input::Undo, Input::Redo] {
-        s.handle(i, T);
-        assert!(s.document().shapes.is_empty());
-        assert_eq!(s.panel().text(), "x");
-        assert!(s.take_regeneration().is_none());
-    }
-}

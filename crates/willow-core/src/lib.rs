@@ -25,7 +25,8 @@ pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{
     CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Panel,
-    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, Viewport,
+    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck, TextChecked,
+    Viewport,
 };
 pub use theme::{
     CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
