@@ -24,6 +24,7 @@ mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
 mod titlebar_macos;
+mod view_menu;
 #[cfg(not(target_os = "windows"))]
 use titlebar_macos::title_bar;
 #[cfg(target_os = "windows")]
@@ -32,6 +33,10 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
+// View menu: Cmd/Ctrl+= and Cmd/Ctrl+-, and full screen.
+actions!(willow, [ZoomIn, ZoomOut, ToggleFullScreen]);
+// Window menu (macOS).
+actions!(willow, [Minimize, Zoom]);
 // File menu: New and Open are app-wide; Close, Save and Save As belong to the focused window.
 actions!(willow, [NewFile, OpenFile, CloseWindow, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
@@ -483,6 +488,11 @@ impl Render for Willow {
                 w.input(Input::ModifiersChanged, cx)
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            .on_action(cx.listener(|w, _: &ZoomIn, _, cx| w.input(Input::ZoomIn, cx)))
+            .on_action(cx.listener(|w, _: &ZoomOut, _, cx| w.input(Input::ZoomOut, cx)))
+            .on_action(cx.listener(|_, _: &ToggleFullScreen, window, _| window.toggle_fullscreen()))
+            .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
+            .on_action(cx.listener(|_, _: &Zoom, window, _| window.zoom_window()))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
@@ -1012,10 +1022,20 @@ pub(crate) fn shadows(
         .collect()
 }
 
-/// The native menu bar: app menu and Edit. Items enable while their action has a handler.
+/// The native menu bar: app menu, File, Edit, View and Window (no Help). Items enable while their action has a handler.
 #[cfg(target_os = "macos")]
-fn set_menus(cx: &mut App) {
+fn set_menus(theme: &Theme, cx: &mut App) {
     use gpui::{Menu, MenuItem, OsAction};
+    /// A submenu of checkable entries.
+    fn choices(name: &'static str, entries: Vec<view_menu::Choice>) -> Menu {
+        Menu::new(name).items(entries.into_iter().map(|c| MenuItem::Action {
+            name: c.label.into(),
+            action: c.action,
+            os_action: None,
+            checked: c.checked,
+            disabled: false,
+        }))
+    }
     cx.set_menus([
         Menu::new("Willow").items([MenuItem::action("Quit Willow", Quit)]),
         Menu::new("File").items([
@@ -1035,7 +1055,22 @@ fn set_menus(cx: &mut App) {
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
             MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
         ]),
-        Menu::new("View").items([MenuItem::action("Code Panel", TogglePanel)]),
+        Menu::new("View").items([
+            MenuItem::action("Show Code Panel", TogglePanel),
+            MenuItem::separator(),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::action("Actual Size", ResetZoom),
+            MenuItem::separator(),
+            MenuItem::submenu(choices("Theme", view_menu::themes(theme))),
+            MenuItem::submenu(choices("Text Alignment", view_menu::alignments())),
+            MenuItem::separator(),
+            MenuItem::action("Enter Full Screen", ToggleFullScreen),
+        ]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", Minimize),
+            MenuItem::action("Zoom", Zoom),
+        ]),
     ]);
 }
 
@@ -1067,6 +1102,25 @@ fn main() {
             "ctrl-0"
         };
         cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
+        let (zoom_in, zoom_in_plus, zoom_out) = if cfg!(target_os = "macos") {
+            ("cmd-=", "cmd-+", "cmd--")
+        } else {
+            ("ctrl-=", "ctrl-+", "ctrl--")
+        };
+        cx.bind_keys([
+            KeyBinding::new(zoom_in, ZoomIn, None),
+            KeyBinding::new(zoom_in_plus, ZoomIn, None),
+            KeyBinding::new(zoom_out, ZoomOut, None),
+        ]);
+        let full_screen = if cfg!(target_os = "macos") {
+            "ctrl-cmd-f"
+        } else {
+            "f11"
+        };
+        cx.bind_keys([KeyBinding::new(full_screen, ToggleFullScreen, None)]);
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([KeyBinding::new("cmd-m", Minimize, None)]);
+        }
         let toggle_panel = if cfg!(target_os = "macos") {
             "cmd-e"
         } else {
@@ -1220,7 +1274,8 @@ fn main() {
             ])
             .expect("bundled fonts");
         #[cfg(target_os = "macos")]
-        set_menus(cx);
+        set_menus(&PAPER, cx);
+        view_menu::register(cx);
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));

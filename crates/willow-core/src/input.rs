@@ -103,6 +103,9 @@ pub enum Input {
     },
     /// Ctrl/Cmd+0: back to 100% around the canvas center.
     ResetZoom,
+    /// Ctrl/Cmd+= and Ctrl/Cmd+-: one eased wheel notch around the view center.
+    ZoomIn,
+    ZoomOut,
     /// Undoes the last document change. Viewport and selection are untouched.
     Undo,
     Redo,

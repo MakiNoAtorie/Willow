@@ -506,6 +506,8 @@ impl Session {
             | Input::Wheel { .. }
             | Input::Pinch { .. }
             | Input::ResetZoom
+            | Input::ZoomIn
+            | Input::ZoomOut
             | Input::FocusLost
             | Input::ModifiersChanged
             | Input::KeyUp(_)

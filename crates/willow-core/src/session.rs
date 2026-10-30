@@ -39,7 +39,7 @@ use crate::Side;
 use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Layout, Measure, layout};
-use crate::zoom::{Zoom, ZoomPill};
+use crate::zoom::{ZOOM_NOTCH_PX, Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
@@ -650,7 +650,11 @@ impl Session {
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
+            Input::ResetZoom
+            | Input::ZoomIn
+            | Input::ZoomOut
+            | Input::PointerLeft
+            | Input::ModifiersChanged => {}
             _ => {
                 self.unmark();
                 self.panel_unmark();
@@ -1103,6 +1107,16 @@ impl Session {
                     y: size.y / 2.0,
                 };
                 (self.zoom).ease_to(&mut self.viewport, self.theme, 1.0, center, now);
+                self.respond(true)
+            }
+            Input::ZoomIn | Input::ZoomOut => {
+                let size = self.viewport.size;
+                let center = Point {
+                    x: size.x / 2.0,
+                    y: size.y / 2.0,
+                };
+                let dy = if input == Input::ZoomIn { 1.0 } else { -1.0 } * ZOOM_NOTCH_PX;
+                (self.zoom).wheel(&mut self.viewport, self.theme, center, dy, now);
                 self.respond(true)
             }
             Input::Pinch { pos, delta } => {

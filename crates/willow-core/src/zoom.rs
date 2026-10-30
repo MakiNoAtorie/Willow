@@ -6,6 +6,9 @@ use crate::{Point, Theme, Viewport};
 
 /// Zoom factor per screen pixel of Ctrl/Cmd+wheel: one 60 px Windows notch is about 1.2x.
 // ponytail: calibration knob, tune per device if a notch feels too big or small.
+/// Screen pixels of wheel one Zoom In / Zoom Out command counts as: one Windows notch.
+pub(crate) const ZOOM_NOTCH_PX: f32 = 60.0;
+
 const WHEEL_ZOOM_PER_PX: f32 = 0.003;
 
 /// The zoom pill as drawn now.
