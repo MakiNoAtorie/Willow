@@ -180,7 +180,7 @@ Saving writes canonical text. Loading a canonical file and saving it reproduces 
 ### Loading imperfect files
 
 - Unknown lines are ignored on load and dropped on save.
-- Until Phase 7, the loader repairs what it can and keeps going: a duplicate ID drops the later line; a link that would close a cycle is dropped; a reference to a missing ID drops the link but keeps the shape; a zone nested deeper than one level is flattened into its parent; conflicting colors within one chain resolve to the first in story order.
+- The loader repairs what it can and keeps going (from Phase 7, the code panel underlines most of these instead of repairing them; see Invalid text): a duplicate ID drops the later line; a link that would close a cycle is dropped; a reference to a missing ID drops the link but keeps the shape; a zone nested deeper than one level is flattened into its parent; conflicting colors within one chain resolve to the first in story order.
 - Missing layout is filled in. A linked shape is placed one **creation gap** away in the stated direction; an unlinked shape is placed below the lowest shape on the canvas. A missing width is the default width. A zone without layout wraps its members with padding. The creation gap is a theme size, measured edge to edge in both directions; Paper's is 48 units, and Phase 4's midpoint creation uses the same value.
 - Any repair, dropped line or filled-in layout marks the document unsaved, so the rewrite on save is a visible choice.
 - A file without a `willow 1` header, from a newer version, or not valid UTF-8 does not open: a native alert names the reason ("not a Willow file", "made by a newer Willow").
@@ -345,16 +345,50 @@ Goal: group sections of the canvas (arcs, episodes) into containers. Zones nest 
 
 ## Phase 7 — Code panel
 
-Goal: edit the diagram as text, live, alongside the canvas.
+Goal: edit the diagram as text, live, alongside the canvas. The file is the text (ADR 0005).
 
-- A hideable side panel shows the document's text format (from Phase 3). Ctrl/Cmd+E or the title-bar toggle shows/hides it.
-- Canvas and text are two views of the same document. Canvas edits rewrite the text; text edits update the canvas after a short pause. The canvas never rewrites the text while the panel has focus, so the caret never jumps under the writer's hands.
-- A text edit, once applied after the pause, is one step in the document's single undo history. Ctrl/Cmd+Z in the panel undoes that step and regenerates the text; there is no separate character-level undo.
-- The parser is forgiving: an unclosed quote runs to the end of its line, and unknown lines are ignored.
-- When the text is invalid (e.g. a reference to an ID that doesn't exist anywhere in the text, a duplicate ID, an unclosed zone), the canvas quietly holds its last valid state and the offending line gets a subtle underline. No popups.
-- The file is the text. Saving with invalid text writes the text as typed, never the last valid model, so nothing the writer typed is lost. Loading an invalid file shows whatever parses, opens the panel and underlines the rest. Invalid lines survive only until the next canvas edit, which regenerates canonical text without them; that edit is undoable, so Ctrl/Cmd+Z brings the lines back.
-- Shapes added in text without a position are auto-placed as the Phase 3 loader does: one creation gap from the shape they link to, or below the lowest shape when unlinked. If the auto-placed spot is taken, the shape overlaps it until Phase 8, where the spacing pass pushes the neighbors clear.
-- IDs stay stable across edits so links never scramble. Changing an ID token in the text is not a rename: it is a new shape, and the old references become invalid lines.
+### Panel and focus
+
+- The **code panel** is a side panel on the right showing the document's text format (Phase 3), as in the `code-panel` mockup. Ctrl/Cmd+E, the title-bar toggle or View > Code Panel opens it and focuses it; when it is open, the same key closes it. Ctrl/Cmd+E follows the Phase 5 rule (Ctrl/Cmd and Shift only); macOS's "use selection for find" doesn't clash, since Willow has no find.
+- Whether the panel is open is per window: it starts closed, is not remembered across launches and is not stored in documents. The one exception: loading an invalid file opens it.
+- It narrows the canvas instead of covering it; the canvas content stays where it is on screen.
+- Resize it by dragging the hairline on its left (about 6 px to grab, column-resize cursor), from 280 px up to half the window (half wins in a window narrower than 560 px), starting at 420 px. The width is an app preference like the theme: the same in every window, remembered across launches, never in documents, not undoable. Widening the panel narrows the canvas without moving its content.
+- Clicking the canvas focuses the canvas; Esc in the panel moves focus to the canvas and the panel stays open. Canvas shortcuts never fire while the panel has focus, as while editing a shape.
+- The editor (ours to build, ADR 0003) has: caret, mouse and Shift+arrow selection, word and line moves, double-click selects a word, triple-click a line, select all, cut, copy and paste as plain text, soft wrap with line numbers counting logical lines, vertical scroll, IME, and the syntax colors from the visual language. Tab inserts 2 spaces; Enter keeps the current line's indent. No find, auto-closing quotes, autocomplete or folding.
+
+### Text to canvas
+
+- Canvas and text are two views of the same document. While the panel has focus the text stays exactly as typed, even when valid: nothing rewrites it, so the caret never jumps under the writer's hands.
+- **Regeneration** writes the text as canonical text from the model. While the panel is open, it happens after each canvas undo step finishes (not on every frame of a drag, and typing in a shape shows when its editing session ends), and when focus leaves the panel with valid text. A closed panel never regenerates; opening it does. Regeneration reorders the text into story order and adds `@layout` lines for auto-placed shapes.
+- Text edits reach the canvas 150 ms after the last keystroke; each keystroke restarts the wait, so at most one update is pending and typing in the panel never waits. Pending text applies at once when focus leaves the panel, on Undo or Redo, on Save and before any canvas edit.
+- The parser is forgiving: an unclosed quote runs to the end of its line.
+- Shapes added in text without a position are auto-placed as the Phase 3 loader does: one creation gap from the shape they link to, or below the lowest shape when unlinked. If the spot is taken, the shape overlaps until Phase 8.
+- Changing only a link's direction word (`below a` to `right of a`), with that shape's `@layout` line untouched, re-places the shape one creation gap from `a` on the new side; the part of its chain reached through it moves with it as one block, as in insert-and-push. This keeps direction words meaningful in text, since layout is what places shapes.
+- Text edits never push, and zone membership comes only from the `zone { }` blocks, never from the drop rule. Zones never grow from a text edit.
+- IDs stay stable across edits so links never scramble. Changing an ID token is not a rename: it is a new shape, and the old references become invalid lines. IDs are lowercase letters, as the generator writes them.
+
+### Invalid text
+
+- An **invalid line** blocks: while any line is invalid, no text edit reaches the canvas, which quietly holds its last valid state. Invalid lines are a reference to a missing ID, a duplicate ID (the later line), an unclosed zone (its `zone` line) or a stray `}`, a link that would close a cycle, a zone nested two levels deep, and a malformed shape, zone or `@layout` line. Each gets the visual language's wavy underline and line tint. No popups.
+- Some problems never block and get no underline: a shape without layout is auto-placed; conflicting colors in one chain resolve to the first in story order (Phase 3), so linking two colored chains in text just works; and **ignored lines**, an `@layout` line for an ID that no longer exists and any unknown line, are skipped. Ignored lines are drawn in the `@layout` gray as a hint that the next regeneration drops them; deleting a shape in text needs only its shape line removed.
+- A canvas edit while lines are invalid works on the held model and regenerates canonical text from it, dropping the invalid lines and any text edits made since the hold began. It is undoable, so Undo brings the typed text back (see below).
+
+### Undo and saving
+
+- Text edits are steps in the document's single undo history; there is no separate character-level undo. Applied updates merge into one step until the writer pauses typing for 1 s, moves the caret to another line, leaves the panel, or presses Undo. Paste and cut in the panel are each a step of their own. Undo in the panel applies pending text first, then undoes, so one Undo takes back the last stretch of typing, like a shape's editing session.
+- Each undo step also records the panel text whenever it is not plain regenerated text (invalid lines, ignored lines, or text not yet regenerated), and undo and redo restore it. So undoing a canvas edit that dropped invalid lines brings them back, and Undo while the text is invalid first records the typed text as a step, then undoes it: the text returns to its last valid version and Redo brings the typing back. Nothing typed is lost without a way back.
+- Save writes the panel text as shown, valid or not; it does not regenerate first, so a save while the panel has focus may be non-canonical until the next regeneration. Recovery files write the same text. Applied or pending panel edits mark the document unsaved.
+- Loading a valid file regenerates its text as in Phase 3; anything handled quietly (missing layout, a color conflict, an ignored line) marks it unsaved. Loading an invalid file shows the file's text as it is, opens the panel and underlines the invalid lines; the canvas shows the model built from the lines that parse, which is the held model, and the document is not marked unsaved. A file changed on disk (Phase 3) loads by the same rules.
+
+### Selection
+
+- A caret on a shape's line or its `@layout` line selects that shape on the canvas, without panning. A caret on a zone line (zones are never selected), an invalid line or an ignored line leaves the selection alone.
+- While the panel is unfocused, a canvas selection scrolls the panel to the selected shape's line; for a multi-selection, its first shape in story order. While the panel has focus, nothing moves its caret or view.
+
+### Performance and Windows
+
+- On the MacBook Air with the generated 10,000-shape document, recorded in bench mode's CSV: typing in the panel draws in ≤ 8 ms per keystroke (only visible lines are laid out and colored); applying text (parse, check, update the model) runs off the UI thread in ≤ 100 ms, the load target, so typing never stalls; regeneration after a canvas step runs off the UI thread in ≤ 50 ms, the save target. With the panel open and idle, CPU stays near zero.
+- A "Phase 7 check on Windows" issue covers IME in the panel, JetBrains Mono rendering, the hairline's resize cursor and drag, Ctrl+E and the panel's shortcuts, and the title-bar toggle beside the caption buttons.
 
 ## Phase 8 — Polish pass
 
@@ -364,8 +398,8 @@ Goal: the whole app feels finished and matches the Phase 1 visual language.
 - Add the Desk and Poster themes and View > Theme, matching their Phase 1 mockups.
 - Add View > Text Alignment (Left and Centered next to the default Justified).
 - Profile memory and frame times on very large generated documents and fix hotspots, against the performance targets on the MacBook Air.
-- Shapes never overlap: every shape keeps at least the minimum gap (Phase 4) from every other shape. This replaces Phase 4's pushing (saved moves, ADR 0004) and the earlier "may overlap" rules for theme switching, drags and auto-placement in Phase 7.
-  - Spacing is its own process, separate from editing. Each shape keeps the position the writer gave it (by moving, creating or placing it). Where it is drawn is worked out from those positions by the spacing pass, which runs after every change.
+- Shapes never overlap: every shape keeps at least the minimum gap (Phase 4) from every other shape. This replaces Phase 4's pushing (saved moves, ADR 0004) and the earlier "may overlap" rules for theme switching, drags, and auto-placement and text edits in Phase 7.
+  - Spacing is its own process, separate from editing. Each shape keeps the position the writer gave it (by moving, creating or placing it, or in the code panel). Where it is drawn is worked out from those positions by the spacing pass, which runs after every change, text edits applied from the code panel included: shapes added or grown in text push their neighbors clear like any other growth.
   - When a shape grows, by typing or resizing, any shape it would come closer to than the gap is pushed away in whatever direction gets it clear soonest, sideways included. Pushes cascade: a pushed shape pushes what it then crowds.
   - A shape in another chain (a branch, say) is never pushed alone: its whole chain moves with it as one block, keeping its own layout. Within the growing shape's own chain, the linked subtree beyond the crowded shape moves, as in Phase 4's insert-and-push.
   - Pushes are never undo steps. Undo reverts only the change the writer made (the text, the resize), and the spacing pass then lets pushed shapes settle back toward their own positions.

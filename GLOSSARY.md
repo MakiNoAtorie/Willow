@@ -92,6 +92,24 @@ A shape or nested zone that belongs to a zone.
 The strip along a zone's top edge, where the title sits; the part of a zone the mouse grabs. The rest of a zone acts like empty canvas.
 _Avoid_: Header, handle
 
+### Text
+
+**Code panel**:
+The side panel showing the document's text format, editable live; the canvas and the text are two views of one document.
+_Avoid_: Editor, source view
+
+**Regeneration**:
+Rewriting the code panel's text as canonical text from the model, after a canvas edit or when focus leaves the panel.
+_Avoid_: Reformat, sync
+
+**Invalid line**:
+A line in the code panel that blocks: while one exists, text edits don't reach the canvas, which holds its last valid state.
+_Avoid_: Error, broken line
+
+**Ignored line**:
+A line in the code panel that is skipped without blocking (an unknown line, or layout for a missing ID) and dropped at the next regeneration.
+_Avoid_: Comment
+
 ### Look
 
 **Theme**:
