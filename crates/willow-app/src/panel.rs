@@ -2,11 +2,13 @@
 //! the title-bar toggle, and regeneration off the UI thread.
 
 use gpui::{
-    Action, App, Bounds, Context, FontWeight, MouseButton, Pixels, ScrollEvent, ShapedLine,
-    TextAlign, TextRun, Window, canvas, div, point, prelude::*, px,
+    Action, App, Bounds, Context, CursorStyle, DispatchPhase, Entity, FontWeight, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, ShapedLine, TextAlign,
+    TextRun, Window, canvas, div, point, prelude::*, px,
 };
 use willow_core::{Input, Session};
 
+use crate::prefs::{self, Prefs};
 use crate::{TogglePanel, WHEEL_LINE, Willow, color};
 
 impl Willow {
@@ -66,7 +68,26 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
                 let d = e.delta.pixel_delta(px(WHEEL_LINE));
                 w.input(Input::ScrollPanel(d.y.into()), cx)
             }))
-            .child(rows),
+            .child(rows)
+            // The hairline's grab area, over the panel's left edge.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .h_full()
+                    .w(px(c.grab_width))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|w, e: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            let (wide, x): (f32, f32) =
+                                (window.viewport_size().width.into(), e.position.x.into());
+                            w.panel_drag = Some(wide - w.session.panel().width - x);
+                        }),
+                    ),
+            ),
     )
 }
 
@@ -177,4 +198,48 @@ fn icon(session: &Session) -> impl IntoElement {
                     .bg(ink.opacity(g.fill_opacity)),
             )
         })
+}
+
+/// The preference holding the panel's width.
+const WIDTH: &str = "panel_width";
+
+/// Gives `session` the shared panel width, kept within this window's limits.
+pub(crate) fn apply_width(session: &mut Session, window: &Window, cx: &App) {
+    let want = (cx.global::<Prefs>().get_f32(WIDTH)).unwrap_or(session.theme().code.width);
+    session.set_panel_width(want, window.viewport_size().width.into());
+}
+
+/// While the hairline is grabbed, window-wide so the drag goes on outside the panel: the
+/// hairline follows the pointer, every window takes the new width, and letting go saves it.
+pub(crate) fn drag_panel(entity: &Entity<Willow>, window: &mut Window, cx: &mut App) {
+    if entity.read(cx).panel_drag.is_some() {
+        window.set_window_cursor_style(CursorStyle::ResizeLeftRight);
+    }
+    let e = entity.clone();
+    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, cx| {
+        let Some(grab) = e.read(cx).panel_drag else {
+            return;
+        };
+        if phase == DispatchPhase::Bubble {
+            let wide: f32 = window.viewport_size().width.into();
+            let x: f32 = ev.position.x.into();
+            let width = e.update(cx, |w, _| {
+                w.session.set_panel_width(wide - x - grab, wide);
+                w.session.panel().width
+            });
+            cx.global_mut::<Prefs>().set_f32(WIDTH, width);
+            cx.refresh_windows();
+        }
+    });
+    let e = entity.clone();
+    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+        if phase == DispatchPhase::Bubble && e.update(cx, |w, _| w.panel_drag.take()).is_some() {
+            let (prefs, file) = (cx.global::<Prefs>().clone(), prefs::file());
+            if let Some(file) = file {
+                cx.background_executor()
+                    .spawn(async move { prefs.save(&file) })
+                    .detach();
+            }
+        }
+    });
 }

@@ -19,6 +19,7 @@ mod bench;
 mod file;
 mod menu;
 mod panel;
+mod prefs;
 mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
@@ -176,6 +177,8 @@ struct Willow {
     settling: bool,
     /// The code panel's regeneration running off the UI thread; replacing it drops the old one.
     regeneration: Option<gpui::Task<()>>,
+    /// Dragging the panel's hairline: how far left of the pointer the hairline was grabbed.
+    panel_drag: Option<f32>,
 }
 
 /// What a window shows: a document, the bytes it was read from, and its file.
@@ -359,6 +362,7 @@ impl Willow {
 
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        panel::apply_width(&mut self.session, window, cx);
         let theme = self.session.theme();
         bench::step(self, window);
         let now = self.start.elapsed();
@@ -391,6 +395,7 @@ impl Render for Willow {
                     });
                     w.cursor == Cursor::Grabbing
                 });
+                panel::drag_panel(&entity, window, cx);
                 // Window-wide, so a pan keeps going (and ends) outside the canvas.
                 let e = entity.clone();
                 window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
@@ -1205,6 +1210,9 @@ fn main() {
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
+        // Preferences are the same in every window; a bench run keeps the defaults.
+        let prefs = prefs::file().filter(|_| bench.is_none());
+        cx.set_global(prefs.map_or_else(Default::default, |f| prefs::Prefs::load(&f)));
         cx.set_quit_mode(QuitMode::LastWindowClosed);
         // A plain launch applies the recovery files instead of opening a new document.
         if recover {
@@ -1275,6 +1283,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     mtime: None,
                     settling: false,
                     regeneration: None,
+                    panel_drag: None,
                 };
                 w.measure_ahead(cx);
                 w

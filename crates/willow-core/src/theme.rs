@@ -332,6 +332,10 @@ pub struct CreateStyle {
 pub struct CodeStyle {
     /// The width a window's panel starts at.
     pub width: f32,
+    /// The narrowest the panel is dragged to; the widest is half the window.
+    pub min_width: f32,
+    /// How wide the hairline's grab area is.
+    pub grab_width: f32,
     pub bg: Rgba,
     /// The hairline on its left.
     pub border: Rgba,
@@ -744,6 +748,8 @@ pub const PAPER: Theme = Theme {
     nudge: 24,
     code: CodeStyle {
         width: 420.0,
+        min_width: 280.0,
+        grab_width: 6.0,
         bg: hex(0xfbf9f4),
         border: rgba(70, 50, 20, 0.10),
         border_width: 1.0,

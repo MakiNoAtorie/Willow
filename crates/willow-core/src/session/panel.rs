@@ -165,6 +165,13 @@ impl Session {
         Panel::new(theme.code.width)
     }
 
+    /// Sets the panel's width to `width` kept within the theme's minimum and half of
+    /// `window_width`; half wins in a window narrower than twice the minimum. A preference,
+    /// not part of the document: no history, no undo.
+    pub fn set_panel_width(&mut self, width: f32, window_width: f32) {
+        self.panel.width = width.max(self.theme.code.min_width).min(window_width / 2.0);
+    }
+
     pub fn panel(&self) -> &Panel {
         &self.panel
     }

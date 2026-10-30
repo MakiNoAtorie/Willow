@@ -14,11 +14,7 @@ use crate::{Content, Willow, file, open_window};
 
 /// `~/Library/Application Support/Willow/Recovery` or `%APPDATA%\Willow\Recovery`.
 fn dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let base = PathBuf::from(std::env::var_os("APPDATA")?);
-    #[cfg(not(windows))]
-    let base = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
-    Some(base.join("Willow").join("Recovery"))
+    Some(crate::prefs::app_dir()?.join("Recovery"))
 }
 
 fn file_of(dir: &Path, id: &str, ext: &str) -> PathBuf {
