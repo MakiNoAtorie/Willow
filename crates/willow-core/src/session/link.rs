@@ -6,9 +6,9 @@ use std::collections::HashSet;
 use super::menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind};
 use super::midpoints::edge_midpoint;
 use super::{Gesture, Session};
-use crate::draw::LinkDrag;
+use crate::draw::{LinkDrag, connector_ends};
 use crate::input::Point;
-use crate::{Link, ShapeId, side};
+use crate::{Link, ShapeId};
 
 /// A link drag in progress and the hovered connector.
 #[derive(Debug, Default)]
@@ -96,9 +96,8 @@ impl Session {
                 return false;
             };
             let (a, b) = (self.drawn(a), self.drawn(b));
-            let (ac, bc) = (a.center(), b.center());
-            let from = vp.to_screen(edge_midpoint(a, side(ac, bc)));
-            let to = vp.to_screen(edge_midpoint(b, side(bc, ac)));
+            let ((from, _), (to, _)) = connector_ends(a, b);
+            let (from, to) = (vp.to_screen(from), vp.to_screen(to));
             distance(p, from, to) <= hit
         })?;
         Some(self.doc.links[k].clone())

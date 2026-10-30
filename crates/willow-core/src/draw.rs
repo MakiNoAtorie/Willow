@@ -10,8 +10,8 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    CaretView, Color, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId, Side, Zone,
-    side,
+    CaretView, Color, DrawnRect, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId,
+    Side, Zone, side,
 };
 
 /// One frame's worth of drawing: zones, then connectors, then shapes.
@@ -184,19 +184,17 @@ impl Session {
                 continue;
             }
             // A sliding shape's connector end slides with it, a previewed one with the preview.
-            let center = |s: &Shape, x: i32, y: i32, h: f32| {
+            let rect = |s: &Shape, x: i32, y: i32, h: f32| {
                 let o = self.sliding(&s.id, now);
-                Point {
-                    x: x as f32 + s.width as f32 / 2.0 + o.x,
-                    y: y as f32 + h / 2.0 + o.y,
+                DrawnRect {
+                    x: x as f32 + o.x,
+                    y: y as f32 + o.y,
+                    width: s.width as f32,
+                    height: h,
                 }
             };
-            let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));
-            let (from_side, to_side) = (side(pc, qc), side(qc, pc));
-            let (mut from, mut to) = (
-                midpoint(pc, p.width, ph, from_side),
-                midpoint(qc, q.width, qh, to_side),
-            );
+            let ((mut from, from_side), (mut to, to_side)) =
+                connector_ends(rect(&p, px, py, ph), rect(&q, qx, qy, qh));
             // A new shape's connector draws out from the other end.
             match creating {
                 Some((id, k)) if *id == q.id => to = lerp(from, to, k),
@@ -354,18 +352,41 @@ impl Session {
     }
 }
 
-/// The midpoint of `side` of a `w` x `h` shape centered at `c`.
-fn midpoint(c: Point, w: u32, h: f32, side: Side) -> Point {
-    let (dx, dy) = match side {
-        Side::Top => (0.0, -h / 2.0),
-        Side::Bottom => (0.0, h / 2.0),
-        Side::Left => (-(w as f32) / 2.0, 0.0),
-        Side::Right => (w as f32 / 2.0, 0.0),
+/// Both ends of the connector between drawn rectangles `a` and `b`, each with the side it
+/// leaves. The one place that decides them; the hit test reads it too. Straight across, at
+/// the middle of the overlap, where the shapes overlap on the axis across the connector;
+/// else midpoint to midpoint.
+pub(crate) fn connector_ends(a: DrawnRect, b: DrawnRect) -> ((Point, Side), (Point, Side)) {
+    let (sa, sb) = (side(a.center(), b.center()), side(b.center(), a.center()));
+    let vertical = matches!(sa, Side::Top | Side::Bottom);
+    let (lo, hi) = if vertical {
+        (a.x.max(b.x), a.right().min(b.right()))
+    } else {
+        (a.y.max(b.y), a.bottom().min(b.bottom()))
     };
-    Point {
-        x: c.x + dx,
-        y: c.y + dy,
-    }
+    let end = |r: DrawnRect, s: Side| {
+        let across = if lo < hi {
+            (lo + hi) / 2.0
+        } else if vertical {
+            r.x + r.width / 2.0
+        } else {
+            r.y + r.height / 2.0
+        };
+        let p = match s {
+            Side::Top => Point { x: across, y: r.y },
+            Side::Bottom => Point {
+                x: across,
+                y: r.bottom(),
+            },
+            Side::Left => Point { x: r.x, y: across },
+            Side::Right => Point {
+                x: r.right(),
+                y: across,
+            },
+        };
+        (p, s)
+    };
+    (end(a, sa), end(b, sb))
 }
 
 /// `a` moved `k` (0 to 1) of the way toward `b`.
