@@ -173,7 +173,7 @@ Neo-brutalist: thick outlines, hard offset shadows, punchy pastels.
 
 | | Value |
 |---|---|
-| Shape text | Space Grotesk (OFL), bundled, 14.5 px / 1.45, weight 500 (bold 700). Also used for menus and zone titles. The code panel keeps JetBrains Mono |
+| Shape text | Space Grotesk (OFL), bundled, 14.5 px / 1.45, weight 500 (bold 700). Italics use slanted faces generated from it, since it has none. Also used for menus and zone titles. The code panel keeps JetBrains Mono |
 | Canvas | `#fbf6ea`, no texture |
 | Ink / accent | `#111111`; a hovered connector turns `#ff4d1a` |
 | Shapes | Radius 10, padding 12 / 14, a 2.5 px ink border, hard shadow `4px 4px 0 #111` |
