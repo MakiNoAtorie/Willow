@@ -326,6 +326,81 @@ pub struct CreateStyle {
     pub scale: f32,
 }
 
+/// The code panel on the right, in screen pixels. Text is `font` (bundled in regular and
+/// `id_weight`), monospaced: every column is `advance` times `font_size` wide.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CodeStyle {
+    /// The width a window's panel starts at.
+    pub width: f32,
+    /// The narrowest the panel is dragged to; the widest is half the window.
+    pub min_width: f32,
+    /// How wide the hairline's grab area is.
+    pub grab_width: f32,
+    pub bg: Rgba,
+    /// The hairline on its left.
+    pub border: Rgba,
+    pub border_width: f32,
+    pub font: &'static str,
+    pub font_size: f32,
+    /// A multiple of `font_size`.
+    pub line_height: f32,
+    pub advance: f32,
+    /// Above the first line (clears a macOS title bar) and below the last.
+    pub pad_top: f32,
+    pub pad_bottom: f32,
+    /// The line-number column, from the hairline to the text, and the space between a
+    /// number's right edge and the text.
+    pub gutter_width: f32,
+    pub gutter_gap: f32,
+    /// Between the longest row and the panel's right edge.
+    pub pad_right: f32,
+    /// Line numbers. Plain text is `Theme.ink`.
+    pub gutter: Rgba,
+    pub keyword: Rgba,
+    pub id: Rgba,
+    /// CSS weight of IDs.
+    pub id_weight: f32,
+    pub string: Rgba,
+    pub direction: Rgba,
+    pub layout: Rgba,
+    /// An invalid line's underline, its thickness, whether it is wavy, and the line's tint.
+    pub invalid: Rgba,
+    pub invalid_width: f32,
+    pub invalid_wavy: bool,
+    pub invalid_tint: Rgba,
+    pub toggle: ToggleStyle,
+}
+
+/// The title bar's panel icon: a `width` x `height` rounded outline with a divider
+/// `divider` in from its left, the part right of it filled while the panel is open. Ink
+/// while open, else the title color. macOS puts it `mac_right` from the window's right edge;
+/// Windows in a caption-sized button.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToggleStyle {
+    pub width: f32,
+    pub height: f32,
+    pub stroke: f32,
+    pub radius: f32,
+    pub divider: f32,
+    /// The open fill: inset from the outline's top, bottom and right, its radius and opacity.
+    pub fill_inset: f32,
+    pub fill_radius: f32,
+    pub fill_opacity: f32,
+    pub mac_right: f32,
+}
+
+impl CodeStyle {
+    /// One row of text.
+    pub fn row_height(&self) -> f32 {
+        self.font_size * self.line_height
+    }
+
+    /// One column of text.
+    pub fn column(&self) -> f32 {
+        self.advance * self.font_size
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub name: &'static str,
@@ -375,6 +450,7 @@ pub struct Theme {
     pub key_pan: KeyPanStyle,
     /// Canvas units one Ctrl/Cmd+Arrow press moves the selection, or resizes a shape, by.
     pub nudge: i32,
+    pub code: CodeStyle,
 }
 
 impl ZoneStyle {
@@ -677,4 +753,45 @@ pub const PAPER: Theme = Theme {
         ease_out: Duration::from_millis(120),
     },
     nudge: 24,
+    code: CodeStyle {
+        width: 420.0,
+        min_width: 280.0,
+        grab_width: 6.0,
+        bg: hex(0xfbf9f4),
+        border: rgba(70, 50, 20, 0.10),
+        border_width: 1.0,
+        font: "JetBrains Mono",
+        font_size: 12.5,
+        line_height: 1.65,
+        advance: 0.6,
+        // The mockup's 46 px under the title bar, plus its 14 px padding.
+        pad_top: 60.0,
+        pad_bottom: 14.0,
+        gutter_width: 40.0,
+        gutter_gap: 14.0,
+        pad_right: 14.0,
+        gutter: hex(0xc9bfb0),
+        keyword: hex(0x8b7760),
+        id: hex(0x3b342c),
+        id_weight: 600.0,
+        string: hex(0x5f7d4c),
+        direction: hex(0x8a6fae),
+        layout: hex(0xa39b8f),
+        invalid: hex(0xd9776c),
+        invalid_width: 1.0,
+        invalid_wavy: true,
+        invalid_tint: rgba(217, 119, 108, 0.06),
+        // The mockup's 16 x 14 SVG: outline inset .75, divider at 10, fill 10..14.6 x 1.4..12.6.
+        toggle: ToggleStyle {
+            width: 16.0,
+            height: 14.0,
+            stroke: 1.3,
+            radius: 3.0,
+            divider: 10.0,
+            fill_inset: 1.4,
+            fill_radius: 1.6,
+            fill_opacity: 0.55,
+            mac_right: 14.0,
+        },
+    },
 };

@@ -9,10 +9,13 @@ use crate::input::Point;
 use crate::{Color, Document, Link, Shape, ShapeId, format};
 
 impl Session {
-    /// What Copy and Cut put on the clipboard: while editing, the selected text; otherwise
-    /// the selected shapes as a whole `willow 1` document with the links among them, their
-    /// colors and layout, and no zones.
+    /// What Copy and Cut put on the clipboard: while the code panel has focus, its selected
+    /// text; while editing, the selected text; otherwise the selected shapes as a whole
+    /// `willow 1` document with the links among them, their colors and layout, and no zones.
     pub fn clipboard_text(&self) -> Option<String> {
+        if self.panel.focused {
+            return self.panel_selected_text();
+        }
         if self.editing.is_some() {
             return self.selected_text();
         }
@@ -170,7 +173,7 @@ fn remap(shapes: &mut [Shape], links: &mut [Link], fresh: Vec<ShapeId>) {
 }
 
 /// Clipboard text as shape text: line breaks normalized, other control characters dropped.
-fn clean(text: &str) -> String {
+pub(super) fn clean(text: &str) -> String {
     (text.replace("\r\n", "\n").replace('\r', "\n").chars())
         .filter(|&c| c == '\n' || !c.is_control())
         .collect()

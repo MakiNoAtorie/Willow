@@ -8,6 +8,11 @@
 //! member list and no member list naming a missing zone; `change_zone` changes position, size,
 //! title or color; `join_zone` and `leave_zone` change membership; `order_zones` sets the draw
 //! order, parents first. Each is undoable and joins an open group like the shape steps.
+//!
+//! Panel text: `text` is the code panel's text for the document as it is now, when that isn't
+//! plain regenerated text. Every new step records it as the text on its far side, and undo and
+//! redo swap it, so the session shows it again. `amend` joins a text edit to the last step;
+//! `text_step` is a step that changes only the text.
 
 use std::collections::{HashMap, HashSet};
 
@@ -105,19 +110,28 @@ impl Op {
     }
 }
 
-/// One undoable step, as the document is on the other side of it.
+/// One undoable step, as the document and the panel text are on the other side of it.
 #[derive(Debug)]
-enum Step {
+struct Step {
+    change: Change,
+    /// The panel text there; `None` when plain regenerated text.
+    text: Option<String>,
+}
+
+#[derive(Debug)]
+enum Change {
     /// Ops in the order they were recorded; applied last first.
     Ops(Vec<Op>),
-    /// The whole document (a reload from disk).
+    /// The whole document (a reload from disk, a text edit).
     Document(Box<Document>),
 }
 
-/// A group in progress: its ops, and the shapes and zones it holds a `Set` or `SetZone` for.
+/// A group in progress: its ops, the panel text before them, and the shapes and zones it holds
+/// a `Set` or `SetZone` for.
 #[derive(Debug, Default)]
 struct Group {
     ops: Vec<Op>,
+    text: Option<String>,
     set: HashSet<ShapeId>,
 }
 
@@ -129,6 +143,8 @@ pub(crate) struct History {
     open: Option<Group>,
     /// Counts changes to the document (including undo and redo); crash recovery watches it.
     revision: u64,
+    /// The panel text for the document as it is now, when it isn't plain regenerated text.
+    pub text: Option<String>,
 }
 
 impl History {
@@ -139,9 +155,20 @@ impl History {
         self.redo.clear();
         match (&mut self.open, op) {
             (_, None) => {}
-            (Some(g), Some(op)) => g.ops.push(op),
-            (None, Some(op)) => self.undo.push(Step::Ops(vec![op])),
+            (Some(g), Some(op)) => {
+                if g.ops.is_empty() {
+                    g.text = self.text.take();
+                }
+                g.ops.push(op);
+            }
+            (None, Some(op)) => self.push(Change::Ops(vec![op])),
         }
+    }
+
+    /// Pushes a new step to undo, with the panel text before it.
+    fn push(&mut self, change: Change) {
+        let text = self.text.take();
+        self.undo.push(Step { change, text });
     }
 
     /// Changes shape `id` through `f`: its own step, or part of the open group. A change that
@@ -255,7 +282,23 @@ impl History {
         self.revision += 1;
         self.redo.clear();
         let old = std::mem::replace(doc, new);
-        self.undo.push(Step::Document(Box::new(old)));
+        self.push(Change::Document(Box::new(old)));
+    }
+
+    /// Replaces the whole document with `new` as part of the last step, which then takes it
+    /// back to before both. The caller knows no other change came since that step.
+    pub fn amend(&mut self, doc: &mut Document, new: Document) {
+        self.revision += 1;
+        self.redo.clear();
+        *doc = new;
+    }
+
+    /// A step that changes only the panel text, from `text` to what the caller makes it.
+    pub fn text_step(&mut self, doc: &Document) {
+        self.end(doc);
+        self.revision += 1;
+        self.redo.clear();
+        self.push(Change::Ops(Vec::new()));
     }
 
     /// Opens a group: changes until `end` become one step.
@@ -273,7 +316,11 @@ impl History {
         if let Some(g) = self.open.take() {
             let ops: Vec<Op> = g.ops.into_iter().filter(|op| !op.is_noop(doc)).collect();
             if !ops.is_empty() {
-                self.undo.push(Step::Ops(ops));
+                let text = g.text;
+                self.undo.push(Step {
+                    change: Change::Ops(ops),
+                    text,
+                });
             }
         }
     }
@@ -305,7 +352,8 @@ impl History {
     }
 
     /// Ends any open group, then moves the top step of one stack onto the other, applying it
-    /// and keeping what takes it back. Reopens the group if one was open.
+    /// and keeping what takes it back, the panel text included. Reopens the group if one was
+    /// open.
     fn across(
         &mut self,
         doc: &mut Document,
@@ -313,24 +361,25 @@ impl History {
     ) {
         let was_open = self.open.is_some();
         self.end(doc);
-        let (from, to) = stacks(self);
-        if let Some(step) = from.pop() {
-            to.push(match step {
+        if let Some(step) = stacks(self).0.pop() {
+            let change = match step.change {
                 // Last op first. The inverses, kept in that order, replay reversed again.
-                Step::Ops(ops) => {
+                Change::Ops(ops) => {
                     let mut at = None;
-                    Step::Ops(
+                    Change::Ops(
                         ops.into_iter()
                             .rev()
                             .map(|op| op.apply(doc, &mut at))
                             .collect(),
                     )
                 }
-                Step::Document(mut d) => {
+                Change::Document(mut d) => {
                     std::mem::swap(doc, &mut d);
-                    Step::Document(d)
+                    Change::Document(d)
                 }
-            });
+            };
+            let text = std::mem::replace(&mut self.text, step.text);
+            stacks(self).1.push(Step { change, text });
             self.revision += 1;
         }
         if was_open {

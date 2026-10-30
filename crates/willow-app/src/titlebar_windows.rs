@@ -1,9 +1,9 @@
 //! Windows: custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
-//! The menu button opens the app menu in the theme's menu style, with the Edit menu cascaded.
+//! The menu button opens the app menu in the theme's menu style, with Edit and View cascaded.
 
 use crate::{
-    CloseWindow, Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, Save, SaveAs, Undo, color,
-    shadows,
+    CloseWindow, Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, Save, SaveAs, TogglePanel, Undo,
+    color, shadows,
 };
 use gpui::{
     Action, AnyElement, App, Entity, MouseButton, Window, WindowControlArea, anchored, deferred,
@@ -11,11 +11,27 @@ use gpui::{
 };
 use willow_core::{MenuStyle, Session};
 
+/// The submenus beside the top menu.
+#[derive(Clone, Copy, PartialEq)]
+enum Cascade {
+    Edit,
+    View,
+}
+
+impl Cascade {
+    fn label(self) -> &'static str {
+        match self {
+            Cascade::Edit => "Edit",
+            Cascade::View => "View",
+        }
+    }
+}
+
 #[derive(Default)]
 struct MenuState {
     open: bool,
-    /// The Edit cascade is showing.
-    edit: bool,
+    /// The cascade showing.
+    cascade: Option<Cascade>,
 }
 
 pub fn title_bar(
@@ -27,9 +43,9 @@ pub fn title_bar(
     let t = session.theme();
     let c = t.chrome;
     let state = window.use_keyed_state("app-menu", cx, |_, _| MenuState::default());
-    let (open, edit) = {
+    let (open, cascade) = {
         let s = state.read(cx);
-        (s.open, s.edit)
+        (s.open, s.cascade)
     };
     let hover = color(t.chrome.button_hover);
     let button = move |id: &'static str, glyph: &'static str, area| {
@@ -46,7 +62,7 @@ pub fn title_bar(
             .window_control_area(area)
             .child(glyph)
     };
-    let menus = open.then(|| app_menu(&t.menu, &state, edit, session));
+    let menus = open.then(|| app_menu(&t.menu, &state, cascade, session));
     let toggle = state.clone();
     div()
         .h(px(c.win_height))
@@ -68,7 +84,7 @@ pub fn title_bar(
                 .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                     if !open {
                         toggle.update(cx, |s, cx| {
-                            (s.open, s.edit) = (true, true);
+                            (s.open, s.cascade) = (true, Some(Cascade::Edit));
                             cx.notify();
                         });
                     }
@@ -96,6 +112,13 @@ pub fn title_bar(
                     )
                 }),
         )
+        .child(crate::panel::toggle(
+            div()
+                .w(px(c.win_button_width))
+                .h_full()
+                .hover(move |s| s.bg(hover)),
+            session,
+        ))
         .child(button("min", "\u{e921}", WindowControlArea::Min))
         .child(button(
             "max",
@@ -113,18 +136,23 @@ pub fn title_bar(
 /// One menu row: label, shortcut (or the submenu arrow), the action it runs.
 type Item = (&'static str, &'static str, Box<dyn Action>);
 
-/// The top menu with the Edit cascade beside it, below the menu button.
-fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Session) -> AnyElement {
-    let set = |open: bool, edit: bool| {
+/// The top menu with the `cascade` menu beside it, below the menu button.
+fn app_menu(
+    m: &MenuStyle,
+    state: &Entity<MenuState>,
+    cascade: Option<Cascade>,
+    session: &Session,
+) -> AnyElement {
+    let set = |open: bool, cascade: Option<Cascade>| {
         let state = state.clone();
         move |cx: &mut App| {
             state.update(cx, |s, cx| {
-                (s.open, s.edit) = (open, edit);
+                (s.open, s.cascade) = (open, cascade);
                 cx.notify();
             })
         }
     };
-    let (show_edit, close) = (set(true, true), set(false, false));
+    let close = set(false, None);
     let file_items: [Item; 4] = [
         ("New", "Ctrl+N", Box::new(NewFile)),
         ("Open…", "Ctrl+O", Box::new(OpenFile)),
@@ -137,24 +165,29 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
         ("Exit", "", Box::new(Quit)),
     ];
     let command = |it: Item| {
-        let hide_edit = set(true, false);
-        item(m, it, true, set(false, false)).on_hover(move |&h, _, cx| {
+        let hide = set(true, None);
+        item(m, it, true, set(false, None)).on_hover(move |&h, _, cx| {
             if h {
-                hide_edit(cx)
+                hide(cx)
             }
         })
     };
+    // A row that shows its cascade while hovered.
+    let opens = |shows: Cascade| {
+        let show = set(true, Some(shows));
+        let name = shows.label();
+        row(m, name, name, "\u{203a}", true)
+            .when(cascade == Some(shows), |d| d.bg(color(m.hover)))
+            .on_hover(move |&h, _, cx| {
+                if h {
+                    show(cx)
+                }
+            })
+    };
     let top = (panel(m).children(file_items.map(command)))
         .child(separator(m))
-        .child(
-            row(m, "edit", "Edit", "\u{203a}", true)
-                .when(edit, |d| d.bg(color(m.hover)))
-                .on_hover(move |&h, _, cx| {
-                    if h {
-                        show_edit(cx)
-                    }
-                }),
-        )
+        .child(opens(Cascade::Edit))
+        .child(opens(Cascade::View))
         .child(separator(m))
         .children(window_items.map(command));
     let edit_items: [Item; 5] = [
@@ -164,8 +197,12 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
         ("Copy", "Ctrl+C", Box::new(Copy)),
         ("Paste", "Ctrl+V", Box::new(Paste)),
     ];
-    let cascade = edit.then(|| {
+    let cascade = cascade.map(|shown| {
         let mut p = panel(m);
+        if shown == Cascade::View {
+            let it: Item = ("Code Panel", "Ctrl+E", Box::new(TogglePanel));
+            return p.child(item(m, it, true, set(false, None)));
+        }
         for (i, it) in edit_items.into_iter().enumerate() {
             if i == 2 {
                 p = p.child(separator(m));
@@ -178,7 +215,7 @@ fn app_menu(m: &MenuStyle, state: &Entity<MenuState>, edit: bool, session: &Sess
                 session.can_copy(),
                 session.can_paste(),
             ][i];
-            p = p.child(item(m, it, enabled, set(false, false)));
+            p = p.child(item(m, it, enabled, set(false, None)));
         }
         p
     });

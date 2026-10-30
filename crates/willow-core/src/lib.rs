@@ -1,6 +1,7 @@
 //! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
 
 mod chain;
+mod check;
 mod draw;
 mod edit;
 mod format;
@@ -10,10 +11,12 @@ mod input;
 mod layout;
 mod recovery;
 mod session;
+mod syntax;
 mod theme;
 mod zoom;
 
 pub use chain::{Link, Side, side};
+pub use check::{LineKind, check};
 pub use draw::{Appear, Connector, Frame, LinkDrag, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
@@ -21,13 +24,14 @@ pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
 pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{
-    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, ResizeTo,
-    Session, Shortcut, Viewport,
+    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Panel,
+    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck, TextChecked,
+    Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle, MenuStyle,
-    MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle, TabPickerStyle,
-    Theme, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
+    MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle,
+    TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

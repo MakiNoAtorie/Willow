@@ -17,6 +17,13 @@ mod link;
 mod midpoints;
 mod nav;
 mod nudge;
+mod panel;
+mod panel_apply;
+#[cfg(test)]
+mod panel_apply_tests;
+mod panel_direction;
+mod panel_edit;
+mod panel_select;
 mod push;
 mod select;
 mod tab_picker;
@@ -36,6 +43,8 @@ use crate::zoom::{Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
 pub use editing::{CaretView, Editing};
+pub use panel::{Panel, PanelRow, Regenerated, Regeneration, Span};
+pub use panel_apply::{TextCheck, TextChecked};
 
 /// Which part of the canvas the screen shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -242,6 +251,8 @@ pub struct Session {
     tab_picker: bool,
     /// Arrow presses still panning the view (keyboard pan).
     key_pan: Vec<keypan::Press>,
+    /// The code panel.
+    panel: panel::Panel,
 }
 
 impl Session {
@@ -255,6 +266,7 @@ impl Session {
             follow: None,
             tab_picker: false,
             key_pan: Vec::new(),
+            panel: Session::new_panel(theme),
             doc,
             history: History::default(),
             theme,
@@ -458,6 +470,7 @@ impl Session {
         // Drop rings that have finished fading out.
         self.rings.retain(|_, r| r.to > 0.0 || !r.done(now, fade));
         self.selected = ids;
+        self.panel_follow_selection();
     }
 
     /// The shape being dragged and its previewed top-left; the document still holds the old one.
@@ -560,7 +573,8 @@ impl Session {
 
     /// Whether there is a document change to undo; the Undo menu item enables from it.
     pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
+        // Typed panel text Undo would apply or keep as a step first.
+        self.history.can_undo() || self.typed_since_step()
     }
 
     pub fn can_redo(&self) -> bool {
@@ -596,6 +610,7 @@ impl Session {
     /// Handles one input event at time `now` (any monotonic clock).
     pub fn handle(&mut self, input: Input, now: Duration) -> Response {
         let revision = self.history.revision();
+        let text = self.panel.versions.now;
         let pointer = matches!(
             input,
             Input::PointerDown { .. } | Input::PointerMove { .. } | Input::PointerUp { .. }
@@ -608,6 +623,9 @@ impl Session {
                 self.end_gesture();
                 r.cursor = self.respond(false).cursor;
             }
+        } else if self.panel.versions.now != text {
+            // Typing in the panel.
+            self.changed(now);
         }
         r
     }
@@ -633,10 +651,16 @@ impl Session {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
             Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
-            _ => self.unmark(),
+            _ => {
+                self.unmark();
+                self.panel_unmark();
+            }
         }
         if let Input::PointerMove { pos, .. } | Input::PointerDown { pos, .. } = input {
             self.pointer = Some(pos);
+        }
+        if let Some(r) = self.panel_input(&input) {
+            return r;
         }
         // The Tab picker closes first: it takes every key, and a click closes it and acts.
         if self.tab_picker
@@ -1013,11 +1037,13 @@ impl Session {
                 self.respond(true)
             }
             Input::Undo | Input::Redo => {
+                self.keep_typing();
                 if input == Input::Undo {
                     self.history.undo(&mut self.doc);
                 } else {
                     self.history.redo(&mut self.doc);
                 }
+                self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
                 // Undone pushes jump back; a slide still running would draw them off.
@@ -1040,7 +1066,11 @@ impl Session {
                 self.open_tab_picker();
                 self.respond(true)
             }
-            Input::PickSide(_) => self.respond(false),
+            // The panel took its inputs first (`panel_input`).
+            Input::PickSide(_) | Input::TogglePanel | Input::FocusPanel | Input::ScrollPanel(_) => {
+                self.respond(false)
+            }
+            Input::TripleClick { .. } => self.respond(false),
             Input::SelectChain => {
                 self.select_chain();
                 self.respond(true)

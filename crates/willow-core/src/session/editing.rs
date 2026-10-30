@@ -217,8 +217,7 @@ impl Session {
     /// How long after `now` the caret next changes (a blink edge, or turning solid); `None`
     /// once nothing will change by itself. The app redraws then, on a timer, not every frame.
     pub fn next_wake(&self, now: Duration) -> Option<Duration> {
-        let e = self.editing.as_ref()?;
-        let (c, since) = (&self.theme.caret, now.saturating_sub(e.since));
+        let (c, since) = (&self.theme.caret, now.saturating_sub(self.caret_since()?));
         if since >= c.idle {
             return None;
         }
@@ -226,14 +225,27 @@ impl Session {
         Some(edge.min(c.idle) - since)
     }
 
-    fn blinking(&self, now: Duration) -> bool {
-        (self.editing.as_ref()).is_some_and(|e| now.saturating_sub(e.since) < self.theme.caret.idle)
+    /// When the caret last moved or its text changed: the code panel's while it has focus,
+    /// else the edited text's.
+    fn caret_since(&self) -> Option<Duration> {
+        if self.panel.focused {
+            return Some(self.panel.edit.since);
+        }
+        self.editing.as_ref().map(|e| e.since)
+    }
+
+    /// Whether a caret shows at `now`: off during the blink's hidden half.
+    pub(super) fn caret_shown(&self, now: Duration) -> bool {
+        let Some(since) = self.caret_since() else {
+            return true;
+        };
+        let (c, since) = (&self.theme.caret, now.saturating_sub(since));
+        since >= c.idle || (since.as_millis() / c.blink.as_millis()) % 2 == 0
     }
 
     /// The caret to draw at `now`, while editing.
     pub fn caret(&self, now: Duration) -> Option<CaretView> {
-        let e = self.editing.as_ref()?;
-        let (t, since) = (self.theme, now.saturating_sub(e.since));
+        let (e, t) = (self.editing.as_ref()?, self.theme);
         let (pos, height) = if e.zone {
             (self.title_point(e.caret.offset)?, self.title_line())
         } else {
@@ -248,8 +260,7 @@ impl Session {
         Some(CaretView {
             pos,
             height,
-            visible: !self.blinking(now)
-                || (since.as_millis() / t.caret.blink.as_millis()) % 2 == 0,
+            visible: self.caret_shown(now),
         })
     }
 
@@ -273,9 +284,12 @@ impl Session {
         })
     }
 
-    /// Whether Cut and Copy have something to act on: text selected in the edited shape, or
-    /// with nothing edited, selected shapes.
+    /// Whether Cut and Copy have something to act on: text selected in the code panel while
+    /// it has focus, else in the edited shape, or with nothing edited, selected shapes.
     pub fn can_cut(&self) -> bool {
+        if self.panel.focused {
+            return !self.panel.selection().is_empty();
+        }
         !self.text_selection().is_empty() || (self.editing.is_none() && !self.selected.is_empty())
     }
 
@@ -283,7 +297,7 @@ impl Session {
         self.can_cut()
     }
 
-    /// Whether Paste has somewhere to go: always, into the edited shape or onto the canvas.
+    /// Whether Paste has somewhere to go: the code panel, the edited shape or the canvas.
     pub fn can_paste(&self) -> bool {
         true
     }

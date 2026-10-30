@@ -14,11 +14,7 @@ use crate::{Content, Willow, file, open_window};
 
 /// `~/Library/Application Support/Willow/Recovery` or `%APPDATA%\Willow\Recovery`.
 fn dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let base = PathBuf::from(std::env::var_os("APPDATA")?);
-    #[cfg(not(windows))]
-    let base = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
-    Some(base.join("Willow").join("Recovery"))
+    Some(crate::prefs::app_dir()?.join("Recovery"))
 }
 
 fn file_of(dir: &Path, id: &str, ext: &str) -> PathBuf {
@@ -86,14 +82,18 @@ impl Autosave {
 struct Pending {
     /// The document's file, written to `<id>.path`.
     path: Option<PathBuf>,
-    document: Document,
-    heights: Vec<f32>,
+    /// `Recovery::Write` or `Text`.
+    write: Recovery,
 }
 
 impl Pending {
     /// Writes `<id>.path` then `<id>.willow`.
     fn write(self, dir: &Path, id: &str) {
-        let text = willow_core::save(&self.document, &self.heights);
+        let text = match self.write {
+            Recovery::Write { document, heights } => willow_core::save(&document, &heights),
+            Recovery::Text(text) => text,
+            Recovery::Delete => return,
+        };
         let path = self
             .path
             .map_or(String::new(), |p| p.to_string_lossy().into());
@@ -133,16 +133,12 @@ impl Willow {
             // ponytail: clones the document on the UI thread; share it (Arc) if that shows up
             // in frame times on very large documents.
             match self.session.take_recovery(now) {
-                Some(Recovery::Write { document, heights }) => {
+                Some(Recovery::Delete) => a.run(remove, cx).detach(),
+                Some(write) => {
                     let path = self.path.clone();
-                    let pending = Pending {
-                        path,
-                        document,
-                        heights,
-                    };
+                    let pending = Pending { path, write };
                     a.run(|dir, id| pending.write(dir, id), cx).detach();
                 }
-                Some(Recovery::Delete) => a.run(remove, cx).detach(),
                 None => {}
             }
         }
@@ -199,18 +195,11 @@ pub(crate) fn launch(cx: &mut App) {
         }
         for r in plan.open {
             // An unreadable recovery file stays where it is.
-            let bytes = fs::read(file_of(dir, &r.id, "willow"));
-            let Ok(mut loaded) = bytes.map_err(|_| ()).and_then(|b| load(&b).map_err(|_| ()))
-            else {
+            let bytes = fs::read(file_of(dir, &r.id, "willow")).ok();
+            let Some((loaded, bytes)) = bytes.and_then(|b| Some((load(&b).ok()?, b))) else {
                 continue;
             };
-            // Starts unsaved, like a repaired load.
-            loaded.repaired = true;
-            open_window(
-                Content::new(loaded, Vec::new(), r.path, Some(r.id)),
-                None,
-                cx,
-            );
+            open_window(Content::new(loaded, bytes, r.path, Some(r.id)), None, cx);
             opened = true;
         }
     }

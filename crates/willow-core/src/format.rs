@@ -1,22 +1,35 @@
 //! The `.willow` text format: `save` writes canonical text, `load` reads it back.
 
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{self, Write};
 
+use crate::check::{LineKind, check};
 use crate::edit::build;
 use crate::{
-    Color, DEFAULT_WIDTH, Document, Link, Point, RichText, Shape, ShapeId, Side, Theme, Zone, side,
+    Color, DEFAULT_WIDTH, Document, Link, Point, RichText, Shape, ShapeId, Side, Theme, side,
 };
 
-/// A loaded file: its document, and whether loading had to repair anything (which leaves
-/// the document unsaved).
+/// Loaded text: the document built from the lines that parse, whether loading had to repair
+/// or drop anything (which, with no invalid line, leaves the document unsaved), and what each
+/// line is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Loaded {
     pub document: Document,
     pub repaired: bool,
     /// What the file gave no layout; `Session::open` places it, since that needs heights.
     pub unplaced: Unplaced,
+    /// One per line of the text (`str::lines`), the header first; `check` gives at least one.
+    pub lines: Vec<LineKind>,
+    /// For each shape (by index in `document`), the shape its line links to and the side of
+    /// it the shape is stated to sit on: the line's direction word.
+    pub sides: Vec<Option<(usize, Side)>>,
+}
+
+impl Loaded {
+    /// Some line is invalid: the text holds the document, and edits to it are held back.
+    pub fn invalid(&self) -> bool {
+        self.lines.contains(&LineKind::Invalid)
+    }
 }
 
 /// Shapes and zones (indices into the loaded document) still to be placed.
@@ -24,8 +37,8 @@ pub struct Loaded {
 pub struct Unplaced {
     /// Each shape, and the shape it goes beside and on which side of it; `None` goes below
     /// the lowest shape.
-    shapes: Vec<(usize, Option<(usize, Side)>)>,
-    zones: Vec<usize>,
+    pub(crate) shapes: Vec<(usize, Option<(usize, Side)>)>,
+    pub(crate) zones: Vec<usize>,
 }
 
 /// Why a file can't open. `Display` is the reason an alert names.
@@ -48,14 +61,8 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Reads a file's bytes. CRLF line endings, a leading byte order mark and whitespace after
-/// the header are accepted as they are, not as repairs.
-/// Shapes stack in the order their lines appear. Links resolve after the whole file, so they
-/// may point forward. Lines it can't read are dropped; a line reusing a taken ID is dropped;
-/// a zone inside a nested zone is flattened into it; links to missing shapes or closing a
-/// cycle are dropped; a chain stating two colors takes the first in the file (where the writer
-/// puts it); shapes and zones without layout are listed in `unplaced`.
-/// All of these count as repairs.
+/// Reads a file's bytes: an error for anything but UTF-8 text with a `willow 1` header, else
+/// `check` of the text.
 pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| LoadError::NotUtf8)?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
@@ -74,110 +81,7 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
             LoadError::NotWillow
         });
     }
-    let mut doc = Document::default();
-    let (mut layout, mut repaired) = (HashMap::new(), false);
-    // Open zone blocks (indices into `doc.zones`; `None` for a dropped zone line), each
-    // shape's stated link and color, and every ID taken so far.
-    let (mut open, mut stated): (Vec<Option<usize>>, _) = (Vec::new(), Vec::new());
-    let mut seen = HashSet::new();
-    for line in lines.map(str::trim).filter(|l| !l.is_empty()) {
-        // Members join the innermost zone still standing.
-        let inner = open.iter().rev().find_map(|z| *z);
-        if let Some(rest) = line.strip_prefix("@layout ") {
-            match parse_layout(rest) {
-                Some((id, l, whole)) => {
-                    let (l, fine) = l.clamped();
-                    repaired |= !whole || !fine;
-                    match layout.entry(id) {
-                        Entry::Vacant(e) => _ = e.insert(l),
-                        Entry::Occupied(_) => repaired = true,
-                    }
-                }
-                None => repaired = true,
-            }
-        } else if line == "}" {
-            repaired |= open.pop().is_none();
-        } else if let Some((id, title, color)) = line.strip_prefix("zone ").and_then(parse_zone) {
-            // A zone inside a nested zone is flattened: its members join its parent.
-            let deep = open.iter().flatten().count() >= 2;
-            if deep || !seen.insert(id) {
-                repaired = true;
-                open.push(None);
-                continue;
-            }
-            if let Some(p) = inner {
-                doc.zones[p].members.push(ShapeId(id.into()));
-            }
-            open.push(Some(doc.zones.len()));
-            doc.zones.push(Zone {
-                id: ShapeId(id.into()),
-                title,
-                color,
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-                members: Vec::new(),
-            });
-        } else if let Some((id, text, rest)) = parse_shape(line) {
-            if !seen.insert(id) {
-                repaired = true;
-                continue;
-            }
-            let mut s = Shape::new(ShapeId(id.into()), 0, 0);
-            s.text = text;
-            if let Some(z) = inner {
-                doc.zones[z].members.push(s.id.clone());
-            }
-            doc.shapes.push(s);
-            let (to, color, whole) = parse_tail(rest);
-            repaired |= !whole;
-            stated.push((to, color));
-        } else {
-            repaired = true;
-            // An unreadable line opening a block still takes the `}` closing it.
-            if line.ends_with('{') {
-                open.push(None);
-            }
-        }
-    }
-    repaired |= !open.is_empty();
-    let mut missing = vec![false; doc.shapes.len()];
-    for (i, s) in doc.shapes.iter_mut().enumerate() {
-        match layout.remove(s.id.0.as_str()) {
-            Some(Place::Shape(x, y, w, h)) => (s.x, s.y, s.width, s.extra_height) = (x, y, w, h),
-            _ => missing[i] = true,
-        }
-    }
-    let mut unplaced = Unplaced::default();
-    for (i, z) in doc.zones.iter_mut().enumerate() {
-        match layout.remove(z.id.0.as_str()) {
-            Some(Place::Zone(x, y, w, h)) => (z.x, z.y, z.width, z.height) = (x, y, w, h),
-            _ => unplaced.zones.push(i),
-        }
-    }
-    repaired |= !layout.is_empty();
-    let (dropped, anchor) = resolve(&mut doc, &stated);
-    // A shape goes beside the shape it names, or else beside a placed one naming it.
-    let mut named_by = vec![None; doc.shapes.len()];
-    for (k, a) in anchor.iter().enumerate() {
-        if let Some((j, side)) = *a
-            && missing[j]
-            && !missing[k]
-        {
-            named_by[j].get_or_insert((k, side.opposite()));
-        }
-    }
-    unplaced.shapes = (0..doc.shapes.len())
-        .filter(|&i| missing[i])
-        .map(|i| (i, anchor[i].or(named_by[i])))
-        .collect();
-    repaired |= dropped || unplaced != Unplaced::default();
-    Ok(Loaded {
-        document: doc,
-        repaired,
-        unplaced,
-    })
+    Ok(check(text))
 }
 
 /// Places what `unplaced` lists. `height` measures a shape.
@@ -302,63 +206,13 @@ pub(crate) fn wrap(
     Some((x as i32, y as i32, w as u32, h as u32))
 }
 
-/// Links each shape to the one it names and paints every chain the first color one of its
-/// shapes states in the file. Whether anything had to be dropped or a chain stated two
-/// colors, and for each shape the shape its kept link names and the side of it the shape
-/// sits on.
-#[allow(clippy::type_complexity)]
-fn resolve(
-    doc: &mut Document,
-    stated: &[(Option<(&str, Side)>, Option<Color>)],
-) -> (bool, Vec<Option<(usize, Side)>>) {
-    let index: HashMap<&str, usize> = (doc.shapes.iter().enumerate())
-        .map(|(i, s)| (s.id.0.as_str(), i))
-        .collect();
-    let mut root: Vec<usize> = (0..doc.shapes.len()).collect();
-    fn find(root: &mut [usize], mut i: usize) -> usize {
-        while root[i] != i {
-            root[i] = root[root[i]];
-            i = root[i];
-        }
-        i
-    }
-    let (mut repaired, mut anchor) = (false, vec![None; stated.len()]);
-    for (i, (to, _)) in stated.iter().enumerate() {
-        let Some((to, side)) = to else { continue };
-        let Some(&j) = index.get(to) else {
-            repaired = true;
-            continue;
-        };
-        let (a, b) = (find(&mut root, i), find(&mut root, j));
-        if a == b {
-            repaired = true;
-            continue;
-        }
-        root[a] = b;
-        anchor[i] = Some((j, *side));
-        let link = Link(doc.shapes[j].id.clone(), doc.shapes[i].id.clone());
-        doc.links.push(link);
-    }
-    // Each chain's first stated color; stating another is a repair.
-    let mut color: Vec<Option<Color>> = vec![None; doc.shapes.len()];
-    for (i, &(_, c)) in stated.iter().enumerate() {
-        let Some(c) = c else { continue };
-        let r = find(&mut root, i);
-        repaired |= *color[r].get_or_insert(c) != c;
-    }
-    for (i, shape) in doc.shapes.iter_mut().enumerate() {
-        shape.color = color[find(&mut root, i)].unwrap_or_default();
-    }
-    (repaired, anchor)
-}
-
-fn is_id(id: &str) -> bool {
+pub(crate) fn is_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase())
 }
 
 /// A shape's x, y, width and extra height, or a zone's x, y, width and height.
 #[derive(Clone, Copy, PartialEq)]
-enum Place {
+pub(crate) enum Place {
     Shape(i32, i32, u32, u32),
     Zone(i32, i32, u32, u32),
 }
@@ -370,7 +224,7 @@ const LIMIT: i32 = 500_000_000;
 impl Place {
     /// Coordinates and sizes clamped to `LIMIT`, a zero shape width made the default; and
     /// whether nothing changed.
-    fn clamped(self) -> (Place, bool) {
+    pub(crate) fn clamped(self) -> (Place, bool) {
         let at = |v: i32| v.clamp(-LIMIT, LIMIT);
         let size = |v: u32| v.min(LIMIT as u32);
         let fixed = match self {
@@ -384,7 +238,7 @@ impl Place {
 
 /// `id x,y wW [hH]` for a shape, `id x,y WxH` for a zone. A bare `id x,y` is a shape of the
 /// default width, and not whole (a repair).
-fn parse_layout(rest: &str) -> Option<(&str, Place, bool)> {
+pub(crate) fn parse_layout(rest: &str) -> Option<(&str, Place, bool)> {
     let mut t = rest.split(' ');
     let id = t.next().filter(|id| is_id(id))?;
     let (x, y) = t.next()?.split_once(',')?;
@@ -412,7 +266,7 @@ fn parse_layout(rest: &str) -> Option<(&str, Place, bool)> {
 /// to with the side of it this shape sits on, the stated color, and whether all of it read
 /// (a bad link or color drops only itself).
 #[allow(clippy::type_complexity)]
-fn parse_tail(rest: &str) -> (Option<(&str, Side)>, Option<Color>, bool) {
+pub(crate) fn parse_tail(rest: &str) -> (Option<(&str, Side)>, Option<Color>, bool) {
     let t: Vec<&str> = rest.split_whitespace().collect();
     let (to, t) = match t.as_slice() {
         ["below", to, t @ ..] => (Some((*to, Side::Bottom)), t),
@@ -436,7 +290,7 @@ fn parse_color(t: &[&str]) -> Option<Option<Color>> {
 }
 
 /// `id "Title" [color name] {` (after `zone `).
-fn parse_zone(rest: &str) -> Option<(&str, String, Color)> {
+pub(crate) fn parse_zone(rest: &str) -> Option<(&str, String, Color)> {
     let (id, rest) = rest.split_once(" \"")?;
     let (mut title, mut chars) = (String::new(), rest.chars());
     loop {
@@ -456,8 +310,9 @@ fn parse_zone(rest: &str) -> Option<(&str, String, Color)> {
     is_id(id).then_some((id, title, parse_color(color)?.unwrap_or_default()))
 }
 
-/// `id: "text"` and whatever follows the closing quote.
-fn parse_shape(line: &str) -> Option<(&str, RichText, &str)> {
+/// `id: "text"` and whatever follows the closing quote; `None` after a quote left open,
+/// which runs to the end of the line.
+pub(crate) fn parse_shape(line: &str) -> Option<(&str, RichText, Option<&str>)> {
     let (id, rest) = line.split_once(": \"")?;
     if !is_id(id) {
         return None;
@@ -465,9 +320,13 @@ fn parse_shape(line: &str) -> Option<(&str, RichText, &str)> {
     let (mut plain, mut styles, mut style) = (String::new(), Vec::new(), (false, false));
     let mut chars = rest.chars();
     loop {
-        let ch = match chars.next()? {
-            '"' => return Some((id, build(&plain, &styles), chars.as_str())),
-            '\\' => match chars.next()? {
+        let Some(ch) = chars.next() else {
+            return Some((id, build(&plain, &styles), None));
+        };
+        let ch = match ch {
+            '"' => return Some((id, build(&plain, &styles), Some(chars.as_str()))),
+            // A backslash ending the line escapes nothing.
+            '\\' => match chars.next().unwrap_or('\\') {
                 'n' => '\n',
                 c => c,
             },
@@ -765,7 +624,7 @@ fn escape(out: &mut String, s: &str) {
 
 /// Text inside the quotes: escapes, `\n` between paragraphs, and style markers that toggle
 /// on each change, closed before each `\n` and reopened after.
-fn text(t: &RichText) -> String {
+pub(crate) fn text(t: &RichText) -> String {
     let mut out = String::new();
     for (i, p) in t.paragraphs.iter().enumerate() {
         if i > 0 {
