@@ -643,12 +643,13 @@ fn paint_caret(
     origin: gpui::Point<Pixels>,
     c: willow_core::CaretView,
     t: &Theme,
+    ink: Rgba,
     z: f32,
     k: f32,
 ) {
     let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
     let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-    window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
+    window.paint_quad(gpui::fill(b, color(ink).opacity(k)));
 }
 
 /// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
@@ -734,7 +735,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             zone_bounds(&v.zone),
             px(zt.radius * z),
             color(v.fill),
-            px(zt.edge_width * z),
+            px(frame.zone_edge * z),
             color(v.edge),
             Default::default(),
         ));
@@ -758,10 +759,14 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     }
     let sel = &t.selection;
     for v in frame.zones.iter().filter(|v| v.show_title) {
+        if let (Some((a, c)), Some(p)) = (v.pill, zt.pill) {
+            let b = Bounds::from_corners(at(a), at(c));
+            window.paint_quad(gpui::fill(b, color(p.fill)).corner_radii(b.size.height / 2.0));
+        }
         for (a, c) in &v.selection {
             window.paint_quad(gpui::fill(
                 Bounds::from_corners(at(*a), at(*c)),
-                color(sel.text),
+                color(zt.pill.map_or(sel.text, |p| p.selection)),
             ));
         }
         text::paint_line(
@@ -778,10 +783,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
                 at(a),
                 size(px((c.x - a.x) * z), px(t.caret.marked_underline)),
             );
-            window.paint_quad(gpui::fill(b, color(t.ink)));
+            window.paint_quad(gpui::fill(b, color(t.title_ink())));
         }
         if let Some(c) = v.caret {
-            paint_caret(window, origin, c, t, z, 1.0);
+            let ink = zt.pill.map_or(t.caret.color, |p| p.ink);
+            paint_caret(window, origin, c, t, ink, z, 1.0);
         }
     }
     let width = frame.connector_width * z;
@@ -791,9 +797,9 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
         if c.hovered {
-            line(window, p, q, hover_width, hover);
+            capped_line(window, p, q, hover_width, hover, cs.square);
         } else {
-            line(window, p, q, width, ink);
+            capped_line(window, p, q, width, ink, cs.square);
         }
     }
 
@@ -827,7 +833,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
                 .for_each(|s| s.color = s.color.opacity(k));
             window.paint_drop_shadows(b, Corners::all(radius), &shadows);
         }
-        if ring > 0.0 {
+        if ring > 0.0 && sel.gap + sel.ring > 0.0 {
             // As the mockups' box-shadow spreads: a canvas gap, then the accent ring, both growing.
             let out = (sel.gap + sel.ring) * ring * z;
             let ring_bounds = b.dilate(px(out));
@@ -844,8 +850,8 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             b,
             radius,
             color(v.fill).opacity(k),
-            px(0.),
-            gpui::transparent_black(),
+            px(frame.shape_border * z),
+            color(t.shape.border_color).opacity(k),
             Default::default(),
         ));
         if t.shape.tab > 0.0 {
@@ -890,13 +896,13 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }
         }
         if let Some(c) = v.caret {
-            paint_caret(window, origin, c, t, z, k);
+            paint_caret(window, origin, c, t, t.caret.color, z, k);
         }
     }
 
     // A link drag's band over every shape, in the hovered connector's style.
     if let Some(l) = frame.link_drag {
-        line(window, at(l.from), at(l.to), hover_width, hover);
+        capped_line(window, at(l.from), at(l.to), hover_width, hover, cs.square);
     }
 
     // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
@@ -995,7 +1001,12 @@ fn paint_tab_picker(
         let half = point(px(t.size / 2.0), px(t.size / 2.0));
         let b = Bounds::new(c - half, size(px(t.size), px(t.size)));
         window.paint_drop_shadows(b, Corners::all(px(t.radius)), &shadow);
-        window.paint_quad(gpui::fill(b, color(t.fill)).corner_radii(px(t.radius)));
+        window.paint_quad(
+            gpui::fill(b, color(t.fill))
+                .corner_radii(px(t.radius))
+                .border_widths(px(t.border))
+                .border_color(color(t.border_color)),
+        );
         // The arrow: a shaft and two wings at its tip.
         let (g, ink) = (t.glyph_size / 2.0, color(t.glyph));
         let at = |a: f32, b: f32| c + point(px(dx * a - dy * b), px(dy * a + dx * b));
@@ -1032,6 +1043,18 @@ fn line(
     width: f32,
     ink: Hsla,
 ) {
+    capped_line(window, p, q, width, ink, false);
+}
+
+/// `line`, with square caps if `square`; the quad it draws for a straight line has them anyway.
+fn capped_line(
+    window: &mut Window,
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+    ink: Hsla,
+    square: bool,
+) {
     let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
     if dx.max(dy) < 1.0 {
         // Under a pixel long: nothing to see.
@@ -1044,12 +1067,30 @@ fn line(
         window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
         return;
     }
+    let (p, q) = if square {
+        square_ends(p, q, width)
+    } else {
+        (p, q)
+    };
     let mut path = gpui::PathBuilder::stroke(px(width));
     path.move_to(p);
     path.line_to(q);
     if let Ok(path) = path.build() {
         window.paint_path(path, ink);
     }
+}
+
+/// `p` and `q` pushed apart by half of `width`: a butt-capped stroke drawn between them has
+/// square caps.
+fn square_ends(
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+) -> (gpui::Point<Pixels>, gpui::Point<Pixels>) {
+    let (dx, dy) = (f32::from(q.x - p.x), f32::from(q.y - p.y));
+    let k = width / 2.0 / dx.hypot(dy);
+    let d = point(px(dx * k), px(dy * k));
+    (p - d, q + d)
 }
 
 /// The resting shadow eased toward the selected one by `k` (0 to 1), scaled by zoom `z`.
@@ -1359,7 +1400,7 @@ fn bundled_fonts() -> Vec<Cow<'static, [u8]>> {
         include_bytes!("../assets/CourierPrime-BoldItalic.ttf").as_slice(),
         include_bytes!("../assets/SpaceGrotesk-Medium.ttf").as_slice(),
         include_bytes!("../assets/SpaceGrotesk-Bold.ttf").as_slice(),
-        include_bytes!("../assets/SpaceGrotesk-Italic.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-MediumItalic.ttf").as_slice(),
         include_bytes!("../assets/SpaceGrotesk-BoldItalic.ttf").as_slice(),
     ]
     .map(Cow::Borrowed)
@@ -1432,4 +1473,15 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
         },
     )
     .expect("open window");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_square_cap_extends_a_line_half_its_width_along_itself() {
+        let (p, q) = square_ends(point(px(0.), px(0.)), point(px(30.), px(40.)), 10.0);
+        assert_eq!((p, q), (point(px(-3.), px(-4.)), point(px(33.), px(44.))));
+    }
 }

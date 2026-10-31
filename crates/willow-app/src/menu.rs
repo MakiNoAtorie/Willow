@@ -126,6 +126,8 @@ fn colors(
                 .flex_none()
                 .rounded(px(m.swatch_radius))
                 .bg(color(session.theme().picker[c as usize]))
+                .border(px(m.swatch_edge))
+                .border_color(ring)
                 .when(current == Some(c), |d| {
                     d.shadow(vec![
                         gpui::BoxShadow {
@@ -169,6 +171,19 @@ fn shortcut(s: Shortcut) -> String {
     }
 }
 
+/// The panel's width.
+fn width(m: &willow_core::MenuStyle, entries: &[MenuEntry]) -> f32 {
+    let n = Color::ALL.len() as f32;
+    let row = n * m.swatch + (n - 1.0) * m.swatch_gap + 2.0 * (m.item_pad_x + m.padding);
+    match entries
+        .iter()
+        .any(|e| matches!(e, MenuEntry::Colors { .. }))
+    {
+        true => row.max(m.min_width),
+        false => m.min_width,
+    }
+}
+
 /// Width and height the panel will take, for keeping it inside the canvas.
 fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
     let row = m.font_size * m.line_height + 2.0 * m.item_pad_y;
@@ -182,5 +197,21 @@ fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
             MenuEntry::Colors { .. } => m.swatch + 2.0 * m.item_pad_y,
         })
         .sum::<f32>();
-    (m.min_width, h + 2.0 * m.padding)
+    (width(m, &menu.entries), h + 2.0 * m.padding)
+}
+
+#[cfg(test)]
+mod tests {
+    use willow_core::{PAPER, POSTER};
+
+    use super::*;
+
+    #[test]
+    fn a_color_row_wider_than_the_minimum_widens_the_menu() {
+        let colors = [MenuEntry::Colors { current: None }];
+        // Seven 22 swatches, six 7 gaps, 10 and 6 padding either side.
+        assert_eq!(width(&POSTER.menu, &colors), 228.0);
+        assert_eq!(width(&POSTER.menu, &[MenuEntry::Separator]), 200.0);
+        assert_eq!(width(&PAPER.menu, &colors), 200.0);
+    }
 }

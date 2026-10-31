@@ -292,7 +292,7 @@ impl Session {
     /// The color `id` is fading in from and how far along (eased, 0 to 1), while it ripples.
     pub(crate) fn rippling(&self, id: &ShapeId, now: Duration) -> Option<(Color, f32)> {
         let r = self.ripples.get(id)?;
-        let p = self.theme.ripple.fade.progress(now.saturating_sub(r.start));
+        let p = self.theme.ripple.progress(now.saturating_sub(r.start));
         (now < r.start + self.theme.ripple.fade.duration).then_some((r.from, p))
     }
 

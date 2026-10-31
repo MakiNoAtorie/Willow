@@ -435,7 +435,7 @@ Every shape keeps a gap from every other shape: the creation gap between two lin
 ### Themes and alignment
 
 - Add Desk and Poster and View > Theme, matching `design/visual-language.md` and their Phase 1 mockups. Both use Paper's gaps, so a switch reflows only through fonts.
-- Bundle Courier Prime and Space Grotesk (Medium and Bold). Space Grotesk has no italic and GPUI doesn't fake one, so slanted Regular and Bold faces are generated once from the font and bundled as TTFs.
+- Bundle Courier Prime and Space Grotesk (Medium and Bold). Space Grotesk has no italic and GPUI doesn't fake one, so slanted Medium and Bold faces are generated once from the font and bundled as TTFs.
 - Add View > Text Alignment (see Text alignment).
 
 ### Menus

@@ -29,6 +29,10 @@ pub struct Frame<'a> {
     pub connectors: Vec<Connector>,
     /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
     pub connector_width: f32,
+    /// Shape border and zone edge widths in canvas units, for `ShapeStyle::border_color` and
+    /// `VisibleZone::edge`: the theme's, or `Theme.border_min_screen` if wider.
+    pub shape_border: f32,
+    pub zone_edge: f32,
     /// Shapes intersecting the rectangle, in draw order (later on top).
     pub shapes: Vec<Visible<'a>>,
     /// Shape text opacity: 1 at `fade_start` and above, 0 at `fade_end` and below.
@@ -96,6 +100,9 @@ pub struct VisibleZone<'a> {
     /// letter in canvas units.
     pub text: String,
     pub title_spacing: f32,
+    /// `ZoneStyle::pill`'s capsule behind a shown title with text or being edited: top-left and
+    /// bottom-right in canvas units.
+    pub pill: Option<(Point, Point)>,
     /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
     /// edited; else paint none.
     pub show_title: bool,
@@ -126,7 +133,8 @@ pub struct Visible<'a> {
     /// scaled by the ring); hit-testing ignores it.
     pub lift: Point,
     pub layout: Rc<Layout>,
-    /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out.
+    /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out. An
+    /// overshooting `SelectionStyle::fade` passes both ends on the way.
     pub ring: f32,
     /// While text shows, on the edited shape only: the text selection highlight in canvas
     /// units, one (top-left, bottom-right) per line; the IME marked text; and the caret,
@@ -258,11 +266,18 @@ impl Session {
                 VisibleZone {
                     nested,
                     fill: mix(t.canvas, source, fill),
-                    edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
+                    edge: zt.edge_color.unwrap_or(mix(
+                        pastel,
+                        t.picker[zone.color as usize],
+                        zt.edge_mix,
+                    )),
                     title_at: self.title_at(&zone),
                     title_size,
                     text: title_text(zt, &zone.title).into_owned(),
                     title_spacing: zt.title_spacing * title_size,
+                    pill: (e.is_some() || !zone.title.is_empty())
+                        .then(|| self.title_pill(&zone, title_size))
+                        .flatten(),
                     show_title: e.is_some()
                         || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
                             <= zone.width as f32,
@@ -289,7 +304,8 @@ impl Session {
                 let ring = if target == Some(&s.id) { 1.0 } else { ring };
                 let e = edited.filter(|e| e.id == s.id);
                 let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
-                    opacity: k,
+                    // `k` passes 1 on a curve that overshoots.
+                    opacity: k.min(1.0),
                     dy: t.create.rise * (1.0 - k),
                     scale: t.create.scale + (1.0 - t.create.scale) * k,
                 });
@@ -322,12 +338,15 @@ impl Session {
             })
             .collect();
         let full = vp.zoom >= z.fade_end;
+        let border = t.border_min_screen / vp.zoom;
         Frame {
             zones,
             zone_ring: self.drop_zone().or(self.band_ring()),
             zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
+            shape_border: t.shape.border.max(border),
+            zone_edge: t.zone.edge_width.max(border),
             shapes,
             text_opacity: fade,
             deepen,
@@ -356,6 +375,24 @@ impl Session {
             x: zone.x as f32 + zt.title_x * k,
             y: zone.y as f32 + zt.title_y * k,
         }
+    }
+
+    /// The capsule around `zone`'s title at `size`: top-left and bottom-right in canvas units.
+    fn title_pill(&self, zone: &Zone, size: f32) -> Option<(Point, Point)> {
+        let t = self.theme();
+        let pill = t.zone.pill?;
+        let (at, k) = (self.title_at(zone), 1.0 / self.viewport().zoom.min(1.0));
+        let (x, y) = (pill.pad_x * k, pill.pad_y * k);
+        let width = self.title_width(&zone.title, size);
+        let from = Point {
+            x: at.x - x,
+            y: at.y - y,
+        };
+        let to = Point {
+            x: at.x + width + x,
+            y: at.y + t.line_height * size + y,
+        };
+        Some((from, to))
     }
 
     /// `title`'s width at `size`, canvas units. Measured on every draw: the app's word cache

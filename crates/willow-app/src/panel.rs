@@ -100,7 +100,8 @@ pub(crate) fn panel(session: &Session, cx: &mut Context<Willow>) -> Option<impl 
             let w = keys.read(cx);
             let caret = w.session.panel_caret(w.start.elapsed());
             if let Some(c) = caret.filter(|c| c.visible) {
-                paint_caret(window, bounds.origin, c, w.session.theme(), 1.0, 1.0);
+                let t = w.session.theme();
+                paint_caret(window, bounds.origin, c, t, t.caret.color, 1.0, 1.0);
             }
             // Typing and the IME go to the panel while it has the keys.
             if w.session.panel().focused {
