@@ -73,7 +73,7 @@ One of the four circles at a hovered shape's edge midpoints; click to create a l
 _Avoid_: Handle, port, anchor
 
 **Insert-and-push**:
-Creating a shape from a midpoint where a shape is already linked on that side: the new shape goes between them and that shape's subtree moves along.
+Creating a shape from a midpoint where a shape is already linked on that side: the new shape goes between them and that shape's subtree moves along, saved in the creation's undo step. The one push that writes placed positions.
 _Avoid_: Splice
 
 **Push**:
