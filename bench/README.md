@@ -1,6 +1,6 @@
 # Bench
 
-`cargo run --release -p willow-app -- --bench --machine NAME` appends rows to `results.csv` (columns `machine,git_rev,scenario,metric,value,unit`; `git_rev` is `git rev-parse --short HEAD` of the Willow checkout, or `unknown`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`. Keep the window on screen: a run that renders no frames waits forever (seen once in #88; the likely cause was a hidden window).
+`cargo run --release -p willow-app -- --bench --machine NAME [--theme Desk] [--shapes 50000]` appends rows to `results.csv` (columns `machine,git_rev,scenario,metric,value,unit`; `git_rev` is `git rev-parse --short HEAD` of the Willow checkout, or `unknown`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`. A Paper run on 10,000 shapes keeps the plain scenario names; a run in another theme ends them in `_desk` or `_poster`, a run on 50,000 shapes says `_50k` (`typing_50k`, `zone_drag_50k`). Keep the window on screen: a run that renders no frames waits forever (seen once in #88; the likely cause was a hidden window).
 
 Each `pan_zoom*_cold` row starts on a new session that has laid nothing out, with no idle `measure_ahead` running, so it times the first layout of every shape in view; the matching `_warm` row pans back over the same ground. No `measure_ahead` runs during any scenario after `open_first_frame`. Rows from `324dac2` to `4cf2ae8` ran their cold pans after `measure_ahead` had laid out much of the document, so those cold rows are not cold. `recovery_take` is the UI-thread part of an autosave (`Session::take_recovery`: clone the document, every shape's height).
 
@@ -50,3 +50,39 @@ A full pass (`Session::respace`: read every height, build chains and order, fix 
 - A keystroke that keeps the height costs next to nothing. The first version read every shape's height back on each key: 0.5 ms in a tight loop but 2 to 5 ms in a real frame, 40 ms after the last one, with `typing_10k` at p95 8.7 ms. The session now reads back only the shapes whose text changed (`History::text_changed_since`).
 - A cheap hash for cell coordinates saves about 0.3 ms a pass. One flat entry list instead of a `Vec` per cell saved 0.3 ms on the generated document and cost 3 ms on the crowded one, so the cells stayed `Vec`s.
 - `pan_zoom*_cold` `draw_max` is now one first frame of 21 to 42 ms that measures every shape for the pass. A real open does that before its first frame, so that row no longer describes a real frame; `idle_after_pan` is still 0 renders.
+
+## Every theme, 50,000 shapes and memory (`mba-m4`, #104, rows at `b5d7408`)
+
+One run per theme and one 50k run in Paper, on battery. Every 10,000-shape target holds in Paper, Desk and Poster:
+
+| Target | Paper | Desk | Poster |
+| --- | --- | --- | --- |
+| Pan and zoom `draw_p95`, worst warm row ≤ 8 ms (the 2% pan, below the UI's 10%) | 7.5 | 7.5 | 6.7 |
+| The same at 10% and up | 3.9 | 4.5 | 4.0 |
+| `typing_10k` `draw_max` ≤ 8 ms, no late frames | 3.6 | 2.9 | 3.7 |
+| `zone_drag` `draw_p95` ≤ 8 ms | 5.6 | 6.4 | 6.1 |
+| `save` ≤ 50 ms | 13.4 | 12.6 | 9.8 |
+| `load` ≤ 100 ms | 42 | 41 | 41 |
+| `panel_regen_10k` `run` ≤ 50 ms | 6.5 | 6.4 | 6.0 |
+| `recovery_take`, well under a frame (8 ms) | 3.8 | 3.5 | 3.8 |
+| `idle_*`: 0 renders, CPU % | 0.57–0.76 | 0.57–0.76 | 0.57–0.76 |
+
+What moved, measured by sampling the app during the pans:
+
+- `recovery_take` was 8.7–11 ms over six runs, 5.7 once: about half cloning the document, half walking every shape's layout for its height, both on a cold CPU. The spacing cache now keeps the heights: 3.2–5.1 ms, all of it the clone. `panel_regen_10k` `take` went from 2.3 to 1.5 ms. Its 8 ms is the ticket's reading of "well under one frame"; the spec gives no number.
+- `is_saved` compared the whole document on every render, for the title bar: a fifth of `Window::draw`, about 1 ms a frame. It now keeps the answer per revision.
+- Desk's weave is hundreds of crossing lines. By estimate from the draw times, each cost GPUI's overlap search about 6 µs, against 0.7 µs for a dot of Paper's grid: `typing_10k` `draw_p95` 6.9 ms and `draw_max` 8.65 ms, over the target. Painting the grid and weave in one GPUI layer skips the search: 2.7 and 2.9 ms now, and Desk's zoom sweep `draw_max` goes from 14 to about 4 ms. GPUI's sort is stable, so the picture should not change.
+- Together these took pan and zoom `draw_p95` from 4–6 ms to about 2.4 ms in every theme at 40% and up.
+- Not a hotspot: the title `String` per visible zone per frame (#101). `title_width` was 1% of `Window::draw` and `to_uppercase` 0.2% in Desk at 10–40%. The 2% pan wasn't sampled.
+- Poster's hard shadows cost nothing visible: its rows match Paper's.
+
+No target, for information:
+
+- `theme_switch_10k` `switch_max`: 57–62 ms, one frame that measures every shape in the new font and runs the pass. 175 ms on 50k.
+- `pass_crowded` 31 ms, 95% in `spacing::clearing`. A keystroke that changes a height in a document that crowded would pay it; the generated document pays 3 ms. Left alone, since no target covers it.
+- `save_unwarmed` 44–57 ms is no real save any more: opening measures every shape (#96).
+- `zone_drag` still has one 23 ms frame, its drop; p95 is unaffected. The `pan_zoom*_cold` `draw_max` rows are the artificial first frame noted under #95.
+
+50,000 shapes in Paper: `save` 39 ms, `load` 203 ms, `pass` 15.6 ms (`pass_crowded` 271 ms), warm pans `draw_p95` 5.7–7.4 ms, `zone_drag` 8.7 ms, `typing_50k` `draw_p95` 7.7 ms, `recovery_take` 16.7 ms, panel typing `draw_p95` 8.5 ms, `panel_regen_50k` `run` 30 ms.
+
+Memory is the `rss` metric of the `idle_*` rows: 200–217 MB on 10,000 shapes in any theme, 430–530 MB on 50,000.
