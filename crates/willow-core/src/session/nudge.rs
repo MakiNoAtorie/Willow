@@ -4,7 +4,7 @@ use super::{ResizeTo, Session};
 use crate::Side;
 
 impl Session {
-    /// Moves the selection one step toward `side`, like a drag: pushes nothing, zones stay.
+    /// Moves the selection one step toward `side`, like a drag: zones stay.
     pub(super) fn nudge(&mut self, side: Side) {
         let ((x, y), step) = (side.unit(), self.theme.nudge);
         self.move_selection(x * step, y * step);

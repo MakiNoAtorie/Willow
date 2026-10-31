@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::drawn::land;
 use super::{Gesture, Session};
 use crate::{Point, Shape, ShapeId};
 
@@ -10,7 +11,7 @@ type Change = (Option<ShapeId>, Option<ShapeId>);
 
 impl Session {
     /// Moves shapes `ids` by (dx, dy), each joining the zone under its new center (or none),
-    /// as one undo step. Pushes nothing.
+    /// as one undo step.
     pub(super) fn drop_shapes(&mut self, ids: &[ShapeId], dx: i32, dy: i32) {
         let changes: Vec<Option<Change>> = (ids.iter())
             .map(|id| {
@@ -18,9 +19,10 @@ impl Session {
                 self.drop_change(s, dx, dy)
             })
             .collect();
+        let landing = self.landing(ids, dx, dy);
         self.history.step(&mut self.doc, |h, doc| {
+            land(h, doc, landing);
             for (id, change) in ids.iter().zip(changes) {
-                h.change(doc, id, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
                 let Some((_, to)) = change else { continue };
                 h.leave_zone(doc, id);
                 if let Some(z) = to {

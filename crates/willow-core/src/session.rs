@@ -555,10 +555,14 @@ impl Session {
         (self.min_width(shape) as i32 - shape.width as i32 + 1).div_euclid(2)
     }
 
-    /// Moves a shape's top-left to (x, y): one discrete change to the document.
+    /// Moves a shape's drawn top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
-        self.history
-            .change(&mut self.doc, id, |s| (s.x, s.y) = (x, y));
+        let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
+            return;
+        };
+        let (from_x, from_y) = self.drawn_at(s);
+        let landing = self.landing([id], x - from_x, y - from_y);
+        (self.history).step(&mut self.doc, |h, doc| drawn::land(h, doc, landing));
     }
 
     /// Links `a` to `b` as one undo step; refused (false, no change) for the same shape, an

@@ -88,7 +88,7 @@ impl Session {
         });
         let spaced = self.spaced.get_mut();
         for &i in block {
-            spaced.slide(&self.doc.shapes[i].id, (-dx, -dy), self.theme, self.now);
+            spaced.slide_moved(&self.doc.shapes[i].id, (dx, dy), self.theme, self.now);
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Multi-selection: the Shift+drag marquee, Shift+click toggling and moving the whole
 //! selection as one undo step, and selecting whole chains.
 
+use super::drawn::land;
 use super::{Gesture, Session};
 use crate::{Point, ShapeId};
 
@@ -44,14 +45,10 @@ impl Session {
         (to.0 - x, to.1 - y)
     }
 
-    /// Moves every selected shape by (dx, dy) as one undo step. Pushes nothing.
+    /// Moves every selected shape by (dx, dy) as one undo step.
     pub fn move_selection(&mut self, dx: i32, dy: i32) {
-        let ids = self.selected.clone();
-        self.history.step(&mut self.doc, |h, doc| {
-            for id in &ids {
-                h.change(doc, id, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
-            }
-        });
+        let landing = self.landing(&self.selected, dx, dy);
+        (self.history).step(&mut self.doc, |h, doc| land(h, doc, landing));
     }
 
     /// Shift+click: adds `id` to the selection, or takes it out.

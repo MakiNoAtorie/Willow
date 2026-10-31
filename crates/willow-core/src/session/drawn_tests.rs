@@ -301,7 +301,7 @@ fn a_drag_previews_from_where_the_shape_is_drawn_and_moves_by_what_the_pointer_d
     pointer(&mut s, pt(c.x + 30.0, c.y + 10.0));
     assert_eq!(painted(&s, "a"), Some((330, 110)));
     release(&mut s, pt(c.x + 30.0, c.y + 10.0));
-    assert_eq!(placed(&s, "a"), (30, 10));
+    assert_eq!(placed(&s, "a"), (330, 110));
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn a_group_drag_previews_every_shape_from_where_it_is_drawn() {
     assert_eq!(painted(&s, "a"), Some((330, 110)));
     assert_eq!(painted(&s, "b"), Some((330, 210)));
     release(&mut s, pt(c.x + 30.0, c.y + 10.0));
-    assert_eq!((placed(&s, "a"), placed(&s, "b")), ((30, 10), (30, 310)));
+    assert_eq!((placed(&s, "a"), placed(&s, "b")), ((330, 110), (330, 210)));
 }
 
 /// Adds `zone` at (x, y), 300 square, holding `members`.
