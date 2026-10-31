@@ -13,10 +13,14 @@
 //! parse, repair, auto-place, a new session). The loaded session replaces the window's, its
 //! `measure_ahead` cancelled, so `open_first_frame` is the first frame with nothing laid out.
 //!
+//! `spacing_pass_10k` times, in milliseconds, full spacing passes on the laid-out document
+//! (`SPACING_RUNS` of them, median and worst): `pass` as generated, where little crowds, and
+//! `pass_crowded` with every position divided by 3, so that most chains have to move.
+//!
 //! No `measure_ahead` runs during any later scenario. Each `pan_zoom*_cold` starts on a new
 //! session of the same document (empty layout and word caches; GPUI's glyph atlas stays), so
-//! its first frame lays out everything in view and later frames each shape that comes into
-//! view; `pan_zoom*_warm` then pans back over the same ground on that session. Before the zoom
+//! its first frame lays out every shape for the spacing pass, which `open` does before a real
+//! first frame; `pan_zoom*_warm` then pans back over the same ground on that session. Before the zoom
 //! sweeps the bench lays out every shape, as the app's idle `measure_ahead` would, so the zoom
 //! sweeps, typing and `recovery_take` run on a fully laid-out document.
 //!
@@ -56,6 +60,8 @@ const SWEEP_FRAMES: usize = 150;
 const KEYSTROKES: usize = 200;
 /// What the typing scenarios type, again and again. ASCII, so every byte is one key.
 const PHRASE: &str = "the quiet harbour remembers everything ";
+/// Full spacing passes per `spacing_pass_10k` row.
+const SPACING_RUNS: usize = 20;
 /// Pointer moves in the zone drag: out for half, back for half.
 const DRAG_FRAMES: usize = 240;
 const IDLE: Duration = Duration::from_secs(5);
@@ -324,6 +330,36 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     scripted(this, cx, "open_first_frame", None, Vec::new()).await;
 }
 
+/// The median and worst of `SPACING_RUNS` full passes on `session`, in milliseconds.
+fn passes(session: &willow_core::Session) -> (f64, f64) {
+    let mut times: Vec<f64> = (0..SPACING_RUNS)
+        .map(|_| timed(|| session.respace()).0)
+        .collect();
+    times.sort_by(f64::total_cmp);
+    (times[SPACING_RUNS / 2], times[SPACING_RUNS - 1])
+}
+
+/// The `spacing_pass_10k` rows; see the module docs.
+async fn spacing(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    this.update_in(cx, |w, window, _| {
+        let (median, worst) = passes(&w.session);
+        let mut doc = w.session.document().clone();
+        for s in &mut doc.shapes {
+            (s.x, s.y) = (s.x / 3, s.y / 3);
+        }
+        let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
+        let crowded = willow_core::Session::new(doc, w.session.theme(), measure);
+        crowded.respace();
+        let (crowded_median, crowded_worst) = passes(&crowded);
+        let b = w.bench.as_mut().unwrap();
+        b.row("spacing_pass_10k", "pass_p50", median, "ms");
+        b.row("spacing_pass_10k", "pass_max", worst, "ms");
+        b.row("spacing_pass_10k", "pass_crowded_p50", crowded_median, "ms");
+        b.row("spacing_pass_10k", "pass_crowded_max", crowded_worst, "ms");
+    })
+    .unwrap();
+}
+
 /// Milliseconds `f` takes, and what it returns.
 fn timed<T>(f: impl FnOnce() -> T) -> (f64, T) {
     let t = Instant::now();
@@ -467,6 +503,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         mods,
     };
     files(&this, cx).await;
+    spacing(&this, cx).await;
     // Each zoom pans right over new ground on a new session (cold: first layout of every shape
     // in view), then back over the same ground (warm).
     let origin = Point { x: -40.0, y: -40.0 };

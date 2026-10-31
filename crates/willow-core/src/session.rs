@@ -29,6 +29,7 @@ mod panel_edit;
 mod panel_select;
 mod push;
 mod select;
+mod spacing;
 mod tab_picker;
 mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
@@ -260,6 +261,8 @@ pub struct Session {
     key_pan: Vec<keypan::Press>,
     /// The code panel.
     panel: panel::Panel,
+    /// The last spacing pass; see `spaced`.
+    spaced: RefCell<drawn::Spaced>,
     /// Offsets tests set by hand, so that a read of the placed position shows.
     #[cfg(test)]
     drawn_offsets: HashMap<ShapeId, (i32, i32)>,
@@ -308,6 +311,7 @@ impl Session {
             links: Default::default(),
             pointer: None,
             now: Duration::ZERO,
+            spaced: RefCell::default(),
             #[cfg(test)]
             drawn_offsets: HashMap::new(),
         }

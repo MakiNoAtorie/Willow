@@ -1,6 +1,5 @@
-//! Every read of what the writer sees goes through the drawn rectangle. Until the spacing pass
-//! makes drawn differ from placed, these set a shape's offset by hand: a read of the placed
-//! position would pass every other test.
+//! Every read of what the writer sees goes through the drawn rectangle. These set a shape's
+//! offset by hand: a read of the placed position would pass most other tests.
 
 use std::collections::HashMap;
 use std::ops::Range;

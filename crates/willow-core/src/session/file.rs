@@ -49,6 +49,8 @@ impl Session {
         } else {
             self.release_text();
         }
+        // Every shape measured and spaced before the first paint.
+        self.spaced();
     }
 
     /// A session over a recovery file's document, read from `bytes`, as `open` makes it but

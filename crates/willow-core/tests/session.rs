@@ -270,7 +270,9 @@ fn clicking_empty_canvas_deselects_but_panning_does_not() {
 fn a_click_where_shapes_overlap_hits_the_later_one() {
     let mut doc = Document::new();
     let b = doc.next_id();
-    doc.shapes.push(willow_core::Shape::new(b, 100, 20));
+    doc.shapes.push(willow_core::Shape::new(b.clone(), 100, 20));
+    // Linked: the spacing pass keeps separate chains apart.
+    doc.links.push(willow_core::Link(id("a"), b));
     let mut s = Session::new(doc, &PAPER, Box::new(common::Fake));
     s.resize(1000.0, 800.0);
 

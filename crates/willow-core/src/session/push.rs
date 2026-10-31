@@ -10,16 +10,16 @@ use crate::input::Point;
 use crate::{Link, Shape, ShapeId, Side};
 
 /// A shape's placed rectangle, what pushes work on: its edges in canvas units.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Rect {
-    l: f32,
-    t: f32,
-    r: f32,
-    b: f32,
+    pub(super) l: f32,
+    pub(super) t: f32,
+    pub(super) r: f32,
+    pub(super) b: f32,
 }
 
 impl Rect {
-    fn moved(self, dx: i32, dy: i32) -> Rect {
+    pub(super) fn moved(self, dx: i32, dy: i32) -> Rect {
         let (dx, dy) = (dx as f32, dy as f32);
         Rect {
             l: self.l + dx,
@@ -38,7 +38,7 @@ impl Rect {
         }
     }
 
-    fn grown(self, d: f32) -> Rect {
+    pub(super) fn grown(self, d: f32) -> Rect {
         Rect {
             l: self.l - d,
             t: self.t - d,
@@ -47,7 +47,7 @@ impl Rect {
         }
     }
 
-    fn overlaps(self, o: Rect) -> bool {
+    pub(super) fn overlaps(self, o: Rect) -> bool {
         self.l < o.r && o.l < self.r && self.t < o.b && o.t < self.b
     }
 }
@@ -142,7 +142,7 @@ pub(super) struct Slide {
 }
 
 impl Session {
-    fn rect(&self, s: &Shape) -> Rect {
+    pub(super) fn rect(&self, s: &Shape) -> Rect {
         let (x, y) = (s.x as f32, s.y as f32);
         Rect {
             l: x,

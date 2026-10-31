@@ -135,6 +135,15 @@ struct Group {
     set: HashSet<ShapeId>,
 }
 
+/// The latest unbroken run of changes that left every shape's box alone but for text height:
+/// revisions `from` to `to`, the shapes they touched by index.
+#[derive(Debug, Default)]
+struct TextRun {
+    from: u64,
+    to: u64,
+    shapes: Vec<usize>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct History {
     undo: Vec<Step>,
@@ -143,6 +152,7 @@ pub(crate) struct History {
     open: Option<Group>,
     /// Counts changes to the document (including undo and redo); crash recovery watches it.
     revision: u64,
+    text_run: TextRun,
     /// The panel text for the document as it is now, when it isn't plain regenerated text.
     pub text: Option<String>,
 }
@@ -187,9 +197,31 @@ impl History {
         if *shape == before {
             return;
         }
+        let same_box = (shape.x, shape.y, shape.width, shape.extra_height)
+            == (before.x, before.y, before.width, before.extra_height);
         // A group's first `Set` for a shape restores it whole; later ones would add nothing.
         let first = (self.open.as_mut()).is_none_or(|g| g.set.insert(before.id.clone()));
         self.record(first.then_some(Op::Set(before)));
+        if same_box {
+            let run = &mut self.text_run;
+            if run.to + 1 != self.revision {
+                *run = TextRun {
+                    from: self.revision - 1,
+                    ..TextRun::default()
+                };
+            }
+            run.to = self.revision;
+            if run.shapes.last() != Some(&i) {
+                run.shapes.push(i);
+            }
+        }
+    }
+
+    /// The shapes (by index) that may have changed since `revision`, when nothing but their
+    /// text did; `None` when anything else may have.
+    pub(crate) fn text_changed_since(&self, revision: u64) -> Option<&[usize]> {
+        let run = &self.text_run;
+        (run.to == self.revision && run.from <= revision).then_some(&run.shapes[..])
     }
 
     /// Runs `f` as one step; inside an open group, its changes join the group.
