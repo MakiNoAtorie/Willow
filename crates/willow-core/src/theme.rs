@@ -1074,7 +1074,17 @@ pub const DESK: Theme = Theme {
     ..PAPER
 };
 
+/// Neo-brutalist: thick outlines, hard offset shadows, punchy pastels. Only what differs from
+/// Paper, as in `design/visual-language.md`.
+pub const POSTER: Theme = Theme {
+    name: "Poster",
+    font: "Space Grotesk",
+    font_size: 14.5,
+    line_height: 1.45,
+    ..PAPER
+};
+
 /// Every theme, as View > Theme lists them. A new theme is a const over `PAPER` naming what
 /// differs, one entry here and its line in the app's `view_menu`. A new field needs only
 /// Paper's value: the others inherit it.
-pub static THEMES: [&Theme; 2] = [&PAPER, &DESK];
+pub static THEMES: [&Theme; 3] = [&PAPER, &DESK, &POSTER];

@@ -1322,18 +1322,7 @@ fn main() {
             ]);
         }
         cx.text_system()
-            .add_fonts(vec![
-                Cow::Borrowed(include_bytes!("../assets/Literata-Regular.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-Bold.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-Italic.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Regular.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Bold.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Italic.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/CourierPrime-BoldItalic.ttf").as_slice()),
-            ])
+            .add_fonts(bundled_fonts())
             .expect("bundled fonts");
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
@@ -1353,6 +1342,28 @@ fn main() {
         }
         cx.activate(true);
     });
+}
+
+/// Every face the themes draw with, in family order.
+fn bundled_fonts() -> Vec<Cow<'static, [u8]>> {
+    [
+        include_bytes!("../assets/Literata-Regular.ttf").as_slice(),
+        include_bytes!("../assets/Literata-Bold.ttf").as_slice(),
+        include_bytes!("../assets/Literata-Italic.ttf").as_slice(),
+        include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice(),
+        include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice(),
+        include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Regular.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Bold.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Italic.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-BoldItalic.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-Medium.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-Bold.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-Italic.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-BoldItalic.ttf").as_slice(),
+    ]
+    .map(Cow::Borrowed)
+    .into()
 }
 
 /// Opens a window showing `content`; `bench` runs the scripted bench in it.

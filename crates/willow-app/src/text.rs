@@ -417,3 +417,24 @@ impl EntityInputHandler for Willow {
         None
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use gpui::PlatformTextSystem;
+    use gpui_apple::AppleTextSystem;
+    use willow_core::THEMES;
+
+    use super::*;
+
+    #[test]
+    fn every_theme_font_has_its_own_face_for_each_style() {
+        let ts = AppleTextSystem::new();
+        ts.add_fonts(crate::bundled_fonts()).unwrap();
+        for t in THEMES {
+            let styles = [(false, false), (true, false), (false, true), (true, true)];
+            let mut ids = styles.map(|(b, i)| ts.font_id(&font(t, b, i)).unwrap());
+            ids.sort_by_key(|id| id.0);
+            assert!(ids.windows(2).all(|w| w[0] != w[1]), "{}: {ids:?}", t.name);
+        }
+    }
+}

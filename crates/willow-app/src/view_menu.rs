@@ -3,7 +3,7 @@
 //! handler in `register`.
 
 use gpui::{Action, App, actions};
-use willow_core::{Align, DESK, PAPER, Theme};
+use willow_core::{Align, DESK, PAPER, POSTER, Theme};
 
 use crate::prefs::{self, Prefs};
 
@@ -12,6 +12,7 @@ actions!(
     [
         ThemePaper,
         ThemeDesk,
+        ThemePoster,
         AlignJustified,
         AlignLeft,
         AlignCentered
@@ -38,6 +39,7 @@ pub(crate) fn themes(current: &Theme) -> Vec<Choice> {
     vec![
         choice(PAPER.name, current.name == PAPER.name, ThemePaper),
         choice(DESK.name, current.name == DESK.name, ThemeDesk),
+        choice(POSTER.name, current.name == POSTER.name, ThemePoster),
     ]
 }
 
@@ -72,6 +74,7 @@ fn set_alignment(align: Align, cx: &mut App) {
 pub(crate) fn register(cx: &mut App) {
     cx.on_action(|_: &ThemePaper, cx| set_theme(&PAPER, cx));
     cx.on_action(|_: &ThemeDesk, cx| set_theme(&DESK, cx));
+    cx.on_action(|_: &ThemePoster, cx| set_theme(&POSTER, cx));
     cx.on_action(|_: &AlignJustified, cx| set_alignment(Align::Justified, cx));
     cx.on_action(|_: &AlignLeft, cx| set_alignment(Align::Left, cx));
     cx.on_action(|_: &AlignCentered, cx| set_alignment(Align::Centered, cx));
@@ -84,8 +87,18 @@ mod tests {
     #[test]
     fn submenus_list_every_choice_with_the_current_one_checked() {
         let shown = |c: &[Choice]| c.iter().map(|c| (c.label, c.checked)).collect::<Vec<_>>();
-        assert_eq!(shown(&themes(&PAPER)), [("Paper", true), ("Desk", false)]);
-        assert_eq!(shown(&themes(&DESK)), [("Paper", false), ("Desk", true)]);
+        assert_eq!(
+            shown(&themes(&PAPER)),
+            [("Paper", true), ("Desk", false), ("Poster", false)]
+        );
+        assert_eq!(
+            shown(&themes(&DESK)),
+            [("Paper", false), ("Desk", true), ("Poster", false)]
+        );
+        assert_eq!(
+            shown(&themes(&POSTER)),
+            [("Paper", false), ("Desk", false), ("Poster", true)]
+        );
         assert_eq!(
             shown(&alignments(Align::Justified)),
             [("Justified", true), ("Left", false), ("Centered", false)]
