@@ -91,13 +91,13 @@ impl Hasher for CheapHasher {
 }
 
 /// `HashMap`'s third parameter for a map hashed by `CheapHasher`.
-pub(super) type Cheap = BuildHasherDefault<CheapHasher>;
+pub(super) type CheapHash = BuildHasherDefault<CheapHasher>;
 
 /// What is fixed so far. A rectangle is listed in every cell it touches, so a lookup costs
 /// what is near it, not what is in the document.
 #[derive(Default)]
 struct Grid {
-    cells: HashMap<(i32, i32), Vec<Rect>, Cheap>,
+    cells: HashMap<(i32, i32), Vec<Rect>, CheapHash>,
     /// Too big to list: a file may ask for a shape half a billion units across.
     huge: Vec<Rect>,
 }
@@ -182,7 +182,7 @@ pub(super) fn order(shapes: &[Shape], ends: &[(usize, usize)]) -> Vec<Vec<Step>>
 
 /// The point link sides are judged from inside a chain: top edge and horizontal center, which
 /// growth never changes.
-fn anchor(s: &Shape) -> Point {
+fn side_point(s: &Shape) -> Point {
     Point {
         x: s.x as f32 + s.width as f32 / 2.0,
         y: s.y as f32,
@@ -197,9 +197,9 @@ fn walk(top: usize, shapes: &[Shape], next: &[Vec<usize>], seen: &mut [bool]) ->
             continue;
         }
         walk.push(Step { shape, from });
-        let at = anchor(&shapes[shape]);
+        let at = side_point(&shapes[shape]);
         let mut ahead: Vec<_> = (next[shape].iter().filter(|&&n| !seen[n]))
-            .map(|&n| (side(at, anchor(&shapes[n])), n))
+            .map(|&n| (side(at, side_point(&shapes[n])), n))
             .collect();
         ahead.sort_by_cached_key(|&(side, n)| {
             let way = WAYS.iter().position(|&w| w == side);
@@ -270,7 +270,7 @@ pub(super) fn pass(
 }
 
 /// Each shape's neighbors, by index.
-fn neighbors(n: usize, ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
+pub(super) fn neighbors(n: usize, ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
     let mut next = vec![Vec::new(); n];
     for &(a, b) in ends.iter().filter(|&&(a, b)| a < n && b < n) {
         next[a].push(b);
@@ -325,13 +325,13 @@ fn need(r: Rect, o: Rect, side: Side, gap: f32) -> i32 {
 }
 
 /// The shortest move along one axis that clears `block` of every `fixed` rectangle and of
-/// `also`.
-fn clearing(block: &[Rect], fixed: &Grid, also: Option<Rect>, gap: f32) -> (i32, i32) {
+/// `linked`, what the shape it was reached from takes up.
+fn clearing(block: &[Rect], fixed: &Grid, linked: Option<Rect>, gap: f32) -> (i32, i32) {
     let mut best = (i32::MAX, (0, 0));
     for side in WAYS {
         let mut d = 0;
         while d < best.0
-            && let Some(need) = crowded(block, fixed, also, side, d, gap)
+            && let Some(need) = crowded(block, fixed, linked, side, d, gap)
         {
             // Rounding at huge coordinates must not stall the walk.
             d = need.max(d.saturating_add(1));
@@ -349,7 +349,7 @@ fn clearing(block: &[Rect], fixed: &Grid, also: Option<Rect>, gap: f32) -> (i32,
 fn crowded(
     block: &[Rect],
     fixed: &Grid,
-    also: Option<Rect>,
+    linked: Option<Rect>,
     side: Side,
     d: i32,
     gap: f32,
@@ -360,7 +360,7 @@ fn crowded(
         let reach = r.moved((x * d, y * d)).grown(gap - SLACK);
         let mut hit = |o: Rect| most = most.max(Some(need(*r, o, side, gap)));
         fixed.overlapping(reach, &mut hit);
-        also.filter(|o| reach.overlaps(*o)).map(hit);
+        linked.filter(|o| reach.overlaps(*o)).map(hit);
     }
     most
 }

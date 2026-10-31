@@ -83,8 +83,7 @@ impl Session {
     /// bar's read every frame keeps the answer per revision. Marked text changes the document
     /// outside the history, so composing always compares.
     fn same_as_saved(&self) -> bool {
-        let revision = self.history.revision();
-        let composing = (self.editing.as_ref()).is_some_and(|e| e.marked.is_some());
+        let (revision, composing) = (self.history.revision(), self.composing());
         match self.same_as_saved.get() {
             Some((r, same)) if r == revision && !composing => same,
             _ => {
@@ -175,10 +174,11 @@ impl Session {
         self.unrecovered = Some((first, now));
     }
 
-    /// How long after `now` a recovery write is due; `None` while there is nothing to recover.
-    /// The app wakes then and calls `take_recovery`.
+    /// How long after `now` a recovery write is due; `None` while there is nothing to recover
+    /// or a composition is open, which comes due when it ends: marked text and what it pushed
+    /// are never written. The app wakes then and calls `take_recovery`.
     pub fn recovery_wake(&self, now: Duration) -> Option<Duration> {
-        let (first, last) = self.unrecovered?;
+        let (first, last) = self.unrecovered.filter(|_| !self.composing())?;
         let due = (last + RECOVERY_QUIET).min(first + RECOVERY_MAX);
         Some(due.saturating_sub(now))
     }
@@ -198,26 +198,10 @@ impl Session {
         if let Some(text) = self.held_text() {
             return Some(Recovery::Text(text.into()));
         }
-        // The IME may still be composing: leave its marked text out rather than commit it.
-        let mut document = self.doc.clone();
-        let mut heights = self.spaced_heights();
-        if let Some(e) = &self.editing
-            && let Some(m) = e.marked.clone()
-        {
-            if e.zone {
-                if let Some(z) = document.zones.iter_mut().find(|z| z.id == e.id) {
-                    z.title.replace_range(m, "");
-                }
-            } else if let Some(i) = document.shapes.iter().position(|s| s.id == e.id) {
-                document.shapes[i].text.replace(m, "");
-                heights[i] = self.shape_height(&document.shapes[i]);
-            }
-        }
-        let drawn = self.drawn_positions();
         Some(Recovery::Write {
-            document,
-            heights,
-            drawn,
+            document: self.doc.clone(),
+            heights: self.heights(),
+            drawn: self.drawn_positions(),
         })
     }
 }

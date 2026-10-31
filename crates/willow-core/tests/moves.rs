@@ -267,6 +267,18 @@ fn a_touched_chain_takes_its_new_placed_positions_without_sliding_either_way() {
 }
 
 #[test]
+fn undoing_and_redoing_a_move_slides_the_moved_shape_where_a_new_move_lands_at_once() {
+    let mut s = session(&[("n", 0, 0)], &[]);
+    let at = drag_by(&mut s, "n", (600, 0));
+    release(&mut s, at);
+    assert_eq!(slide(&s, "n"), (0.0, 0.0), "the drop lands as released");
+    s.handle(Input::Undo, T);
+    assert_eq!((drawn(&s, "n"), slide(&s, "n")), ((0, 0), (600.0, 0.0)));
+    s.handle(Input::Redo, Duration::from_millis(300));
+    assert_eq!((drawn(&s, "n"), slide(&s, "n")), ((600, 0), (-600.0, 0.0)));
+}
+
+#[test]
 fn nothing_moves_during_a_drag_and_on_release_the_rest_slides_clear() {
     // x-y is larger than the note m it is dropped on, so m gives way.
     let mut s = session(&[("x", 0, 0), ("y", 0, 97), ("m", 600, 0)], &[("x", "y")]);

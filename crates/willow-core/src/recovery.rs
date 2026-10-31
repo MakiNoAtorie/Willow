@@ -8,8 +8,7 @@ use crate::Document;
 /// What to do with a window's recovery file, once due (`Session::take_recovery`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Recovery {
-    /// Write this document to it (without any IME marked text), with its shapes' heights and
-    /// drawn positions for `save`.
+    /// Write this document to it, with its shapes' heights and drawn positions for `save`.
     Write {
         document: Document,
         heights: Vec<f32>,

@@ -222,11 +222,11 @@ fn the_clipboard_is_the_panel_selection_as_plain_text_not_shapes() {
 
 /// Where to point at row `row`, a little right of column `col`'s left edge. The canvas is
 /// 1000 px wide; the panel's text starts past its 1 px hairline and 40 px gutter, columns are
-/// 7.5 px and rows 20.625 px from 60 px down.
+/// 7.5 px and rows 20.625 px from 46 px down.
 fn at(row: f32, col: f32) -> Point {
     Point {
         x: 1041.0 + col * 7.5 + 2.0,
-        y: 60.0 + row * 20.625 + 10.0,
+        y: 46.0 + row * 20.625 + 10.0,
     }
 }
 
@@ -330,16 +330,16 @@ fn the_caret_blinks_where_it_stops_on_the_column_grid() {
     let c = s.panel_caret(T).unwrap();
     assert_eq!(
         (c.pos, c.height, c.visible),
-        (p(62.5, 80.625), 20.625, true)
+        (p(62.5, 66.625), 20.625, true)
     );
-    assert_eq!(s.panel_point(14), p(62.5, 80.625));
+    assert_eq!(s.panel_point(14), p(62.5, 66.625));
     assert_eq!(s.next_wake(T), Some(Duration::from_millis(530)));
     assert!(!s.panel_caret(Duration::from_millis(600)).unwrap().visible);
     assert_eq!(s.next_wake(Duration::from_secs(5)), None);
     // At a wrapped row's end it shows there, not at the next row's start.
     s.handle(Input::Move(Motion::LineEnd), T);
     let pos = s.panel_caret(T).unwrap().pos;
-    assert_eq!((pos.x.round(), pos.y), (400.0, 80.625));
+    assert_eq!((pos.x.round(), pos.y), (400.0, 66.625));
     // None once the canvas has the keys.
     s.handle(Input::Escape, T);
     assert_eq!(s.panel_caret(T), None);
@@ -359,8 +359,8 @@ fn selection_and_marked_text_are_one_rect_per_row() {
     assert_eq!(
         round(s.panel_rects(s.panel().selection())),
         [
-            (p(77.5, 60.0), p(122.5, 80.625)),
-            (p(40.0, 80.625), p(77.5, 101.25))
+            (p(77.5, 46.0), p(122.5, 66.625)),
+            (p(40.0, 66.625), p(77.5, 87.25))
         ]
     );
     // A selected line break shows as one more column.
@@ -372,8 +372,8 @@ fn selection_and_marked_text_are_one_rect_per_row() {
     assert_eq!(
         round(s.panel_rects(1..4)),
         [
-            (p(47.5, 60.0), p(62.5, 80.625)),
-            (p(40.0, 80.625), p(47.5, 101.25))
+            (p(47.5, 46.0), p(62.5, 66.625)),
+            (p(40.0, 66.625), p(47.5, 87.25))
         ]
     );
 }
@@ -391,11 +391,11 @@ fn keys_scroll_the_caret_into_view() {
     let y = s.panel_caret(T).unwrap().pos.y;
     assert!((y - (800.0 - 14.0 - 20.625)).abs() < 1e-3, "{y}");
     assert!(s.panel_rows().iter().any(|r| r.number == Some(41)));
-    // Scrolled away, typing brings it back to the top, below the 60 px top padding.
+    // Scrolled away, typing brings it back to the top, below the 46 px top padding.
     s.handle(Input::ScrollPanel(-1e9), T);
     typed(&mut s, "x");
     let y = s.panel_caret(T).unwrap().pos.y;
-    assert!((y - 60.0).abs() < 1e-3, "{y}");
+    assert!((y - 46.0).abs() < 1e-3, "{y}");
 }
 
 /// Each row in view as (text, color) runs.
@@ -463,9 +463,9 @@ fn marked_text_is_underlined_just_under_its_em_box() {
     let mut s = panel("willow 1\n");
     assert_eq!(s.panel_underlines(), []);
     mark(&mut s, "か", None, T);
-    // Row 0 is 60 px down, the text 40 px in; a wide character takes two 7.5 px columns, and
+    // Row 0 is 46 px down, the text 40 px in; a wide character takes two 7.5 px columns, and
     // the 12.5 px em box sits centered in the 20.625 px row.
-    let (y, x) = (76.5625, 40.0);
+    let (y, x) = (62.5625, 40.0);
     assert_eq!(
         s.panel_underlines(),
         [(Point { x, y }, Point { x: x + 15.0, y })]

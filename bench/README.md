@@ -2,7 +2,7 @@
 
 `cargo run --release -p willow-app -- --bench --machine NAME [--theme Desk] [--shapes 50000]` appends rows to `results.csv` (columns `machine,git_rev,scenario,metric,value,unit`; `git_rev` is `git rev-parse --short HEAD` of the Willow checkout, or `unknown`). Scenarios and metrics are documented in `crates/willow-app/src/bench.rs`. A Paper run on 10,000 shapes keeps the plain scenario names; a run in another theme ends them in `_desk` or `_poster`, a run on 50,000 shapes says `_50k` (`typing_50k`, `zone_drag_50k`). Keep the window on screen: a run that renders no frames waits forever (seen once in #88; the likely cause was a hidden window).
 
-Each `pan_zoom*_cold` row starts on a new session that has laid nothing out, with no idle `measure_ahead` running, so it times the first layout of every shape in view; the matching `_warm` row pans back over the same ground. No `measure_ahead` runs during any scenario after `open_first_frame`. Rows from `324dac2` to `4cf2ae8` ran their cold pans after `measure_ahead` had laid out much of the document, so those cold rows are not cold. `recovery_take` is the UI-thread part of an autosave (`Session::take_recovery`: clone the document, every shape's height).
+Each `pan_zoom*_cold` row starts on a new session that has laid nothing out, so it times the first layout of every shape in view; the matching `_warm` row pans back over the same ground. Rows from `324dac2` to `4cf2ae8` ran their cold pans after `measure_ahead`, an idle layout step gone since #96, had laid out much of the document, so those cold rows are not cold. `recovery_take` is the UI-thread part of an autosave (`Session::take_recovery`: clone the document, every shape's height).
 
 ## MacBook Air M4 (`mba-m4`, #16)
 

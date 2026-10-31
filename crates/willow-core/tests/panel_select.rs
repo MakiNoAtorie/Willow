@@ -25,7 +25,7 @@ fn ids(s: &Session) -> Vec<&str> {
 fn at_line(line: usize) -> Point {
     Point {
         x: 1100.0,
-        y: 60.0 + line as f32 * 20.625 + 5.0,
+        y: 46.0 + line as f32 * 20.625 + 5.0,
     }
 }
 

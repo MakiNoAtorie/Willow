@@ -148,7 +148,7 @@ fn long_lines_wrap_and_numbers_count_logical_lines() {
     ];
     assert_eq!(rows(&s), want);
     let tops: Vec<f32> = s.panel_rows().iter().map(|r| r.y).collect();
-    assert_eq!(tops[..3], [60.0, 80.625, 101.25]);
+    assert_eq!(tops[..3], [46.0, 66.625, 87.25]);
 }
 
 #[test]
@@ -227,20 +227,20 @@ fn only_visible_rows_are_laid_out_and_the_panel_scrolls() {
         .map(|i| format!("@layout a {i},0 w210"))
         .collect();
     s.set_panel_text(lines.join("\n"));
-    // 800 px tall: rows from 60 px down, 20.625 px each.
-    assert_eq!(s.panel_rows().len(), 36);
-    // Ten rows up: line 8 is the first still showing, its top 1.875 px above.
+    // 800 px tall: rows from 46 px down, 20.625 px each.
+    assert_eq!(s.panel_rows().len(), 37);
+    // Ten rows up: line 8 is the first still showing, its top 15.875 px above.
     input(&mut s, Input::ScrollPanel(-206.25));
     let first = &s.panel_rows()[0];
     assert_eq!(first.number, Some(8));
-    assert!((first.y + 1.875).abs() < 1e-3, "{}", first.y);
+    assert!((first.y + 15.875).abs() < 1e-3, "{}", first.y);
     // Scrolling stops with the last line above the bottom padding, and at the top.
     input(&mut s, Input::ScrollPanel(-1e9));
     let last = s.panel_rows().last().unwrap().clone();
     assert_eq!(last.number, Some(1000));
     assert!((last.y + 20.625 + 14.0 - 800.0).abs() < 1e-2, "{}", last.y);
     input(&mut s, Input::ScrollPanel(1e9));
-    assert_eq!(s.panel_rows()[0].y, 60.0);
+    assert_eq!(s.panel_rows()[0].y, 46.0);
 }
 
 #[test]

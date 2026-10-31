@@ -39,7 +39,7 @@ pub struct Frame<'a> {
     pub text_opacity: f32,
     /// How far fills have moved from pastel toward the picker color, 0 to `block_mix`.
     pub deepen: f32,
-    /// Shape shadows and the dot grid are drawn (dropped below `fade_end`).
+    /// Shape shadows and the dot grid or weave are drawn (dropped below `fade_end`).
     pub shadows: bool,
     pub grid: bool,
     /// The hovered shape's edge midpoints, canvas units; paint them over every shape at the
@@ -175,8 +175,7 @@ impl Session {
                 Some(r) if r.id == s.id => Cow::Owned(r.clone()),
                 _ => Cow::Borrowed(s),
             };
-            let (dx, dy) = self.drawn_offset_at(i);
-            let (x, y) = (s.x.saturating_add(dx), s.y.saturating_add(dy));
+            let (x, y) = s.moved_by(self.drawn_offset_at(i));
             let (x, y) = match (group, preview) {
                 (Some((dx, dy)), _) if moved.contains(&s.id) => (x + dx, y + dy),
                 (_, Some(p)) if *p.id == s.id => (p.x, p.y),
@@ -315,10 +314,7 @@ impl Session {
                         Some((from, p)) => mix(picker(from), picker(s.color), p),
                         None => picker(s.color),
                     },
-                    lift: Point {
-                        x: t.selection.lift_x * ring,
-                        y: t.selection.lift_y * ring,
-                    },
+                    lift: self.lift(ring),
                     fill: match self.rippling(&s.id, now) {
                         Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
                         None => fills[s.color as usize],
@@ -352,7 +348,7 @@ impl Session {
             deepen,
             shadows: full,
             grid: full,
-            midpoints: self.midpoints(),
+            midpoints: self.midpoints(now),
             marquee: self.marquee(),
             link_drag,
             tab_picker: self.tab_picker(),
@@ -361,6 +357,16 @@ impl Session {
 }
 
 impl Session {
+    /// How far a shape at ring opacity `ring` paints off where it is drawn; hit-testing
+    /// ignores it.
+    pub(crate) fn lift(&self, ring: f32) -> Point {
+        let s = &self.theme().selection;
+        Point {
+            x: s.lift_x * ring,
+            y: s.lift_y * ring,
+        }
+    }
+
     /// Zone titles' size in canvas units: never under the theme's minimum on screen.
     pub(crate) fn title_size(&self) -> f32 {
         let zt = &self.theme().zone;

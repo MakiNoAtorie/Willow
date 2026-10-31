@@ -112,40 +112,39 @@ fn colors(
     current: Option<Color>,
     cx: &mut Context<Willow>,
 ) -> AnyElement {
-    let ring = color(m.ink);
+    let picker = session.theme().picker;
     div()
         .flex()
         .gap(px(m.swatch_gap))
         .px(px(m.item_pad_x))
         .py(px(m.item_pad_y))
         .children(Color::ALL.into_iter().map(|c| {
-            // The ring is a shadow outside the circle, so every circle takes the same room.
+            let swatch = color(picker[c as usize]);
+            // Around the swatch, not a shadow on it: a shadow's spread keeps the swatch's corner
+            // radius, so a circle's ring would come out a rounded square.
+            let out = m.swatch_ring_gap + m.swatch_ring;
+            let ring = div()
+                .absolute()
+                .top(px(-out))
+                .left(px(-out))
+                .size(px(m.swatch + 2.0 * out))
+                .rounded(px(m.swatch_radius + out))
+                .border(px(m.swatch_ring))
+                .border_color(m.swatch_ring_color.map_or(swatch, color));
             div()
                 .id(("menu-color", row * Color::ALL.len() + c as usize))
+                .relative()
                 .size(px(m.swatch))
                 .flex_none()
-                .rounded(px(m.swatch_radius))
-                .bg(color(session.theme().picker[c as usize]))
-                .border(px(m.swatch_edge))
-                .border_color(ring)
-                .when(current == Some(c), |d| {
-                    d.shadow(vec![
-                        gpui::BoxShadow {
-                            color: ring,
-                            offset: gpui::point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            inset: false,
-                            spread_radius: px(m.swatch_ring_gap + m.swatch_ring),
-                        },
-                        gpui::BoxShadow {
-                            color: color(m.bg),
-                            offset: gpui::point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            inset: false,
-                            spread_radius: px(m.swatch_ring_gap),
-                        },
-                    ])
-                })
+                .when(current == Some(c), |d| d.child(ring))
+                .child(
+                    div()
+                        .size_full()
+                        .rounded(px(m.swatch_radius))
+                        .bg(swatch)
+                        .border(px(m.swatch_edge))
+                        .border_color(color(m.ink)),
+                )
                 .cursor_pointer()
                 .on_click(cx.listener(move |w, _, _, cx| {
                     w.input(Input::MenuChoose(MenuAction::Recolor(c)), cx)

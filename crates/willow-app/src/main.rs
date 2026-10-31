@@ -367,7 +367,9 @@ impl Render for Willow {
         self.session.set_align(align);
         if theme.name != self.session.theme().name {
             self.session.set_theme(theme);
+            self.arm_recovery(cx);
             self.regenerate(cx);
+            self.arm_text_check(cx);
         }
         bench::step(self, window);
         let now = self.start.elapsed();
@@ -698,8 +700,9 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         }
 
         // The weave: lines at a fixed screen size at any zoom, moving with the canvas.
-        for (i, wv) in t.weave.iter().flatten().enumerate() {
-            let (vertical, ink) = (i == 1, color(wv.color));
+        let weave = t.weave.iter().filter(|_| frame.grid);
+        for (vertical, wv) in weave.flat_map(|w| [(false, w.horizontal), (true, w.vertical)]) {
+            let ink = color(wv.color);
             let (len, across) = match vertical {
                 true => (bounds.size.height, bounds.size.width),
                 false => (bounds.size.width, bounds.size.height),
@@ -770,7 +773,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         for (a, c) in &v.selection {
             window.paint_quad(gpui::fill(
                 Bounds::from_corners(at(*a), at(*c)),
-                color(zt.pill.map_or(sel.text, |p| p.selection)),
+                color(t.title_selection()),
             ));
         }
         text::paint_line(
@@ -790,8 +793,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             window.paint_quad(gpui::fill(b, color(t.title_ink())));
         }
         if let Some(c) = v.caret {
-            let ink = zt.pill.map_or(t.caret.color, |p| p.ink);
-            paint_caret(window, origin, c, t, ink, z, 1.0);
+            paint_caret(window, origin, c, t, t.title_caret(), z, 1.0);
         }
     }
     let width = frame.connector_width * z;
@@ -801,9 +803,9 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
         if c.hovered {
-            capped_line(window, p, q, hover_width, hover, cs.square);
+            line(window, p, q, hover_width, hover, cs.square);
         } else {
-            capped_line(window, p, q, width, ink, cs.square);
+            line(window, p, q, width, ink, cs.square);
         }
     }
 
@@ -906,19 +908,13 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
 
     // A link drag's band over every shape, in the hovered connector's style.
     if let Some(l) = frame.link_drag {
-        capped_line(window, at(l.from), at(l.to), hover_width, hover, cs.square);
+        line(window, at(l.from), at(l.to), hover_width, hover, cs.square);
     }
 
     // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
     let m = &t.midpoint;
-    let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
-    let shadow = [BoxShadow {
-        color: color(sh.color),
-        offset: point(px(sh.x), px(sh.y)),
-        blur_radius: px(sh.blur / 2.0),
-        spread_radius: px(sh.spread),
-        inset: false,
-    }];
+    let d = m.size + 2.0 * m.stroke_width;
+    let shadow = [box_shadow(&m.shadow, 1.0, false)];
     for &p in &frame.midpoints {
         let b = Bounds::new(at(p) - point(px(d / 2.0), px(d / 2.0)), size(px(d), px(d)));
         window.paint_drop_shadows(b, Corners::all(px(d / 2.0)), &shadow);
@@ -984,21 +980,19 @@ fn paint_tab_picker(
     t: &willow_core::TabPickerStyle,
     picker: &[(Side, gpui::Point<Pixels>)],
 ) {
-    let shadow = t.shadow.map(|s| BoxShadow {
-        color: color(s.color),
-        offset: point(px(s.x), px(s.y)),
-        blur_radius: px(s.blur / 2.0),
-        spread_radius: px(s.spread),
-        inset: false,
-    });
+    let shadow = t.shadow.map(|s| box_shadow(&s, 1.0, false));
     for &(side, m) in picker {
         let (dx, dy) = side.unit();
         let (dx, dy) = (dx as f32, dy as f32);
         let along = |d: f32| m + point(px(dx * d), px(dy * d));
         let mut d = 0.0;
         while d < t.stub_length {
-            let end = (d + t.dash).min(t.stub_length);
-            line(window, along(d), along(end), t.stub_width, color(t.stub));
+            // Butt ends: a dash is `dash` long, its gap as long.
+            let (a, b) = (along(d), along((d + t.dash).min(t.stub_length)));
+            let half = t.stub_width / 2.0;
+            let across = point(px(dy.abs() * half), px(dx.abs() * half));
+            let dash = Bounds::from_corners(a.min(&b) - across, a.max(&b) + across);
+            window.paint_quad(gpui::fill(dash, color(t.stub)));
             d += 2.0 * t.dash;
         }
         let c = along(t.offset);
@@ -1014,7 +1008,7 @@ fn paint_tab_picker(
         // The arrow: a shaft and two wings at its tip.
         let (g, ink) = (t.glyph_size / 2.0, color(t.glyph));
         let at = |a: f32, b: f32| c + point(px(dx * a - dy * b), px(dy * a + dx * b));
-        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink);
+        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink, false);
         for w in [-1.0, 1.0] {
             line(
                 window,
@@ -1022,6 +1016,7 @@ fn paint_tab_picker(
                 at(g, 0.0),
                 t.glyph_width,
                 ink,
+                false,
             );
         }
     }
@@ -1039,19 +1034,9 @@ fn box_shadow(s: &Shadow, z: f32, inset: bool) -> BoxShadow {
     }
 }
 
-/// A straight line from `p` to `q`, `width` screen pixels wide.
+/// A straight line from `p` to `q`, `width` screen pixels wide, with square caps if `square`;
+/// the quad it draws for a straight line has them anyway.
 fn line(
-    window: &mut Window,
-    p: gpui::Point<Pixels>,
-    q: gpui::Point<Pixels>,
-    width: f32,
-    ink: Hsla,
-) {
-    capped_line(window, p, q, width, ink, false);
-}
-
-/// `line`, with square caps if `square`; the quad it draws for a straight line has them anyway.
-fn capped_line(
     window: &mut Window,
     p: gpui::Point<Pixels>,
     q: gpui::Point<Pixels>,
@@ -1105,20 +1090,19 @@ pub(crate) fn shadows(
     z: f32,
 ) -> Vec<BoxShadow> {
     let mix = |a: f32, b: f32| a + (b - a) * k;
-    let zmix = |a: f32, b: f32| mix(a, b) * z;
     rest.iter()
         .zip(selected)
         .map(|(a, b)| {
             let (ca, cb) = (a.color.0.to_be_bytes(), b.color.0.to_be_bytes());
             let c: [u8; 4] = std::array::from_fn(|i| mix(ca[i] as f32, cb[i] as f32).round() as u8);
-            BoxShadow {
-                color: color(Rgba(u32::from_be_bytes(c))),
-                offset: point(px(zmix(a.x, b.x)), px(zmix(a.y, b.y))),
-                // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
-                blur_radius: px(zmix(a.blur, b.blur) / 2.0),
-                spread_radius: px(zmix(a.spread, b.spread)),
-                inset: false,
-            }
+            let mixed = Shadow {
+                color: Rgba(u32::from_be_bytes(c)),
+                x: mix(a.x, b.x),
+                y: mix(a.y, b.y),
+                blur: mix(a.blur, b.blur),
+                spread: mix(a.spread, b.spread),
+            };
+            box_shadow(&mixed, z, false)
         })
         .collect()
 }
@@ -1211,6 +1195,8 @@ fn main() {
         }
         None => Document::new(),
     };
+    #[cfg(target_os = "macos")]
+    titlebar_macos::one_full_screen_item();
     gpui_platform::application().run(move |cx: &mut App| {
         let reset_zoom = if cfg!(target_os = "macos") {
             "cmd-0"
@@ -1223,9 +1209,10 @@ fn main() {
         } else {
             ("ctrl-=", "ctrl-+", "ctrl--")
         };
+        // The native menu shows the first binding: Zoom In reads as Cmd +.
         cx.bind_keys([
-            KeyBinding::new(zoom_in, ZoomIn, None),
             KeyBinding::new(zoom_in_plus, ZoomIn, None),
+            KeyBinding::new(zoom_in, ZoomIn, None),
             KeyBinding::new(zoom_out, ZoomOut, None),
         ]);
         let full_screen = if cfg!(target_os = "macos") {

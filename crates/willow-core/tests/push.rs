@@ -189,3 +189,64 @@ fn the_pushed_subtree_slides_from_its_old_place_over_220_ms() {
     // The new shape and the source don't slide.
     assert_eq!((slide(0, "a"), slide(0, "d")), ((0.0, 0.0), (0.0, 0.0)));
 }
+
+/// How far `name` is drawn off its rest position at `ms`, slides only.
+fn slide(s: &Session, name: &str, ms: u64) -> (f32, f32) {
+    let (from, to) = (
+        Point {
+            x: -1000.0,
+            y: -1000.0,
+        },
+        Point {
+            x: 1000.0,
+            y: 1000.0,
+        },
+    );
+    let f = s.draw(from, to, Duration::from_millis(ms));
+    let v = f.shapes.iter().find(|v| v.shape.id.0 == name).expect(name);
+    (v.slide.x, v.slide.y)
+}
+
+/// `a`, then the new `d`, then `b` and `c` pushed one slot down, with `d` no longer edited.
+fn inserted() -> Session {
+    let mut s = session(
+        &[("a", 0, 0), ("b", 0, 97), ("c", 0, 194)],
+        &[("a", "b"), ("b", "c")],
+    );
+    s.create_linked(&id("a"), Side::Bottom);
+    s.handle(Input::Escape, T);
+    s
+}
+
+#[test]
+fn undoing_and_redoing_an_insertion_slides_the_subtree_there_and_back() {
+    let mut s = inserted();
+    let (settled, later) = (Duration::from_millis(300), Duration::from_millis(600));
+    assert_eq!(at(&s, "b"), (0, 194));
+    s.handle(Input::Undo, settled);
+    // Drawn where they were (97 units down), easing up to where they were placed.
+    assert_eq!((at(&s, "b"), at(&s, "c")), ((0, 97), (0, 194)));
+    assert_eq!(
+        (slide(&s, "b", 300), slide(&s, "c", 300)),
+        ((0.0, 97.0), (0.0, 97.0))
+    );
+    assert_eq!(slide(&s, "a", 300), (0.0, 0.0));
+    assert_eq!(slide(&s, "b", 520), (0.0, 0.0));
+
+    s.handle(Input::Redo, later);
+    assert_eq!(at(&s, "b"), (0, 194));
+    assert_eq!(slide(&s, "b", 600), (0.0, -97.0));
+}
+
+#[test]
+fn undoing_an_insertion_during_its_slide_retargets_it() {
+    let mut s = inserted();
+    let left = slide(&s, "b", 110).1;
+    assert!(-97.0 < left && left < 0.0, "{left}");
+    s.handle(Input::Undo, Duration::from_millis(110));
+    // Still drawn at 194 + left, now off a rest position 97 units higher.
+    assert_eq!(at(&s, "b"), (0, 97));
+    assert_eq!(slide(&s, "b", 110), (0.0, left + 97.0));
+    assert!(s.animating(Duration::from_millis(329)));
+    assert!(!s.animating(Duration::from_millis(330)));
+}

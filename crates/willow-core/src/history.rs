@@ -138,7 +138,7 @@ struct Group {
 /// The latest unbroken run of changes that left every shape's box alone but for text height:
 /// revisions `from` to `to`, the shapes they touched by index.
 #[derive(Debug, Default)]
-struct TextRun {
+struct TextEdits {
     from: u64,
     to: u64,
     shapes: Vec<usize>,
@@ -152,7 +152,7 @@ pub(crate) struct History {
     open: Option<Group>,
     /// Counts changes to the document (including undo and redo); crash recovery watches it.
     revision: u64,
-    text_run: TextRun,
+    text_edits: TextEdits,
     /// The panel text for the document as it is now, when it isn't plain regenerated text.
     pub text: Option<String>,
 }
@@ -203,16 +203,16 @@ impl History {
         let first = (self.open.as_mut()).is_none_or(|g| g.set.insert(before.id.clone()));
         self.record(first.then_some(Op::Set(before)));
         if same_box {
-            let run = &mut self.text_run;
-            if run.to + 1 != self.revision {
-                *run = TextRun {
+            let edits = &mut self.text_edits;
+            if edits.to + 1 != self.revision {
+                *edits = TextEdits {
                     from: self.revision - 1,
-                    ..TextRun::default()
+                    ..TextEdits::default()
                 };
             }
-            run.to = self.revision;
-            if run.shapes.last() != Some(&i) {
-                run.shapes.push(i);
+            edits.to = self.revision;
+            if edits.shapes.last() != Some(&i) {
+                edits.shapes.push(i);
             }
         }
     }
@@ -220,8 +220,8 @@ impl History {
     /// The shapes (by index) that may have changed since `revision`, when nothing but their
     /// text did; `None` when anything else may have.
     pub(crate) fn text_changed_since(&self, revision: u64) -> Option<&[usize]> {
-        let run = &self.text_run;
-        (run.to == self.revision && run.from <= revision).then_some(&run.shapes[..])
+        let edits = &self.text_edits;
+        (edits.to == self.revision && edits.from <= revision).then_some(&edits.shapes[..])
     }
 
     /// Runs `f` as one step; inside an open group, its changes join the group.

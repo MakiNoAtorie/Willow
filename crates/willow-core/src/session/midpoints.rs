@@ -51,8 +51,8 @@ impl Session {
             self.viewport.to_canvas(p),
             MIDPOINT_HIT / self.viewport.zoom,
         );
-        let i = self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = self.drawn_at(s);
+        let i = (0..self.doc.shapes.len()).rfind(|&i| {
+            let (s, (x, y)) = (&self.doc.shapes[i], self.drawn_top_left(i));
             let (x, y) = (x as f32, y as f32);
             (x - r..=x + s.width as f32 + r).contains(&c.x)
                 && (y - r..=y + self.shape_height(s) + r).contains(&c.y)
@@ -79,11 +79,15 @@ impl Session {
         hover != std::mem::replace(&mut self.mid.hover, hover.clone())
     }
 
-    /// The hovered shape's four edge midpoints in canvas units, or none: not on the shape
-    /// being edited, nor during a gesture other than a midpoint press.
-    pub(crate) fn midpoints(&self) -> Vec<Point> {
-        let idle = matches!(self.gesture, None | Some(Gesture::Midpoint { .. }));
-        let Some(id) = self.mid.hover.as_ref().filter(|_| idle && !self.space_held) else {
+    /// The hovered shape's four edge midpoints in canvas units as painted at `now`, on the
+    /// lifted shape, or none: not on the shape being edited, nor during a gesture other than a
+    /// midpoint press, nor under an open menu or picker.
+    pub(crate) fn midpoints(&self, now: Duration) -> Vec<Point> {
+        let idle = matches!(self.gesture, None | Some(Gesture::Midpoint { .. }))
+            && !self.space_held
+            && self.menu.is_none()
+            && !self.tab_picker;
+        let Some(id) = self.mid.hover.as_ref().filter(|_| idle) else {
             return Vec::new();
         };
         if self.editing.as_ref().is_some_and(|e| &e.id == id) {
@@ -92,8 +96,15 @@ impl Session {
         let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
             return Vec::new();
         };
-        let r = self.drawn(s);
-        SIDES.map(|side| edge_midpoint(r, side)).to_vec()
+        let (r, lift) = (self.drawn(s), self.lift(self.ring(id, now)));
+        let lifted = |side| {
+            let p = edge_midpoint(r, side);
+            Point {
+                x: p.x + lift.x,
+                y: p.y + lift.y,
+            }
+        };
+        SIDES.map(lifted).to_vec()
     }
 
     /// Creates an empty shape linked to `id` on `side`, one creation gap away (placed as the

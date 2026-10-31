@@ -32,7 +32,7 @@ pub use theme::{
     CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, DESK,
     KeyPanStyle, MenuStyle, MidpointStyle, PAPER, POSTER, Rgba, RippleStyle, SelectionStyle,
     Shadow, ShapeStyle, THEMES, TabPickerStyle, Theme, TitlePill, ToggleStyle, Transition, Weave,
-    ZoneStyle, ZoomPillStyle, ZoomStyle,
+    WeaveLines, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
@@ -128,6 +128,11 @@ pub struct Shape {
 }
 
 impl Shape {
+    /// Its top-left moved by (dx, dy): how a drawn position is made from a placed one.
+    pub(crate) fn moved_by(&self, (dx, dy): (i32, i32)) -> (i32, i32) {
+        (self.x.saturating_add(dx), self.y.saturating_add(dy))
+    }
+
     /// An empty neutral shape of the default width with its top-left at (x, y).
     pub fn new(id: ShapeId, x: i32, y: i32) -> Self {
         Shape {

@@ -59,6 +59,32 @@ fn a_card_has_a_tab_in_its_picker_color_and_paper_has_none() {
 }
 
 #[test]
+fn midpoints_sit_on_the_lifted_card_and_are_hit_where_they_rest() {
+    let mut s = session(desk());
+    let mods = Modifiers::default();
+    let r = s.drawn_rect(&id("a")).expect("a");
+    let (top, on) = (r.y, s.viewport().to_screen(r.center()));
+    s.handle(Input::PointerMove { pos: on, mods }, T);
+    let tops = |s: &Session, now| {
+        let m = s.draw(SCREEN.0, SCREEN.1, now).midpoints;
+        m.iter().map(|p| p.y).fold(f32::MAX, f32::min)
+    };
+    assert_eq!(tops(&s, LATER), top, "not selected: no lift");
+    s.select([id("a")]);
+    assert_eq!(tops(&s, LATER), top - 4.0);
+
+    // The lifted circle's own top isn't the resting one: the press stays with the rest.
+    let pos = s.viewport().to_screen(Point {
+        x: r.center().x,
+        y: top,
+    });
+    let button = Button::Left;
+    s.handle(Input::PointerDown { pos, button, mods }, T);
+    s.handle(Input::PointerUp { pos, button, mods }, T);
+    assert_eq!(s.document().shapes.len(), 2);
+}
+
+#[test]
 fn a_selected_card_lifts_4px_as_its_ring_fades_in_and_hit_testing_stays() {
     let mut s = session(desk());
     let placed = s.drawn_rect(&id("a")).unwrap();

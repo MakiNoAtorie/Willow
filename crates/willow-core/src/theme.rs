@@ -243,6 +243,8 @@ pub struct MenuStyle {
     pub swatch_gap: f32,
     pub swatch_ring: f32,
     pub swatch_ring_gap: f32,
+    /// The ring's color; `None` is the swatch's own picker color.
+    pub swatch_ring_color: Option<Rgba>,
     /// Ring, then drop shadow.
     pub shadow: [Shadow; 2],
     /// The menu's left edge from the window's.
@@ -324,10 +326,17 @@ pub struct SelectionStyle {
 
 /// One set of parallel lines in the canvas texture: `width` thick every `period`, screen px.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Weave {
+pub struct WeaveLines {
     pub color: Rgba,
     pub width: f32,
     pub period: f32,
+}
+
+/// A canvas texture, at a fixed screen size at any zoom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weave {
+    pub horizontal: WeaveLines,
+    pub vertical: WeaveLines,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -486,8 +495,7 @@ pub struct Theme {
     pub grid_dot: Rgba,
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
-    /// Canvas texture of horizontal then vertical lines, at a fixed screen size at any zoom.
-    pub weave: Option<[Weave; 2]>,
+    pub weave: Option<Weave>,
     pub shape: ShapeStyle,
     /// Screen pixels shape borders and zone edges never get thinner than; 0 lets them scale away.
     pub border_min_screen: f32,
@@ -544,6 +552,16 @@ impl Theme {
     /// Zone title text.
     pub fn title_ink(&self) -> Rgba {
         self.zone.pill.map_or(self.ink, |p| p.ink)
+    }
+
+    /// Selected zone title text's highlight.
+    pub fn title_selection(&self) -> Rgba {
+        self.zone.pill.map_or(self.selection.text, |p| p.selection)
+    }
+
+    /// The caret in a zone title.
+    pub fn title_caret(&self) -> Rgba {
+        self.zone.pill.map_or(self.caret.color, |p| p.ink)
     }
 
     pub fn pastel(&self, c: Color) -> Rgba {
@@ -766,6 +784,7 @@ pub const PAPER: Theme = Theme {
         swatch_gap: 7.0,
         swatch_ring: 1.5,
         swatch_ring_gap: 2.0,
+        swatch_ring_color: None,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -871,8 +890,8 @@ pub const PAPER: Theme = Theme {
         font_size: 12.5,
         line_height: 1.65,
         advance: 0.6,
-        // The mockup's 46 px under the title bar, plus its 14 px padding.
-        pad_top: 60.0,
+        // The mockup's 46 px, which replace its 14 px padding at the top.
+        pad_top: 46.0,
         pad_bottom: 14.0,
         gutter_width: 40.0,
         gutter_gap: 14.0,
@@ -915,18 +934,18 @@ pub const DESK: Theme = Theme {
     // No dot grid.
     grid_dot: rgba(0, 0, 0, 0.0),
     // The mockups' two repeating gradients.
-    weave: Some([
-        Weave {
+    weave: Some(Weave {
+        horizontal: WeaveLines {
             color: rgba(120, 100, 70, 0.035),
             width: 1.0,
             period: 3.0,
         },
-        Weave {
+        vertical: WeaveLines {
             color: rgba(120, 100, 70, 0.03),
             width: 1.0,
             period: 4.0,
         },
-    ]),
+    }),
     shape: ShapeStyle {
         radius: 4.0,
         pad_x: 15.0,
@@ -975,6 +994,8 @@ pub const DESK: Theme = Theme {
         title_weight: 700.0,
         title_upper: true,
         title_spacing: 0.08,
+        // The mockups' normal line box is about 4 px shorter than this 1.5: same glyphs.
+        title_y: 10.0,
         ..PAPER.zone
     },
     selection: SelectionStyle {
@@ -1170,8 +1191,9 @@ pub const POSTER: Theme = Theme {
     grid_dot: rgba(0, 0, 0, 0.0),
     shape: ShapeStyle {
         radius: 10.0,
-        // The mockups' 14 and 12 padding, inside the border.
-        pad_x: 16.5,
+        // Inside the border: the mockups' 12 padding, and across the 178 of text they show in
+        // a default shape, which decides where words wrap.
+        pad_x: 16.0,
         pad_y: 14.5,
         pad_top: 14.5,
         border: 2.5,
@@ -1298,6 +1320,7 @@ pub const POSTER: Theme = Theme {
         swatch_radius: 6.0,
         swatch_edge: 2.0,
         swatch_ring: 2.5,
+        swatch_ring_color: Some(INK),
         shadow: [
             Shadow {
                 x: 0.0,

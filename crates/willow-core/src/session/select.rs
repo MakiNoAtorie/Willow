@@ -77,13 +77,13 @@ impl Session {
         *to = self.viewport.to_canvas(pos);
         let (a, b) = self.marquee().expect("marquee");
         // ponytail: scans every shape per move; a spatial index if 10k-shape marquees lag.
-        let touched: Vec<ShapeId> = (self.doc.shapes.iter())
-            .filter(|s| {
-                let (x, y) = self.drawn_at(s);
+        let touched: Vec<ShapeId> = (self.doc.shapes.iter().enumerate())
+            .filter(|&(i, s)| {
+                let (x, y) = self.drawn_top_left(i);
                 let (x, y) = (x as f32, y as f32);
                 x <= b.x && x + s.width as f32 >= a.x && y <= b.y && y + self.shape_height(s) >= a.y
             })
-            .map(|s| s.id.clone())
+            .map(|(_, s)| s.id.clone())
             .collect();
         let ids: Vec<ShapeId> = self.marquee_base.iter().cloned().chain(touched).collect();
         self.select(ids);

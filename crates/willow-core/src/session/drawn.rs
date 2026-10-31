@@ -73,11 +73,16 @@ pub(super) struct Spaced {
     /// How each chain settled inside itself, by shape index; a keystroke redoes only its chain.
     settled: Vec<(i32, i32)>,
     /// Where each shape of `ids` is in them, for reads by ID.
-    index: HashMap<ShapeId, usize, spacing::Cheap>,
+    index: HashMap<ShapeId, usize, spacing::CheapHash>,
     /// How far each shape is drawn off its placed position, by shape index.
     offsets: Vec<(i32, i32)>,
     /// Slides by shape: a pass starts them, `tick` drops finished ones.
     slides: HashMap<ShapeId, Slide>,
+    /// An undo or redo since the last pass: no moved shape lands, all slide from where they were.
+    pub(super) undone: bool,
+    /// Shapes whose marked text changed since the last pass: it sits outside the history, so
+    /// the revision doesn't show it.
+    pub(super) composed: Vec<usize>,
 }
 
 impl Spaced {
@@ -105,9 +110,9 @@ impl Spaced {
         self.slides.insert(id.clone(), Slide { from, since: now });
     }
 
-    /// Slides every shape the last pass moved off its offset in `old`. A shape whose placed
-    /// position changed by `moved` (by index; empty for none) starts from there, so a drop
-    /// slides only if pushed off where it was released, or stays put if drawn where it was.
+    /// Slides every shape the last pass moved off its offset in `old`, from where it was drawn.
+    /// A shape whose placed position the writer changed by `moved` (by index; empty for none)
+    /// instead starts from there, so a drop slides only if pushed off where it was released.
     fn slide_from(
         &mut self,
         old: &[(i32, i32)],
@@ -116,20 +121,74 @@ impl Spaced {
         now: Duration,
     ) {
         for (i, &(x, y)) in old.iter().enumerate() {
-            let (nx, ny) = self.offsets[i];
+            let new = self.offsets[i];
             let (mx, my) = moved.get(i).copied().unwrap_or_default();
-            let drawn_there = (x.saturating_sub(mx), y.saturating_sub(my)) == (nx, ny);
-            let (x, y) = match (mx, my) {
-                (0, 0) => (x, y),
-                _ if drawn_there => (nx, ny),
-                _ => (0, 0),
+            let was = (x.saturating_sub(mx), y.saturating_sub(my));
+            let from = match self.undone || (mx, my) == (0, 0) || was == new {
+                true => was,
+                false => (0, 0),
             };
-            if (x, y) != (nx, ny) {
+            if from != new {
                 let id = self.ids[i].clone();
-                let by = (x.saturating_sub(nx), y.saturating_sub(ny));
+                let by = (from.0.saturating_sub(new.0), from.1.saturating_sub(new.1));
                 self.slide(&id, by, theme, now);
             }
         }
+    }
+
+    /// Updates what the pass takes in for shapes `typed`; true if any of it changed.
+    fn update_text<'a>(&mut self, s: &Session, typed: impl Iterator<Item = &'a usize>) -> bool {
+        let mut stale = false;
+        for &i in typed {
+            let shape = &s.doc.shapes[i];
+            self.heights[i] = s.shape_height(shape);
+            let rect = Rect::of(shape, self.heights[i]);
+            if self.rects[i] != rect {
+                self.rects[i] = rect;
+                stale = true;
+                let chain = self.order.iter().find(|c| c.iter().any(|s| s.shape == i));
+                let chain = chain.expect("every shape is in a chain");
+                spacing::settle(chain, &self.rects, s.gaps(), &mut self.settled);
+            }
+        }
+        stale
+    }
+
+    /// Updates all that the pass takes in; if any of it changed, how far each shape's placed
+    /// position did, by shape index.
+    fn update_all(&mut self, s: &Session) -> Option<Vec<(i32, i32)>> {
+        let shapes = &s.doc.shapes;
+        self.heights = shapes.iter().map(|x| s.shape_height(x)).collect();
+        let at = shapes.iter().zip(&self.heights);
+        let rects: Vec<_> = at.map(|(x, &h)| Rect::of(x, h)).collect();
+        let ends = s.link_ends();
+        let same = self.rects == rects
+            && self.ends == *ends
+            && self.ids.iter().eq(shapes.iter().map(|x| &x.id));
+        if same {
+            return None;
+        }
+        let was = |x: &Shape| self.index.get(&x.id).map(|&i| self.rects[i]);
+        let moved = (shapes.iter().zip(&rects))
+            .map(|(x, r)| was(x).map_or((0, 0), |o| ((r.l - o.l) as i32, (r.t - o.t) as i32)))
+            .collect();
+        self.order = spacing::order(shapes, &ends);
+        self.rects = rects;
+        self.ends.clone_from(&ends);
+        if !self.ids.iter().eq(shapes.iter().map(|x| &x.id)) {
+            // The last offsets by the new indices: slides compare the two passes.
+            let offset = |x: &Shape| self.index.get(&x.id).map(|&i| self.offsets[i]);
+            let offsets = shapes.iter().map(|x| offset(x).unwrap_or_default());
+            self.offsets = offsets.collect();
+            self.ids = shapes.iter().map(|x| x.id.clone()).collect();
+            let at = self.ids.iter().cloned().enumerate();
+            self.index = at.map(|(i, id)| (id, i)).collect();
+        }
+        self.settled = vec![(0, 0); shapes.len()];
+        for chain in &self.order {
+            spacing::settle(chain, &self.rects, s.gaps(), &mut self.settled);
+        }
+        Some(moved)
     }
 }
 
@@ -179,12 +238,18 @@ impl Session {
     /// changed: walking every shape's layout costs a cold frame more than the pass does.
     pub(super) fn spaced(&self) -> Ref<'_, Spaced> {
         let (revision, last) = (self.history.revision(), self.spaced.borrow().revision);
-        if last != Some(revision) {
-            let typed = last.and_then(|r| self.history.text_changed_since(r));
+        if last != Some(revision) || !self.spaced.borrow().composed.is_empty() {
+            let typed = match last {
+                Some(r) if r == revision => Some(&[][..]),
+                _ => last.and_then(|r| self.history.text_changed_since(r)),
+            };
             let spaced = &mut *self.spaced.borrow_mut();
+            let composed = std::mem::take(&mut spaced.composed);
             let stale = match typed {
-                Some(typed) => self.retake_text(spaced, typed).then(Vec::new),
-                None => self.retake_all(spaced),
+                Some(typed) => {
+                    (spaced.update_text(self, typed.iter().chain(&composed))).then(Vec::new)
+                }
+                None => spaced.update_all(self),
             };
             if let Some(moved) = stale {
                 let gap = self.theme.min_gap;
@@ -195,64 +260,9 @@ impl Session {
                     spaced.slide_from(&old, &moved, self.theme, self.now);
                 }
             }
-            spaced.revision = Some(revision);
+            (spaced.revision, spaced.undone) = (Some(revision), false);
         }
         self.spaced.borrow()
-    }
-
-    /// Updates what the pass takes in for shapes `typed`; true if any of it changed.
-    fn retake_text(&self, spaced: &mut Spaced, typed: &[usize]) -> bool {
-        let mut stale = false;
-        for &i in typed {
-            let s = &self.doc.shapes[i];
-            spaced.heights[i] = self.shape_height(s);
-            let rect = Rect::of(s, spaced.heights[i]);
-            if spaced.rects[i] != rect {
-                spaced.rects[i] = rect;
-                stale = true;
-                let chain = spaced.order.iter().find(|c| c.iter().any(|s| s.shape == i));
-                let chain = chain.expect("every shape is in a chain");
-                spacing::settle(chain, &spaced.rects, self.gaps(), &mut spaced.settled);
-            }
-        }
-        stale
-    }
-
-    /// Updates all that the pass takes in; if any of it changed, how far each shape's placed
-    /// position did, by shape index.
-    fn retake_all(&self, spaced: &mut Spaced) -> Option<Vec<(i32, i32)>> {
-        let shapes = &self.doc.shapes;
-        spaced.heights = shapes.iter().map(|s| self.shape_height(s)).collect();
-        let at = shapes.iter().zip(&spaced.heights);
-        let rects: Vec<_> = at.map(|(s, &h)| Rect::of(s, h)).collect();
-        let ends = self.link_ends();
-        let same = spaced.rects == rects
-            && spaced.ends == *ends
-            && spaced.ids.iter().eq(shapes.iter().map(|s| &s.id));
-        if same {
-            return None;
-        }
-        let was = |s: &Shape| spaced.index.get(&s.id).map(|&i| spaced.rects[i]);
-        let moved = (shapes.iter().zip(&rects))
-            .map(|(s, r)| was(s).map_or((0, 0), |o| ((r.l - o.l) as i32, (r.t - o.t) as i32)))
-            .collect();
-        spaced.order = spacing::order(shapes, &ends);
-        spaced.rects = rects;
-        spaced.ends.clone_from(&ends);
-        if !spaced.ids.iter().eq(shapes.iter().map(|s| &s.id)) {
-            // The last offsets by the new indices: slides compare the two passes.
-            let offset = |s: &Shape| spaced.index.get(&s.id).map(|&i| spaced.offsets[i]);
-            let offsets = shapes.iter().map(|s| offset(s).unwrap_or_default());
-            spaced.offsets = offsets.collect();
-            spaced.ids = shapes.iter().map(|s| s.id.clone()).collect();
-            let at = spaced.ids.iter().cloned().enumerate();
-            spaced.index = at.map(|(i, id)| (id, i)).collect();
-        }
-        spaced.settled = vec![(0, 0); shapes.len()];
-        for chain in &spaced.order {
-            spacing::settle(chain, &spaced.rects, self.gaps(), &mut spaced.settled);
-        }
-        Some(moved)
     }
 
     fn gaps(&self) -> spacing::Gaps {
@@ -269,9 +279,9 @@ impl Session {
         self.spaced();
     }
 
-    /// Every shape's height as of the last history step, in document order: marked text sits
-    /// outside the history, so a shape being composed in may differ.
-    pub(super) fn spaced_heights(&self) -> Vec<f32> {
+    /// Every shape's drawn height, in document order: what `save` needs for the side rule. An
+    /// open composition counts, as it does for the pass.
+    pub fn heights(&self) -> Vec<f32> {
         self.spaced().heights.clone()
     }
 
@@ -316,21 +326,22 @@ impl Session {
         self.spaced().offsets.get(i).copied().unwrap_or_default()
     }
 
-    /// Top-left of `s` as drawn. `s` may be a preview or copy of a document shape: its own
-    /// position counts, moved by the offset of the shape with its ID. Costs no layout, for
-    /// the loops that cull before measuring.
+    /// Top-left of `s` as drawn, at the cost of an ID lookup and no layout. `s` may be a preview
+    /// or copy of a document shape: its own position counts, moved by the offset of the shape
+    /// with its ID. Loops over every shape use `drawn_top_left`.
     pub(crate) fn drawn_at(&self, s: &Shape) -> (i32, i32) {
-        let (dx, dy) = self.drawn_offset(&s.id);
-        (s.x.saturating_add(dx), s.y.saturating_add(dy))
+        s.moved_by(self.drawn_offset(&s.id))
+    }
+
+    /// Top-left of the shape at index `i` as drawn, for the loops over every shape.
+    pub(crate) fn drawn_top_left(&self, i: usize) -> (i32, i32) {
+        self.doc.shapes[i].moved_by(self.drawn_offset_at(i))
     }
 
     /// Every shape's drawn top-left, in document order: what `save` reads with `heights`.
     pub fn drawn_positions(&self) -> Vec<(i32, i32)> {
-        let at = |(i, s): (usize, &Shape)| {
-            let (dx, dy) = self.drawn_offset_at(i);
-            (s.x.saturating_add(dx), s.y.saturating_add(dy))
-        };
-        self.doc.shapes.iter().enumerate().map(at).collect()
+        let all = 0..self.doc.shapes.len();
+        all.map(|i| self.drawn_top_left(i)).collect()
     }
 
     /// Every shape (indices into the document) in story order within its chain, as drawn.
@@ -340,7 +351,15 @@ impl Session {
 
     /// The drawn rectangle of `s`, as `drawn_at` takes it.
     pub(crate) fn drawn(&self, s: &Shape) -> DrawnRect {
-        let (x, y) = self.drawn_at(s);
+        self.rect_at(s, self.drawn_at(s))
+    }
+
+    /// The drawn rectangle of the shape at index `i`, for the loops over every shape.
+    pub(crate) fn drawn_index(&self, i: usize) -> DrawnRect {
+        self.rect_at(&self.doc.shapes[i], self.drawn_top_left(i))
+    }
+
+    fn rect_at(&self, s: &Shape, (x, y): (i32, i32)) -> DrawnRect {
         DrawnRect {
             x: x as f32,
             y: y as f32,

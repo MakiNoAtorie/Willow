@@ -5485,6 +5485,7 @@ dependencies = [
  "gpui",
  "gpui_apple",
  "gpui_platform",
+ "objc2-foundation 0.3.2",
  "rfd",
  "willow-core",
 ]

@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use common::{doc_with, session_of};
-use willow_core::{Button, Input, Modifiers, Point, Recovery, Session};
+use willow_core::{Button, Input, Link, Modifiers, Point, Recovery, Session, Shape, ShapeId};
 
 const T: Duration = Duration::ZERO;
 /// Inside the centered default shape.
@@ -26,6 +26,10 @@ fn click(s: &mut Session, pos: Point) {
 }
 
 fn mark(s: &mut Session, text: &str, selected: Option<Range<usize>>) {
+    mark_at(s, text, selected, T);
+}
+
+fn mark_at(s: &mut Session, text: &str, selected: Option<Range<usize>>, now: Duration) {
     let (text, replace) = (text.into(), None);
     s.handle(
         Input::Mark {
@@ -33,7 +37,7 @@ fn mark(s: &mut Session, text: &str, selected: Option<Range<usize>>) {
             replace,
             selected,
         },
-        T,
+        now,
     );
 }
 
@@ -185,15 +189,21 @@ fn save_commits_the_marked_text_first() {
 }
 
 #[test]
-fn a_recovery_leaves_out_the_marked_text_and_keeps_composing() {
+fn a_recovery_waits_for_the_composition_and_comes_due_when_it_ends() {
     let mut s = editing("ab");
     commit(&mut s, "x");
     mark(&mut s, "k", None);
-    let Some(Recovery::Write { document, .. }) = s.take_recovery(Duration::from_secs(5)) else {
+    let due = Duration::from_secs(5);
+    assert_eq!(s.recovery_wake(due), None);
+    assert_eq!(s.take_recovery(due), None);
+    assert_eq!(state(&s), (Some(3..4), 4, 4));
+
+    mark(&mut s, "", None);
+    assert_eq!(s.recovery_wake(due), Some(Duration::ZERO));
+    let Some(Recovery::Write { document, .. }) = s.take_recovery(due) else {
         panic!("a write due");
     };
     assert_eq!(document.shapes[0].text.plain(), "abx");
-    assert_eq!(state(&s), (Some(3..4), 4, 4));
 }
 
 #[test]
@@ -207,38 +217,13 @@ fn a_saved_document_reads_unsaved_only_while_composing() {
 }
 
 #[test]
-fn heights_hold_the_marked_text_and_a_recovery_leaves_it_out() {
+fn heights_hold_the_marked_text_while_it_lasts() {
     let mut s = editing("ab");
-    commit(&mut s, "x");
     let plain = s.heights()[0];
     mark(&mut s, &"k ".repeat(100), None);
     assert!(s.heights()[0] > plain);
-    let Some(Recovery::Write { heights, .. }) = s.take_recovery(Duration::from_secs(5)) else {
-        panic!("a write due");
-    };
-    assert_eq!(heights[0], plain);
-    assert!(s.heights()[0] > plain);
-}
-
-#[test]
-fn a_recovery_leaves_marked_text_out_of_heights_read_after_a_real_edit() {
-    let mut s = editing("ab");
-    let plain = s.heights()[0];
-    let (text, replace) = ("k ".repeat(100), Some(0..1));
-    let selected = None;
-    s.handle(
-        Input::Mark {
-            text,
-            replace,
-            selected,
-        },
-        T,
-    );
-    assert!(s.heights()[0] > plain);
-    let Some(Recovery::Write { heights, .. }) = s.take_recovery(Duration::from_secs(5)) else {
-        panic!("a write due");
-    };
-    assert_eq!(heights[0], plain);
+    mark(&mut s, "", None);
+    assert_eq!(s.heights()[0], plain);
 }
 
 #[test]
@@ -270,4 +255,124 @@ fn ranges_past_the_end_or_inside_a_character_are_clamped() {
     s.handle(Input::Move(willow_core::Motion::Left), T);
     s.handle(Input::Unmark, T);
     assert_eq!(plain(&s), "abかな");
+}
+
+/// The shape `b` linked one creation gap below the shape being edited, `ab` held by the document.
+fn with_neighbor() -> Session {
+    let mut doc = doc_with("ab");
+    let a = doc.shapes[0].clone();
+    let b = ShapeId("b".into());
+    doc.links.push(Link(a.id.clone(), b.clone()));
+    doc.shapes.push(Shape::new(b, a.x, a.y + 97));
+    let mut s = session_of(doc);
+    s.select([a.id]);
+    s.handle(Input::StartEditing, T);
+    s
+}
+
+fn neighbor(s: &Session) -> i32 {
+    let r = s.drawn_rect(&ShapeId("b".into())).expect("b");
+    r.y as i32
+}
+
+/// How far `b` is drawn off its rest position just after a change at `T`, slides only.
+fn neighbor_slide(s: &Session) -> f32 {
+    let (from, to) = (
+        Point {
+            x: -999.0,
+            y: -999.0,
+        },
+        Point { x: 999.0, y: 999.0 },
+    );
+    let f = s.draw(from, to, T);
+    f.shapes
+        .iter()
+        .find(|v| v.shape.id.0 == "b")
+        .expect("b")
+        .slide
+        .y
+}
+
+#[test]
+fn every_composition_change_reruns_the_pass_and_slides_and_a_cancel_settles_back() {
+    let mut s = with_neighbor();
+    let rest = neighbor(&s);
+    let plain = s.heights();
+
+    mark(&mut s, &"k ".repeat(100), None);
+    let pushed = neighbor(&s);
+    assert!(pushed > rest, "{pushed}");
+    assert_eq!(neighbor_slide(&s), (rest - pushed) as f32);
+
+    mark(&mut s, &"k ".repeat(50), None);
+    let less = neighbor(&s);
+    assert!(rest < less && less < pushed, "{less}");
+
+    mark_at(&mut s, "", None, Duration::from_millis(300));
+    assert_eq!(neighbor(&s), rest);
+    assert_eq!(s.heights(), plain);
+    assert_eq!(neighbor_slide(&s), (less - rest) as f32);
+    assert_eq!(s.document().shapes[1].y, rest, "never a saved position");
+    assert!(s.is_saved());
+    s.handle(Input::Escape, T);
+    assert!(!s.can_undo());
+}
+
+#[test]
+fn a_commit_keeps_where_the_composition_pushed_the_neighbor() {
+    let mut s = with_neighbor();
+    mark(&mut s, &"k ".repeat(100), None);
+    let pushed = neighbor(&s);
+    commit(&mut s, &"k ".repeat(100));
+    assert_eq!(neighbor(&s), pushed);
+}
+
+#[test]
+fn a_recovery_after_a_composition_pairs_plain_heights_with_positions_that_match() {
+    let mut s = with_neighbor();
+    let rest = neighbor(&s);
+    commit(&mut s, "x");
+    let typed = s.heights();
+    mark(&mut s, &"k ".repeat(100), None);
+    assert!(neighbor(&s) > rest);
+    mark(&mut s, "", None);
+    let Some(Recovery::Write { heights, drawn, .. }) = s.take_recovery(Duration::from_secs(5))
+    else {
+        panic!("a write due");
+    };
+    assert_eq!((heights, drawn[1].1), (typed, rest));
+}
+
+#[test]
+fn regeneration_waits_for_the_end_of_editing_and_never_reads_a_composition() {
+    let mut s = with_neighbor();
+    s.show_panel();
+    mark(&mut s, "zzz", None);
+    assert!(s.take_regeneration().is_none());
+    mark(&mut s, "", None);
+    s.handle(Input::Escape, T);
+    let r = s.take_regeneration().expect("the panel opened");
+    s.regenerated(r.run());
+    assert!(!s.panel().text().contains("zzz"), "{}", s.panel().text());
+}
+
+#[test]
+fn a_cancelled_composition_keeps_panel_text_that_holds_the_document() {
+    let bytes = b"willow 1\n\na: \"ab\"\n\n@layout a 0,0 w210\n@layout oops\n".to_vec();
+    let load = willow_core::load(&bytes).unwrap();
+    let mut s = Session::open(
+        load,
+        bytes.clone(),
+        &willow_core::PAPER,
+        Box::new(common::Fake),
+    );
+    let text = s.panel().text().to_string();
+    assert!(text.contains("oops"), "{text}");
+    s.select([ShapeId("a".into())]);
+    s.handle(Input::StartEditing, T);
+    mark(&mut s, "k", None);
+    mark(&mut s, "", None);
+    s.handle(Input::Escape, T);
+    assert_eq!(s.panel().text(), text);
+    assert!(s.take_regeneration().is_none());
 }

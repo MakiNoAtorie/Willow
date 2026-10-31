@@ -3,17 +3,13 @@
 
 use std::collections::HashSet;
 
-use super::Session;
+use super::{Session, spacing};
 use crate::{Link, Shape, ShapeId, Side};
 
 /// Shape `root` and every shape linked beyond it, not through `from`, of `n` shapes linked at
 /// `ends` (index pairs; ends out of range are skipped).
 pub(super) fn beyond(n: usize, ends: &[(usize, usize)], root: usize, from: usize) -> Vec<usize> {
-    let mut next = vec![Vec::new(); n];
-    for &(a, b) in ends.iter().filter(|&&(a, b)| a < n && b < n) {
-        next[a].push(b);
-        next[b].push(a);
-    }
+    let next = spacing::neighbors(n, ends);
     let (mut out, mut seen) = (vec![root], HashSet::from([root, from]));
     let mut i = 0;
     while let Some(&s) = out.get(i) {

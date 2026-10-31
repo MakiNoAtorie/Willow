@@ -148,7 +148,7 @@ fn ime_marked_text_shows_in_the_title_and_only_its_commit_is_undoable() {
 }
 
 #[test]
-fn a_recovery_write_leaves_the_titles_marked_text_out() {
+fn a_recovery_write_waits_for_the_titles_composition() {
     let mut s = session("A");
     rename(&mut s);
     type_text(&mut s, "b");
@@ -161,11 +161,22 @@ fn a_recovery_write_leaves_the_titles_marked_text_out() {
         },
         T,
     );
-    let Some(Recovery::Write { document, .. }) = s.take_recovery(Duration::from_secs(5)) else {
+    let due = Duration::from_secs(5);
+    assert_eq!(s.take_recovery(due), None);
+    assert_eq!(title(&s), "Abか");
+    let (text, replace, selected) = (String::new(), None, None);
+    s.handle(
+        Input::Mark {
+            text,
+            replace,
+            selected,
+        },
+        T,
+    );
+    let Some(Recovery::Write { document, .. }) = s.take_recovery(due) else {
         panic!("a write due");
     };
     assert_eq!(document.zones[0].title, "Ab");
-    assert_eq!(title(&s), "Abか");
 }
 
 /// The draw query's view of zone "z": shown title, caret, selection and marked underline.

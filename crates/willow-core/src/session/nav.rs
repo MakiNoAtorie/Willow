@@ -116,9 +116,8 @@ impl Session {
             self.key_pan_down(dir);
             return true;
         };
-        let centers: Vec<Point> = (self.doc.shapes.iter())
-            .map(|s| self.drawn(s).center())
-            .collect();
+        let all = 0..self.doc.shapes.len();
+        let centers: Vec<Point> = all.map(|i| self.drawn_index(i).center()).collect();
         let Some(to) = next_shape(&self.doc, &centers, from, dir) else {
             // Nothing that way: a multi-selection still collapses, the view stays.
             self.select([self.doc.shapes[from].id.clone()]);

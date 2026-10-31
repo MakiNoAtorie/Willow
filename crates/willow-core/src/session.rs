@@ -65,10 +65,15 @@ pub struct Viewport {
 impl Viewport {
     /// The canvas point at the view's center.
     pub fn center(&self) -> Point {
-        self.to_canvas(Point {
+        self.to_canvas(self.screen_center())
+    }
+
+    /// The view's center in screen pixels.
+    fn screen_center(&self) -> Point {
+        Point {
             x: self.size.x / 2.0,
             y: self.size.y / 2.0,
-        })
+        }
     }
 
     pub fn to_screen(&self, p: Point) -> Point {
@@ -412,21 +417,6 @@ impl Session {
     pub fn shape_height(&self, shape: &Shape) -> f32 {
         let pad = &self.theme.shape;
         self.layout(shape).height + pad.pad_top + pad.pad_y + shape.extra_height as f32
-    }
-
-    /// Every shape's drawn height, in document order: what `save` needs for the side rule.
-    pub fn heights(&self) -> Vec<f32> {
-        let mut heights = self.spaced_heights();
-        if let Some(i) = self.composing_in() {
-            heights[i] = self.shape_height(&self.doc.shapes[i]);
-        }
-        heights
-    }
-
-    /// The index of the shape holding marked text, if any.
-    fn composing_in(&self) -> Option<usize> {
-        let e = self.editing.as_ref().filter(|e| e.marked.is_some())?;
-        (self.doc.shapes.iter()).position(|s| !e.zone && s.id == e.id)
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
@@ -1071,6 +1061,7 @@ impl Session {
                 } else {
                     self.history.redo(&mut self.doc);
                 }
+                self.spaced.get_mut().undone = true;
                 self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
@@ -1123,20 +1114,12 @@ impl Session {
                 self.respond(true)
             }
             Input::ResetZoom => {
-                let size = self.viewport.size;
-                let center = Point {
-                    x: size.x / 2.0,
-                    y: size.y / 2.0,
-                };
+                let center = self.viewport.screen_center();
                 (self.zoom).ease_to(&mut self.viewport, self.theme, 1.0, center, now);
                 self.respond(true)
             }
             Input::ZoomIn | Input::ZoomOut => {
-                let size = self.viewport.size;
-                let center = Point {
-                    x: size.x / 2.0,
-                    y: size.y / 2.0,
-                };
+                let center = self.viewport.screen_center();
                 let dy = if input == Input::ZoomIn { 1.0 } else { -1.0 } * ZOOM_NOTCH_PX;
                 (self.zoom).wheel(&mut self.viewport, self.theme, center, dy, now);
                 self.respond(true)
@@ -1262,8 +1245,8 @@ impl Session {
     /// A shape's interior under `p` hides the edges of shapes below it.
     fn edge_at(&self, p: Point) -> Option<(usize, Edge)> {
         let g = EDGE_GRAB;
-        for (i, s) in self.doc.shapes.iter().enumerate().rev() {
-            let r = self.drawn(s);
+        for i in (0..self.doc.shapes.len()).rev() {
+            let r = self.drawn_index(i);
             let tl = self.viewport.to_screen(Point { x: r.x, y: r.y });
             let z = self.viewport.zoom;
             let (w, h) = (r.width * z, r.height * z);
@@ -1291,8 +1274,8 @@ impl Session {
     /// Index of the topmost shape under screen point `p`.
     fn shape_at(&self, p: Point) -> Option<usize> {
         let c = self.viewport.to_canvas(p);
-        self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = self.drawn_at(s);
+        (0..self.doc.shapes.len()).rfind(|&i| {
+            let (s, (x, y)) = (&self.doc.shapes[i], self.drawn_top_left(i));
             let (x, y) = (x as f32, y as f32);
             (x..=x + s.width as f32).contains(&c.x) && (y..=y + self.shape_height(s)).contains(&c.y)
         })

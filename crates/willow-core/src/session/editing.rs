@@ -316,16 +316,16 @@ impl Session {
     /// The shape whose center is nearest the view center; ties go in generation order.
     fn nearest_view_center(&self) -> Option<ShapeId> {
         let c = self.viewport.center();
-        let dist = |s: &Shape| {
-            let p = self.drawn(s).center();
+        let dist = |i: usize| {
+            let p = self.drawn_index(i).center();
             (p.x - c.x).hypot(p.y - c.y)
         };
-        (self.doc.shapes.iter())
-            .min_by(|a, b| {
-                (dist(a).total_cmp(&dist(b)))
+        (self.doc.shapes.iter().enumerate())
+            .min_by(|&(i, a), &(j, b)| {
+                (dist(i).total_cmp(&dist(j)))
                     .then_with(|| a.id.generation_order().cmp(&b.id.generation_order()))
             })
-            .map(|s| s.id.clone())
+            .map(|(_, s)| s.id.clone())
     }
 
     /// Opens an editing session on shape `id`, or zone `id`'s title, caret at the end.
@@ -367,6 +367,11 @@ impl Session {
         let e = self.editing.as_ref()?;
         let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
         Some((shape, shape.text.plain()))
+    }
+
+    /// Whether marked text sits in the document: saved data waits until it doesn't.
+    pub(super) fn composing(&self) -> bool {
+        self.editing.as_ref().is_some_and(|e| e.marked.is_some())
     }
 
     /// The edited text: the edited shape's plain text or zone's title. What offsets index.
@@ -537,12 +542,14 @@ impl Session {
             if let Some(z) = self.doc.zones.iter_mut().find(|z| z.id == e.id) {
                 z.title.replace_range(range, text);
             }
-        } else if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
+        } else if let Some(i) = self.doc.shapes.iter().position(|s| s.id == e.id) {
+            let s = &mut self.doc.shapes[i];
             let end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = e.pending {
                 s.text.set_style(range.start..end, Style::Bold, bold);
                 s.text.set_style(range.start..end, Style::Italic, italic);
             }
+            self.spaced.get_mut().composed.push(i);
         }
     }
 
