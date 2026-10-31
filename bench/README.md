@@ -40,3 +40,13 @@ The panel text of the generated document is about 1 MB. Every target holds: pane
 - The first run with #86 merged showed `apply` at 189 ms: the direction-word check scanned every link once per shape. The links are hashed once now.
 - `undo` (Undo in the panel after an applied edit) is 10.7 ms on the UI thread: it checks the 1 MB text it brings back. No target covers it; it is one late frame per Undo.
 - `dirty_to_present_p95` while panel typing is 15 ms (canvas typing in the same run: 18 ms), with no late frames.
+
+## Spacing pass, 10,000 shapes (`mba-m4`, #95, rows at `9099cd6`)
+
+A full pass (`Session::respace`: read every height, build chains and order, fix every chain, build the offsets): median 2.2 ms, worst of 20 4.7 ms on the generated document, where nothing crowds. With every position divided by 3, so most chains move, 8.3 ms and 9.1 ms. That extra time is chains stepping past each other along their four ways out.
+
+- `load` is 39.6 ms, up from about 19 ms: it now measures every shape and runs the pass (target ≤ 100 ms).
+- Typing: `draw_p50` 3.4 ms, `draw_p95` 5.0 ms, no late frames, against 3.5 and 4.6 ms before the pass. `draw_max` is 10.6 ms against 5.0 ms: a keystroke that changes a shape's height runs a pass on a cold CPU cache, on top of its usual frame, and that is over the 8 ms target. About one key in thirty in this script does.
+- A keystroke that keeps the height costs next to nothing. The first version read every shape's height back on each key: 0.5 ms in a tight loop but 2 to 5 ms in a real frame, 40 ms after the last one, with `typing_10k` at p95 8.7 ms. The session now reads back only the shapes whose text changed (`History::text_changed_since`).
+- A cheap hash for cell coordinates saves about 0.3 ms a pass. One flat entry list instead of a `Vec` per cell saved 0.3 ms on the generated document and cost 3 ms on the crowded one, so the cells stayed `Vec`s.
+- `pan_zoom*_cold` `draw_max` is now one first frame of 21 to 42 ms that measures every shape for the pass. A real open does that before its first frame, so that row no longer describes a real frame; `idle_after_pan` is still 0 renders.
