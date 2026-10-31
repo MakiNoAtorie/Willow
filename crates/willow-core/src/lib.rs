@@ -31,8 +31,8 @@ pub use session::{
 pub use theme::{
     CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, DESK,
     KeyPanStyle, MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow,
-    ShapeStyle, THEMES, TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle,
-    ZoomStyle,
+    ShapeStyle, THEMES, TabPickerStyle, Theme, ToggleStyle, Transition, Weave, ZoneStyle,
+    ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

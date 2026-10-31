@@ -104,7 +104,7 @@ fn row(
         )
 }
 
-/// The color row: a circle per picker color, the current one ringed.
+/// The color row: a swatch per picker color, the current one ringed.
 fn colors(
     session: &Session,
     m: &willow_core::MenuStyle,
@@ -124,7 +124,7 @@ fn colors(
                 .id(("menu-color", row * Color::ALL.len() + c as usize))
                 .size(px(m.swatch))
                 .flex_none()
-                .rounded_full()
+                .rounded(px(m.swatch_radius))
                 .bg(color(session.theme().picker[c as usize]))
                 .when(current == Some(c), |d| {
                     d.shadow(vec![

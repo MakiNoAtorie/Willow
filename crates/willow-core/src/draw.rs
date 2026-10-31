@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     CaretView, Color, DrawnRect, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId,
-    Side, Zone, side,
+    Side, Zone, ZoneStyle, side,
 };
 
 /// One frame's worth of drawing: zones, then connectors, then shapes.
@@ -92,6 +92,10 @@ pub struct VisibleZone<'a> {
     /// glyphs centered in it, in the bold face if `ZoneStyle::title_bold`.
     pub title_at: Point,
     pub title_size: f32,
+    /// The title as drawn (capitals if `ZoneStyle::title_upper`), and the space after each
+    /// letter in canvas units.
+    pub text: String,
+    pub title_spacing: f32,
     /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
     /// edited; else paint none.
     pub show_title: bool,
@@ -115,6 +119,12 @@ pub struct Visible<'a> {
     pub height: f32,
     /// Fill color, deepened.
     pub fill: Rgba,
+    /// The tab's color (`ShapeStyle::tab` tall along the top edge); the picker color, rippling
+    /// with the fill.
+    pub tab: Rgba,
+    /// Canvas units to paint the shape off `x`, `y` while it is selected (`SelectionStyle::lift_*`
+    /// scaled by the ring); hit-testing ignores it.
+    pub lift: Point,
     pub layout: Rc<Layout>,
     /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out.
     pub ring: f32,
@@ -241,12 +251,18 @@ impl Session {
                 } else {
                     zt.fill_mix
                 };
+                let source = match zt.fill_picker {
+                    true => t.picker[zone.color as usize],
+                    false => pastel,
+                };
                 VisibleZone {
                     nested,
-                    fill: mix(t.canvas, pastel, fill),
+                    fill: mix(t.canvas, source, fill),
                     edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
                     title_at: self.title_at(&zone),
                     title_size,
+                    text: title_text(zt, &zone.title).into_owned(),
+                    title_spacing: zt.title_spacing * title_size,
                     show_title: e.is_some()
                         || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
                             <= zone.width as f32,
@@ -277,7 +293,16 @@ impl Session {
                     dy: t.create.rise * (1.0 - k),
                     scale: t.create.scale + (1.0 - t.create.scale) * k,
                 });
+                let picker = |c: Color| t.picker[c as usize];
                 Some(Visible {
+                    tab: match self.rippling(&s.id, now) {
+                        Some((from, p)) => mix(picker(from), picker(s.color), p),
+                        None => picker(s.color),
+                    },
+                    lift: Point {
+                        x: t.selection.lift_x * ring,
+                        y: t.selection.lift_y * ring,
+                    },
                     fill: match self.rippling(&s.id, now) {
                         Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
                         None => fills[s.color as usize],
@@ -338,18 +363,32 @@ impl Session {
     /// draw with, then scaled to `size`.
     pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
         let t = self.theme();
+        // One cluster per grapheme of the title as drawn, so capitals can change its length.
+        let (mut shown, mut clusters, mut letters) = (String::new(), Vec::new(), 0);
+        for g in title.graphemes(true) {
+            let start = shown.len();
+            shown.push_str(&title_text(&t.zone, g));
+            clusters.push(start..shown.len());
+            letters += 1;
+        }
         let para = Paragraph {
             runs: vec![Run {
-                text: title.into(),
+                text: shown,
                 bold: t.zone.title_bold(),
                 ..Run::default()
             }],
         };
-        let clusters: Vec<_> = (title.grapheme_indices(true))
-            .map(|(i, g)| i..i + g.len())
-            .collect();
         let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
-        w * size / t.font_size
+        w * size / t.font_size + letters as f32 * t.zone.title_spacing * size
+    }
+}
+
+/// `title` as the theme draws it.
+fn title_text<'a>(zt: &ZoneStyle, title: &'a str) -> Cow<'a, str> {
+    if zt.title_upper {
+        title.to_uppercase().into()
+    } else {
+        title.into()
     }
 }
 

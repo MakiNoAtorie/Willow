@@ -36,6 +36,8 @@ pub struct ShapeStyle {
     pub pad_y: f32,
     /// Above the text.
     pub pad_top: f32,
+    /// A strip this tall along the top edge in the picker color; 0 for none. Inside `pad_top`.
+    pub tab: f32,
     /// Resting shadow layers, bottom first.
     pub shadow: [Shadow; 2],
 }
@@ -62,6 +64,10 @@ pub struct ZoneStyle {
     /// How far the fill moves from the canvas toward the pastel; deeper for nested zones.
     pub fill_mix: f32,
     pub nested_fill_mix: f32,
+    /// The fill moves from the canvas toward the picker color rather than the pastel.
+    pub fill_picker: bool,
+    /// A soft shadow inside the zone's edge (a transparent color for none).
+    pub inset: Shadow,
     /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
     pub edge_mix: f32,
     pub edge_width: f32,
@@ -72,6 +78,9 @@ pub struct ZoneStyle {
     /// text) has its top-left `title_x`, `title_y` in, constant on screen when zoomed out.
     pub title_size: f32,
     pub title_weight: f32,
+    /// Titles drawn in capitals, with `title_spacing` (a multiple of the size) after each letter.
+    pub title_upper: bool,
+    pub title_spacing: f32,
     pub title_min_screen: f32,
     pub title_x: f32,
     pub title_y: f32,
@@ -203,6 +212,8 @@ pub struct MenuStyle {
     /// The color row's circles: diameter, space between, and the current one's ring width and
     /// its gap from the circle.
     pub swatch: f32,
+    /// Corner radius: half of `swatch` for circles.
+    pub swatch_radius: f32,
     pub swatch_gap: f32,
     pub swatch_ring: f32,
     pub swatch_ring_gap: f32,
@@ -266,6 +277,18 @@ pub struct SelectionStyle {
     pub marquee_fill: Rgba,
     pub marquee_width: f32,
     pub marquee_radius: f32,
+    pub marquee_dashed: bool,
+    /// How far a selected shape moves from where it is drawn, canvas units, as the ring fades in.
+    pub lift_x: f32,
+    pub lift_y: f32,
+}
+
+/// One set of parallel lines in the canvas texture: `width` thick every `period`, screen px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weave {
+    pub color: Rgba,
+    pub width: f32,
+    pub period: f32,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -421,6 +444,8 @@ pub struct Theme {
     pub grid_dot: Rgba,
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
+    /// Canvas texture of horizontal then vertical lines, at a fixed screen size at any zoom.
+    pub weave: Option<[Weave; 2]>,
     pub shape: ShapeStyle,
     /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
     /// linked to it.
@@ -488,11 +513,13 @@ pub const PAPER: Theme = Theme {
     grid_dot: rgba(70, 50, 20, 0.10),
     grid_dot_radius: 1.0,
     grid_spacing: 24.0,
+    weave: None,
     shape: ShapeStyle {
         radius: 14.0,
         pad_x: 16.0,
         pad_y: 13.0,
         pad_top: 13.0,
+        tab: 0.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -522,6 +549,14 @@ pub const PAPER: Theme = Theme {
     },
     zone: ZoneStyle {
         radius: 22.0,
+        fill_picker: false,
+        inset: Shadow {
+            x: 0.0,
+            y: 0.0,
+            blur: 0.0,
+            spread: 0.0,
+            color: rgba(0, 0, 0, 0.0),
+        },
         fill_mix: 0.45,
         nested_fill_mix: 0.7,
         edge_mix: 0.35,
@@ -529,6 +564,8 @@ pub const PAPER: Theme = Theme {
         ring: 2.0,
         title_size: 13.0,
         title_weight: 600.0,
+        title_upper: false,
+        title_spacing: 0.0,
         title_min_screen: 12.0,
         title_x: 16.0,
         title_y: 12.0,
@@ -544,6 +581,9 @@ pub const PAPER: Theme = Theme {
         marquee_fill: rgba(139, 119, 96, 0.08),
         marquee_width: 1.0,
         marquee_radius: 3.0,
+        marquee_dashed: false,
+        lift_x: 0.0,
+        lift_y: 0.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -665,6 +705,7 @@ pub const PAPER: Theme = Theme {
         shortcut_opacity: 0.45,
         disabled_opacity: 0.4,
         swatch: 18.0,
+        swatch_radius: 9.0,
         swatch_gap: 7.0,
         swatch_ring: 1.5,
         swatch_ring_gap: 2.0,
@@ -814,11 +855,25 @@ pub const DESK: Theme = Theme {
     accent: hex(0x2b2621),
     // No dot grid.
     grid_dot: rgba(0, 0, 0, 0.0),
+    // The mockups' two repeating gradients.
+    weave: Some([
+        Weave {
+            color: rgba(120, 100, 70, 0.035),
+            width: 1.0,
+            period: 3.0,
+        },
+        Weave {
+            color: rgba(120, 100, 70, 0.03),
+            width: 1.0,
+            period: 4.0,
+        },
+    ]),
     shape: ShapeStyle {
         radius: 4.0,
         pad_x: 15.0,
         // 12 under the 6 tall tab.
         pad_top: 18.0,
+        tab: 6.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -846,11 +901,21 @@ pub const DESK: Theme = Theme {
     },
     zone: ZoneStyle {
         radius: 6.0,
+        fill_picker: true,
+        inset: Shadow {
+            x: 0.0,
+            y: 1.0,
+            blur: 2.0,
+            spread: 0.0,
+            color: rgba(70, 50, 20, 0.12),
+        },
         fill_mix: 0.16,
         nested_fill_mix: 0.3,
         edge_width: 0.0,
         title_size: 12.0,
         title_weight: 700.0,
+        title_upper: true,
+        title_spacing: 0.08,
         ..PAPER.zone
     },
     selection: SelectionStyle {
@@ -861,6 +926,8 @@ pub const DESK: Theme = Theme {
         marquee: rgba(43, 38, 33, 0.6),
         marquee_fill: rgba(43, 38, 33, 0.05),
         marquee_radius: 2.0,
+        marquee_dashed: true,
+        lift_y: -4.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -930,6 +997,7 @@ pub const DESK: Theme = Theme {
         separator: rgba(43, 38, 33, 0.094),
         radius: 4.0,
         item_radius: 2.0,
+        swatch_radius: 3.0,
         font_weight: 400.0,
         shadow: [
             Shadow {

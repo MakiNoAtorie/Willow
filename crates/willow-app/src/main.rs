@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
-    App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
-    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode,
-    ScrollEvent, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point,
-    prelude::*, px, quad, size,
+    App, BorderStyle, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase,
+    ElementInputHandler, FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, Rgba, Session, Shadow, Side,
@@ -693,6 +693,29 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         y += s;
     }
 
+    // The weave: lines at a fixed screen size at any zoom, moving with the canvas.
+    for (i, wv) in t.weave.iter().flatten().enumerate() {
+        let (vertical, ink) = (i == 1, color(wv.color));
+        let (len, across) = match vertical {
+            true => (bounds.size.height, bounds.size.width),
+            false => (bounds.size.width, bounds.size.height),
+        };
+        let o = if vertical {
+            origin.x - bounds.origin.x
+        } else {
+            origin.y - bounds.origin.y
+        };
+        let mut d = f32::from(o).rem_euclid(wv.period);
+        while d < f32::from(across) {
+            let (at, extent) = match vertical {
+                true => (point(px(d), px(0.)), size(px(wv.width), len)),
+                false => (point(px(0.), px(d)), size(len, px(wv.width))),
+            };
+            window.paint_quad(gpui::fill(Bounds::new(bounds.origin + at, extent), ink));
+            d += wv.period;
+        }
+    }
+
     // Zones, then their titles (so a nested zone never covers its parent's), then
     // connectors, under the shapes.
     let at = |p: willow_core::Point| origin + point(px(p.x * z), px(p.y * z));
@@ -715,6 +738,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(v.edge),
             Default::default(),
         ));
+        window.paint_inset_shadows(
+            zone_bounds(&v.zone),
+            Corners::all(px(zt.radius * z)),
+            &[box_shadow(&zt.inset, z, true)],
+        );
     }
     // The hover ring over the edge, after every fill so an overlapping zone never hides it.
     let ringed = (frame.zones.iter()).find(|v| Some(&v.zone.id) == frame.zone_ring);
@@ -739,10 +767,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         text::paint_line(
             window,
             at(v.title_at),
-            &v.zone.title,
+            &v.text,
             t,
             zt.title_bold(),
             v.title_size * z,
+            v.title_spacing * z,
         );
         if let Some((a, c)) = v.marked {
             let b = Bounds::new(
@@ -770,7 +799,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
 
     for v in &frame.shapes {
         // A pushed shape paints off its place while it slides there.
-        let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
+        let origin = origin
+            + point(
+                px((v.slide.x + v.lift.x) * z),
+                px((v.slide.y + v.lift.y) * z),
+            );
         // A shape being created paints faded (`k`), offset and scaled around its center.
         let (origin, z, k) = match v.appear {
             Some(a) => {
@@ -815,6 +848,26 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             gpui::transparent_black(),
             Default::default(),
         ));
+        if t.shape.tab > 0.0 {
+            let tab = Bounds::new(
+                b.origin,
+                size(b.size.width, px(t.shape.tab * z).min(b.size.height)),
+            );
+            let corners = Corners {
+                top_left: radius,
+                top_right: radius,
+                bottom_right: px(0.),
+                bottom_left: px(0.),
+            };
+            window.paint_quad(quad(
+                tab,
+                corners,
+                color(v.tab).opacity(k),
+                px(0.),
+                gpui::transparent_black(),
+                Default::default(),
+            ));
+        }
         // The text selection, under the edited shape's text.
         for (a, c) in &v.selection {
             let tl = origin + point(px(a.x * z), px(a.y * z));
@@ -882,7 +935,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(sel.marquee_fill),
             px(sel.marquee_width),
             color(sel.marquee),
-            Default::default(),
+            if sel.marquee_dashed {
+                BorderStyle::Dashed
+            } else {
+                Default::default()
+            },
         ));
     }
     let picker: Vec<_> = (frame.tab_picker.iter())
@@ -952,6 +1009,18 @@ fn paint_tab_picker(
                 ink,
             );
         }
+    }
+}
+
+/// `s` as GPUI draws it at zoom `z`, inside the box if `inset`.
+fn box_shadow(s: &Shadow, z: f32, inset: bool) -> BoxShadow {
+    BoxShadow {
+        color: color(s.color),
+        offset: point(px(s.x * z), px(s.y * z)),
+        // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
+        blur_radius: px(s.blur * z / 2.0),
+        spread_radius: px(s.spread * z),
+        inset,
     }
 }
 
