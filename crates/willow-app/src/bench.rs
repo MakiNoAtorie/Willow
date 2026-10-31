@@ -1,5 +1,7 @@
-//! `--bench --machine NAME`: scripts pans, zoom sweeps, typing and idle on the generated
-//! 10,000-shape document in a real window and appends CSV rows to `bench/results.csv`.
+//! `--bench --machine NAME [--theme NAME] [--shapes N]`: scripts pans, zoom sweeps, typing and
+//! idle on a generated document (10,000 shapes unless told otherwise) in a real window and
+//! appends CSV rows to `bench/results.csv`. A run in another theme or on another size names
+//! that in its scenarios; see `scenario_name`.
 //!
 //! Frame timings come from GPUI's profiler: `draw` is `Window::draw` (layout, prepaint, paint;
 //! CPU only), `dirty_to_present` runs from the first invalidation to handing the frame to the
@@ -7,8 +9,8 @@
 //! Scripted input goes through `Session::handle`, one event per frame, as the platform's would.
 //!
 //! `file_10k` times, in milliseconds, saves of the generated document (serialize and write
-//! beside): `save_unwarmed` from a new session that has measured nothing (a save the moment a
-//! file opens), `save` the window's first, `save_again` the next; then `load` of that file
+//! beside): `save_unwarmed` from a new session that has measured nothing (no real save: opening
+//! measures every shape), `save` the window's first, `save_again` the next; then `load` of that file
 //! (read, parse, repair, auto-place, measure every shape, the spacing pass, a new session). The
 //! loaded session replaces the window's, so `open_first_frame` is its first frame.
 //!
@@ -30,6 +32,10 @@
 //! recovery write due: autosave's UI-thread part (clone the document, every shape's height
 //! and drawn position).
 //!
+//! `theme_switch_10k`, `switch_max`, is the slowest frame of a switch to each other theme and
+//! back, through `Prefs` as the View menu does it: the whole first frame, shapes measured in the
+//! new theme and the spacing pass included.
+//!
 //! Last, the code panel opens on the document's canonical text. `panel_typing_10k` types into
 //! the first shape's text through the platform path: frame rows, and `keystroke_*`, the time
 //! to dispatch each key (its handling, before any draw). `panel_apply_10k` types one more
@@ -47,7 +53,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use gpui::{AsyncWindowContext, FrameDurationSnapshot, Keystroke, WeakEntity, Window};
-use willow_core::{Button, Input, Modifiers, Point, Viewport};
+use willow_core::{Button, Input, Modifiers, Point, THEMES, Theme, Viewport};
 
 use crate::Willow;
 
@@ -68,6 +74,8 @@ const IDLE: Duration = Duration::from_secs(5);
 
 pub(crate) struct Bench {
     machine: String,
+    pub(crate) shapes: usize,
+    pub(crate) theme: &'static Theme,
     rows: Vec<(String, &'static str, f64, &'static str)>,
     /// Scripted inputs left, one applied per frame, popped from the back.
     frames: Vec<Input>,
@@ -76,9 +84,11 @@ pub(crate) struct Bench {
 }
 
 impl Bench {
-    pub(crate) fn new(machine: String) -> Self {
+    pub(crate) fn new(machine: String, shapes: usize, theme: &'static Theme) -> Self {
         Bench {
             machine,
+            shapes,
+            theme,
             rows: Vec::new(),
             frames: Vec::new(),
             renders: 0,
@@ -86,8 +96,9 @@ impl Bench {
     }
 
     fn row(&mut self, scenario: &str, metric: &'static str, value: f64, unit: &'static str) {
-        println!("{scenario:<20} {metric:<22} {value:>10.3} {unit}");
-        self.rows.push((scenario.into(), metric, value, unit));
+        let scenario = scenario_name(scenario, self.shapes, self.theme.name);
+        println!("{scenario:<26} {metric:<22} {value:>10.3} {unit}");
+        self.rows.push((scenario, metric, value, unit));
     }
 
     fn write_csv(&self) {
@@ -109,6 +120,23 @@ impl Bench {
         }
         println!("appended {} rows to {CSV}", self.rows.len());
     }
+}
+
+/// `base` for a run on `shapes` shapes in `theme`. A Paper run on 10,000 shapes keeps the plain
+/// name, so its rows compare with every earlier run.
+fn scenario_name(base: &str, shapes: usize, theme: &str) -> String {
+    let mut name = base.to_string();
+    if shapes != 10_000 {
+        let size = format!("_{}k", shapes / 1000);
+        name = match name.contains("_10k") {
+            true => name.replace("_10k", &size),
+            false => name + &size,
+        };
+    }
+    if theme != willow_core::PAPER.name {
+        name = format!("{name}_{}", theme.to_lowercase());
+    }
+    name
 }
 
 /// A new session on `w`'s document that has laid nothing out.
@@ -358,6 +386,33 @@ fn timed<T>(f: impl FnOnce() -> T) -> (f64, T) {
     let t = Instant::now();
     let out = f();
     (t.elapsed().as_secs_f64() * 1e3, out)
+}
+
+/// The `theme_switch_10k` row; see the module docs.
+async fn theme_switch(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    let home = (this.update(cx, |w, _| w.session.theme())).unwrap();
+    let others = THEMES.iter().filter(|t| t.name != home.name);
+    let mut worst = 0.0f64;
+    for &theme in others.chain([&home]) {
+        let before = this
+            .update_in(cx, |_, window, cx| {
+                cx.global_mut::<crate::prefs::Prefs>().set_theme(theme);
+                cx.refresh_windows();
+                window.frame_duration_snapshot()
+            })
+            .unwrap();
+        wait(cx, Duration::from_millis(500)).await;
+        let frame = this.update_in(cx, |_, window, _| {
+            let mut draw = window.frame_duration_snapshot().draw_duration_histogram;
+            let _ = draw.subtract(&before.draw_duration_histogram);
+            ms(draw.max())
+        });
+        worst = worst.max(frame.unwrap());
+    }
+    this.update(cx, |w, _| {
+        (w.bench.as_mut().unwrap()).row("theme_switch_10k", "switch_max", worst, "ms");
+    })
+    .ok();
 }
 
 /// The `panel_*` and `idle_panel_open` rows; see the module docs.
@@ -657,6 +712,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     })
     .ok();
     idle(&this, cx, "idle_after_anim").await;
+    theme_switch(&this, cx).await;
     code_panel(&this, cx).await;
     this.update(cx, |w, cx| {
         w.bench.as_ref().unwrap().write_csv();
@@ -667,6 +723,25 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
 
 #[cfg(test)]
 mod tests {
+    use super::scenario_name;
+
+    #[test]
+    fn a_plain_run_keeps_the_names_earlier_runs_used() {
+        assert_eq!(scenario_name("typing_10k", 10_000, "Paper"), "typing_10k");
+        assert_eq!(scenario_name("zone_drag", 10_000, "Paper"), "zone_drag");
+    }
+
+    #[test]
+    fn a_run_on_other_shapes_or_another_theme_names_them() {
+        assert_eq!(scenario_name("typing_10k", 50_000, "Paper"), "typing_50k");
+        assert_eq!(scenario_name("zone_drag", 50_000, "Paper"), "zone_drag_50k");
+        assert_eq!(scenario_name("zone_drag", 10_000, "Desk"), "zone_drag_desk");
+        assert_eq!(
+            scenario_name("typing_10k", 10_000, "Poster"),
+            "typing_10k_poster"
+        );
+    }
+
     #[test]
     fn csv_row_quotes_fields_with_commas_quotes_or_newlines() {
         let row = super::csv_row(&["a,b", "4cf2ae8", "say \"hi\"", "two\nlines", "1.000", "ms"]);

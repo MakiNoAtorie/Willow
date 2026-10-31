@@ -12,8 +12,8 @@ use gpui::{
     WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
-    Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, Rgba, Session, Shadow, Side,
-    Theme, ZoomPill,
+    Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
+    Side, THEMES, Theme, ZoomPill,
 };
 mod bench;
 mod file;
@@ -674,48 +674,52 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         phase(origin.x, bounds.origin.x),
         phase(origin.y, bounds.origin.y),
     );
-    let dot = color(t.grid_dot);
-    let mut y = if frame.grid { y0 } else { f32::INFINITY };
-    while y < f32::from(bounds.size.height) {
-        let mut x = x0;
-        while x < f32::from(bounds.size.width) {
-            let c = bounds.origin + point(px(x), px(y));
-            let b = Bounds::new(c - point(px(r), px(r)), size(px(2. * r), px(2. * r)));
-            window.paint_quad(quad(
-                b,
-                px(r),
-                dot,
-                px(0.),
-                gpui::transparent_black(),
-                Default::default(),
-            ));
-            x += s;
+    // One layer: hundreds of crossing lines cost GPUI's overlap search 6 us each, a third of
+    // Desk's draw, and a layer takes none. Same-layer quads keep their paint order.
+    window.paint_layer(bounds, |window| {
+        let dot = color(t.grid_dot);
+        let mut y = if frame.grid { y0 } else { f32::INFINITY };
+        while y < f32::from(bounds.size.height) {
+            let mut x = x0;
+            while x < f32::from(bounds.size.width) {
+                let c = bounds.origin + point(px(x), px(y));
+                let b = Bounds::new(c - point(px(r), px(r)), size(px(2. * r), px(2. * r)));
+                window.paint_quad(quad(
+                    b,
+                    px(r),
+                    dot,
+                    px(0.),
+                    gpui::transparent_black(),
+                    Default::default(),
+                ));
+                x += s;
+            }
+            y += s;
         }
-        y += s;
-    }
 
-    // The weave: lines at a fixed screen size at any zoom, moving with the canvas.
-    for (i, wv) in t.weave.iter().flatten().enumerate() {
-        let (vertical, ink) = (i == 1, color(wv.color));
-        let (len, across) = match vertical {
-            true => (bounds.size.height, bounds.size.width),
-            false => (bounds.size.width, bounds.size.height),
-        };
-        let o = if vertical {
-            origin.x - bounds.origin.x
-        } else {
-            origin.y - bounds.origin.y
-        };
-        let mut d = f32::from(o).rem_euclid(wv.period);
-        while d < f32::from(across) {
-            let (at, extent) = match vertical {
-                true => (point(px(d), px(0.)), size(px(wv.width), len)),
-                false => (point(px(0.), px(d)), size(len, px(wv.width))),
+        // The weave: lines at a fixed screen size at any zoom, moving with the canvas.
+        for (i, wv) in t.weave.iter().flatten().enumerate() {
+            let (vertical, ink) = (i == 1, color(wv.color));
+            let (len, across) = match vertical {
+                true => (bounds.size.height, bounds.size.width),
+                false => (bounds.size.width, bounds.size.height),
             };
-            window.paint_quad(gpui::fill(Bounds::new(bounds.origin + at, extent), ink));
-            d += wv.period;
+            let o = if vertical {
+                origin.x - bounds.origin.x
+            } else {
+                origin.y - bounds.origin.y
+            };
+            let mut d = f32::from(o).rem_euclid(wv.period);
+            while d < f32::from(across) {
+                let (at, extent) = match vertical {
+                    true => (point(px(d), px(0.)), size(px(wv.width), len)),
+                    false => (point(px(0.), px(d)), size(len, px(wv.width))),
+                };
+                window.paint_quad(gpui::fill(Bounds::new(bounds.origin + at, extent), ink));
+                d += wv.period;
+            }
         }
-    }
+    });
 
     // Zones, then their titles (so a nested zone never covers its parent's), then
     // connectors, under the shapes.
@@ -1178,16 +1182,29 @@ const GENERATE_SEED: u64 = 1;
 
 fn main() {
     // `--generate N`: open a generated document of N shapes instead of a new one.
-    // `--bench --machine NAME`: run the scripted bench on 10,000 generated shapes, then quit.
+    // `--bench --machine NAME [--theme NAME] [--shapes N]`: run the scripted bench on generated
+    // shapes (10,000 unless told otherwise), then quit.
     let args: Vec<String> = std::env::args().collect();
     let arg = |flag: &str| args.iter().position(|a| a == flag).map(|i| args.get(i + 1));
     let bench = args.iter().any(|a| a == "--bench").then(|| {
         let machine = arg("--machine").flatten();
-        machine.expect("--bench needs --machine NAME").clone()
+        let machine = machine.expect("--bench needs --machine NAME").clone();
+        let shapes = arg("--shapes").map(|n| n.and_then(|n| n.parse().ok()));
+        let shapes = shapes.map_or(10_000, |n| n.expect("--shapes takes a shape count"));
+        let theme = arg("--theme").map(|n| {
+            let named = THEMES
+                .iter()
+                .find(|t| Some(t.name) == n.map(String::as_str));
+            *named.expect("--theme takes a theme's name")
+        });
+        bench::Bench::new(machine, shapes, theme.unwrap_or(&PAPER))
     });
     let recover = bench.is_none() && arg("--generate").is_none();
     let doc = match arg("--generate") {
-        _ if bench.is_some() => willow_core::generate(10_000, GENERATE_SEED),
+        _ if bench.is_some() => {
+            let shapes = bench.as_ref().map_or(0, |b| b.shapes);
+            willow_core::generate(shapes, GENERATE_SEED)
+        }
         Some(n) => {
             let n = n.and_then(|n| n.parse().ok());
             willow_core::generate(n.expect("--generate takes a shape count"), GENERATE_SEED)
@@ -1368,9 +1385,13 @@ fn main() {
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
-        // Preferences are the same in every window; a bench run keeps the defaults.
+        // Preferences are the same in every window; a bench run keeps the defaults but its theme.
         let prefs = prefs::file().filter(|_| bench.is_none());
-        cx.set_global(prefs.map_or_else(Default::default, |f| prefs::Prefs::load(&f)));
+        let mut prefs = prefs.map_or_else(prefs::Prefs::default, |f| prefs::Prefs::load(&f));
+        if let Some(b) = &bench {
+            prefs.set_theme(b.theme);
+        }
+        cx.set_global(prefs);
         #[cfg(target_os = "macos")]
         set_menus(cx);
         view_menu::register(cx);
@@ -1408,7 +1429,7 @@ fn bundled_fonts() -> Vec<Cow<'static, [u8]>> {
 }
 
 /// Opens a window showing `content`; `bench` runs the scripted bench in it.
-fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
+fn open_window(content: Content, bench: Option<bench::Bench>, cx: &mut App) {
     let c = cx.global::<prefs::Prefs>().theme().chrome;
     let bounds = Bounds::centered(None, size(px(c.window_width), px(c.window_height)), cx);
     cx.open_window(
@@ -1460,7 +1481,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     _activation,
                     _tab_picker_keys,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
-                    bench: bench.map(bench::Bench::new),
+                    bench,
                     path,
                     mtime: None,
                     settling: false,

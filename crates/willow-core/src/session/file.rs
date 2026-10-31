@@ -43,7 +43,7 @@ impl Session {
         let saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
         let words = words(&loaded);
         put(self, loaded.document);
-        self.saved = saved;
+        self.set_saved(saved);
         if invalid {
             self.hold_text(String::from_utf8_lossy(bytes).into(), loaded.lines, words);
         } else {
@@ -62,7 +62,7 @@ impl Session {
         measure: Box<dyn Measure>,
     ) -> Self {
         let mut s = Session::open(loaded, bytes.to_vec(), theme, measure);
-        s.saved = None;
+        s.set_saved(None);
         s.bytes.clear();
         s
     }
@@ -76,8 +76,31 @@ impl Session {
     /// The document matches what was last read or written (undoing back to it counts), and
     /// no panel text was typed since that isn't regenerated yet.
     pub fn is_saved(&self) -> bool {
-        // ponytail: compares the whole document per call; a change counter if it shows up in profiles.
-        self.saved.as_ref() == Some(&self.doc) && !self.text_unsaved()
+        self.same_as_saved() && !self.text_unsaved()
+    }
+
+    /// Compares the whole document, a fifth of a frame's draw on 10,000 shapes, so the title
+    /// bar's read every frame keeps the answer per revision. Marked text changes the document
+    /// outside the history, so composing always compares.
+    fn same_as_saved(&self) -> bool {
+        let revision = self.history.revision();
+        let composing = (self.editing.as_ref()).is_some_and(|e| e.marked.is_some());
+        match self.same_as_saved.get() {
+            Some((r, same)) if r == revision && !composing => same,
+            _ => {
+                let same = self.saved.as_ref() == Some(&self.doc);
+                if !composing {
+                    self.same_as_saved.set(Some((revision, same)));
+                }
+                same
+            }
+        }
+    }
+
+    /// Replaces what the document is compared with.
+    fn set_saved(&mut self, saved: Option<Document>) {
+        self.saved = saved;
+        self.same_as_saved.set(None);
     }
 
     /// The bytes last read or written; empty for a document never read or saved.
@@ -101,7 +124,7 @@ impl Session {
         };
         write(&bytes)?;
         (self.unrecovered, self.recovery_written) = (None, false);
-        self.saved = Some(self.doc.clone());
+        self.set_saved(Some(self.doc.clone()));
         self.text_saved();
         self.bytes = bytes;
         Ok(())
@@ -114,7 +137,7 @@ impl Session {
     /// with a recovery due.
     pub fn disk_changed(&mut self, bytes: Option<&[u8]>) {
         let Some(bytes) = bytes else {
-            self.saved = None;
+            self.set_saved(None);
             // A file that comes back is compared afresh.
             self.bytes.clear();
             self.changed(self.now);
@@ -136,7 +159,7 @@ impl Session {
                     s.respace();
                 }
             }),
-            _ => self.saved = None,
+            _ => self.set_saved(None),
         }
         self.changed(self.now);
     }
@@ -177,6 +200,7 @@ impl Session {
         }
         // The IME may still be composing: leave its marked text out rather than commit it.
         let mut document = self.doc.clone();
+        let mut heights = self.spaced_heights();
         if let Some(e) = &self.editing
             && let Some(m) = e.marked.clone()
         {
@@ -184,15 +208,11 @@ impl Session {
                 if let Some(z) = document.zones.iter_mut().find(|z| z.id == e.id) {
                     z.title.replace_range(m, "");
                 }
-            } else if let Some(s) = document.shapes.iter_mut().find(|s| s.id == e.id) {
-                s.text.replace(m, "");
+            } else if let Some(i) = document.shapes.iter().position(|s| s.id == e.id) {
+                document.shapes[i].text.replace(m, "");
+                heights[i] = self.shape_height(&document.shapes[i]);
             }
         }
-        let heights = document
-            .shapes
-            .iter()
-            .map(|s| self.shape_height(s))
-            .collect();
         let drawn = self.drawn_positions();
         Some(Recovery::Write {
             document,

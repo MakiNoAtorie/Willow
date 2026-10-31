@@ -61,6 +61,9 @@ impl Slide {
 pub(super) struct Spaced {
     /// The document revision it holds for; `None` before the first run.
     revision: Option<u64>,
+    /// Every shape's height as of `revision`: walking the layout cache is half of what an
+    /// autosave takes from the UI thread.
+    heights: Vec<f32>,
     /// What it took in: a change that leaves these as they were needs no new pass.
     rects: Vec<Rect>,
     ends: Vec<(usize, usize)>,
@@ -201,7 +204,9 @@ impl Session {
     fn retake_text(&self, spaced: &mut Spaced, typed: &[usize]) -> bool {
         let mut stale = false;
         for &i in typed {
-            let rect = self.rect(&self.doc.shapes[i]);
+            let s = &self.doc.shapes[i];
+            spaced.heights[i] = self.shape_height(s);
+            let rect = Rect::of(s, spaced.heights[i]);
             if spaced.rects[i] != rect {
                 spaced.rects[i] = rect;
                 stale = true;
@@ -217,7 +222,9 @@ impl Session {
     /// position did, by shape index.
     fn retake_all(&self, spaced: &mut Spaced) -> Option<Vec<(i32, i32)>> {
         let shapes = &self.doc.shapes;
-        let rects: Vec<_> = shapes.iter().map(|s| self.rect(s)).collect();
+        spaced.heights = shapes.iter().map(|s| self.shape_height(s)).collect();
+        let at = shapes.iter().zip(&spaced.heights);
+        let rects: Vec<_> = at.map(|(s, &h)| Rect::of(s, h)).collect();
         let ends = self.link_ends();
         let same = spaced.rects == rects
             && spaced.ends == *ends
@@ -262,15 +269,10 @@ impl Session {
         self.spaced();
     }
 
-    /// A shape's placed rectangle.
-    pub(super) fn rect(&self, s: &Shape) -> Rect {
-        let (x, y) = (s.x as f32, s.y as f32);
-        Rect {
-            l: x,
-            t: y,
-            r: x + s.width as f32,
-            b: y + self.shape_height(s),
-        }
+    /// Every shape's height as of the last history step, in document order: marked text sits
+    /// outside the history, so a shape being composed in may differ.
+    pub(super) fn spaced_heights(&self) -> Vec<f32> {
+        self.spaced().heights.clone()
     }
 
     /// How far `id` is drawn off its rest position at `now` while it slides; (0, 0) otherwise.

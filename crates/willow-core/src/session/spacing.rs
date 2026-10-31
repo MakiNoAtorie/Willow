@@ -19,6 +19,17 @@ pub(super) struct Rect {
 }
 
 impl Rect {
+    /// The placed rectangle of `s`, `height` tall.
+    pub(super) fn of(s: &Shape, height: f32) -> Rect {
+        let (x, y) = (s.x as f32, s.y as f32);
+        Rect {
+            l: x,
+            t: y,
+            r: x + s.width as f32,
+            b: y + height,
+        }
+    }
+
     fn moved(self, (dx, dy): (i32, i32)) -> Rect {
         let (dx, dy) = (dx as f32, dy as f32);
         Rect {

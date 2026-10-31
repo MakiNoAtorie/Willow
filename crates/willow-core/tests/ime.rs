@@ -197,6 +197,61 @@ fn a_recovery_leaves_out_the_marked_text_and_keeps_composing() {
 }
 
 #[test]
+fn a_saved_document_reads_unsaved_only_while_composing() {
+    let mut s = editing("ab");
+    assert!(s.is_saved());
+    mark(&mut s, "k", None);
+    assert!(!s.is_saved());
+    mark(&mut s, "", None);
+    assert!(s.is_saved());
+}
+
+#[test]
+fn heights_hold_the_marked_text_and_a_recovery_leaves_it_out() {
+    let mut s = editing("ab");
+    commit(&mut s, "x");
+    let plain = s.heights()[0];
+    mark(&mut s, &"k ".repeat(100), None);
+    assert!(s.heights()[0] > plain);
+    let Some(Recovery::Write { heights, .. }) = s.take_recovery(Duration::from_secs(5)) else {
+        panic!("a write due");
+    };
+    assert_eq!(heights[0], plain);
+    assert!(s.heights()[0] > plain);
+}
+
+#[test]
+fn a_recovery_leaves_marked_text_out_of_heights_read_after_a_real_edit() {
+    let mut s = editing("ab");
+    let plain = s.heights()[0];
+    let (text, replace) = ("k ".repeat(100), Some(0..1));
+    let selected = None;
+    s.handle(
+        Input::Mark {
+            text,
+            replace,
+            selected,
+        },
+        T,
+    );
+    assert!(s.heights()[0] > plain);
+    let Some(Recovery::Write { heights, .. }) = s.take_recovery(Duration::from_secs(5)) else {
+        panic!("a write due");
+    };
+    assert_eq!(heights[0], plain);
+}
+
+#[test]
+fn heights_follow_typed_text_and_its_undo() {
+    let mut s = editing("ab");
+    let plain = s.heights()[0];
+    commit(&mut s, &"k ".repeat(100));
+    assert!(s.heights()[0] > plain);
+    s.handle(Input::Undo, T);
+    assert_eq!(s.heights()[0], plain);
+}
+
+#[test]
 fn ranges_past_the_end_or_inside_a_character_are_clamped() {
     let mut s = editing("ab");
     s.handle(

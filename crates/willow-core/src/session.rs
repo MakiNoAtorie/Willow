@@ -34,7 +34,7 @@ mod tab_picker;
 mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -243,6 +243,8 @@ pub struct Session {
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
     saved: Option<Document>,
+    /// The revision `doc` was last compared with `saved` at, and the answer.
+    same_as_saved: Cell<Option<(u64, bool)>>,
     /// The bytes last read or written.
     bytes: Vec<u8>,
     /// First and last change not yet in a recovery file.
@@ -269,6 +271,7 @@ impl Session {
     pub fn new(doc: Document, theme: &'static Theme, measure: Box<dyn Measure>) -> Self {
         Session {
             saved: Some(doc.clone()),
+            same_as_saved: Cell::default(),
             bytes: Vec::new(),
             unrecovered: None,
             recovery_written: false,
@@ -413,11 +416,17 @@ impl Session {
 
     /// Every shape's drawn height, in document order: what `save` needs for the side rule.
     pub fn heights(&self) -> Vec<f32> {
-        self.doc
-            .shapes
-            .iter()
-            .map(|s| self.shape_height(s))
-            .collect()
+        let mut heights = self.spaced_heights();
+        if let Some(i) = self.composing_in() {
+            heights[i] = self.shape_height(&self.doc.shapes[i]);
+        }
+        heights
+    }
+
+    /// The index of the shape holding marked text, if any.
+    fn composing_in(&self) -> Option<usize> {
+        let e = self.editing.as_ref().filter(|e| e.marked.is_some())?;
+        (self.doc.shapes.iter()).position(|s| !e.zone && s.id == e.id)
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
