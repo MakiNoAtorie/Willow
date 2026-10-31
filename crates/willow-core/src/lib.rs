@@ -29,9 +29,10 @@ pub use session::{
     TextChecked, Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
-    MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle,
-    TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, DESK,
+    KeyPanStyle, MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow,
+    ShapeStyle, THEMES, TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle,
+    ZoomStyle,
 };
 pub use zoom::ZoomPill;
 

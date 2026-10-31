@@ -319,6 +319,15 @@ impl Session {
         self.theme
     }
 
+    /// Changes the look: every shape is measured again and spaced, with nothing sliding. The
+    /// document, its saved state and the undo history are untouched.
+    pub fn set_theme(&mut self, theme: &'static Theme) {
+        self.theme = theme;
+        self.layouts.get_mut().clear();
+        self.respace();
+        self.drawn_changed();
+    }
+
     /// The selected shapes, in the order selected. The shape being edited is `editing()`.
     pub fn selection(&self) -> &[ShapeId] {
         &self.selected
@@ -398,7 +407,8 @@ impl Session {
 
     /// Drawn height in canvas units: text, padding and extra height.
     pub fn shape_height(&self, shape: &Shape) -> f32 {
-        self.layout(shape).height + 2.0 * self.theme.shape.pad_y + shape.extra_height as f32
+        let pad = &self.theme.shape;
+        self.layout(shape).height + pad.pad_top + pad.pad_y + shape.extra_height as f32
     }
 
     /// Every shape's drawn height, in document order: what `save` needs for the side rule.

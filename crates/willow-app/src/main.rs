@@ -12,8 +12,8 @@ use gpui::{
     prelude::*, px, quad, size,
 };
 use willow_core::{
-    Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
-    Side, Theme, ZoomPill,
+    Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, Rgba, Session, Shadow, Side,
+    Theme, ZoomPill,
 };
 mod bench;
 mod file;
@@ -225,11 +225,11 @@ impl Content {
         Content::new(loaded, Vec::new(), None, None)
     }
 
-    fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
+    fn session(self, theme: &'static Theme, window: &Window) -> (Session, Option<PathBuf>) {
         let measure = Box::new(text::TextMeasure::new(window.text_system().clone()));
         let session = match self.recovery {
-            Some(_) => Session::recover(self.loaded, &self.bytes, &PAPER, measure),
-            None => Session::open(self.loaded, self.bytes, &PAPER, measure),
+            Some(_) => Session::recover(self.loaded, &self.bytes, theme, measure),
+            None => Session::open(self.loaded, self.bytes, theme, measure),
         };
         (session, self.path)
     }
@@ -260,7 +260,7 @@ impl Willow {
         // Paint sizes the new session's viewport.
         let panel = self.session.panel().open;
         let path;
-        (self.session, path) = content.session(window);
+        (self.session, path) = content.session(self.session.theme(), window);
         // Checks and regenerations of the old document never land in the new one.
         (self.text_wake, self.text_check, self.regeneration) = (None, None, None);
         // The panel belongs to the window: still open, it shows the new document.
@@ -362,9 +362,13 @@ impl Willow {
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         panel::apply_width(&mut self.session, window, cx);
-        self.session
-            .set_align(cx.global::<prefs::Prefs>().alignment());
-        let theme = self.session.theme();
+        let prefs = cx.global::<prefs::Prefs>();
+        let (align, theme) = (prefs.alignment(), prefs.theme());
+        self.session.set_align(align);
+        if theme.name != self.session.theme().name {
+            self.session.set_theme(theme);
+            self.regenerate(cx);
+        }
         bench::step(self, window);
         let now = self.start.elapsed();
         // Paint requests the next frame while the session is animating.
@@ -818,7 +822,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             window.paint_quad(gpui::fill(Bounds::from_corners(tl, br), color(sel.text)));
         }
         if frame.text_opacity > 0.0 {
-            let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
+            let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_top * z));
             text::paint_text(
                 window,
                 o,
@@ -1007,8 +1011,9 @@ pub(crate) fn shadows(
 
 /// The native menu bar: app menu, File, Edit, View and Window (no Help). Items enable while their action has a handler.
 #[cfg(target_os = "macos")]
-fn set_menus(theme: &Theme, cx: &mut App) {
-    let align = cx.global::<prefs::Prefs>().alignment();
+fn set_menus(cx: &mut App) {
+    let prefs = cx.global::<prefs::Prefs>();
+    let (theme, align) = (prefs.theme(), prefs.alignment());
     use gpui::{Menu, MenuItem, OsAction};
     /// A submenu of checkable entries.
     fn choices(name: &'static str, entries: Vec<view_menu::Choice>) -> Menu {
@@ -1255,6 +1260,10 @@ fn main() {
                 Cow::Borrowed(include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice()),
                 Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice()),
                 Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Regular.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Bold.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/CourierPrime-Italic.ttf").as_slice()),
+                Cow::Borrowed(include_bytes!("../assets/CourierPrime-BoldItalic.ttf").as_slice()),
             ])
             .expect("bundled fonts");
         cx.on_action(|_: &Quit, cx| file::quit(cx));
@@ -1264,7 +1273,7 @@ fn main() {
         let prefs = prefs::file().filter(|_| bench.is_none());
         cx.set_global(prefs.map_or_else(Default::default, |f| prefs::Prefs::load(&f)));
         #[cfg(target_os = "macos")]
-        set_menus(&PAPER, cx);
+        set_menus(cx);
         view_menu::register(cx);
         cx.set_quit_mode(QuitMode::LastWindowClosed);
         // A plain launch applies the recovery files instead of opening a new document.
@@ -1279,7 +1288,7 @@ fn main() {
 
 /// Opens a window showing `content`; `bench` runs the scripted bench in it.
 fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
-    let c = &PAPER.chrome;
+    let c = cx.global::<prefs::Prefs>().theme().chrome;
     let bounds = Bounds::centered(None, size(px(c.window_width), px(c.window_height)), cx);
     cx.open_window(
         WindowOptions {
@@ -1319,7 +1328,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 });
                 let _tab_picker_keys = tab_picker_keys(cx, window);
                 let recovery = content.recovery.clone();
-                let (session, path) = content.session(window);
+                let (session, path) = content.session(cx.global::<prefs::Prefs>().theme(), window);
                 Willow {
                     session,
                     focus,

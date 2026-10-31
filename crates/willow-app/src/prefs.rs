@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use gpui::{App, Global};
-use willow_core::Align;
+use willow_core::{Align, PAPER, THEMES, Theme};
 
 /// `~/Library/Application Support/Willow` or `%APPDATA%\Willow`.
 pub(crate) fn app_dir() -> Option<PathBuf> {
@@ -24,6 +24,7 @@ pub(crate) fn file() -> Option<PathBuf> {
 }
 
 const ALIGNMENT: &str = "text_alignment";
+const THEME: &str = "theme";
 
 /// Writes the preferences off the UI thread.
 pub(crate) fn save_later(cx: &App) {
@@ -91,6 +92,17 @@ impl Prefs {
         self.0.insert(ALIGNMENT.into(), name.into());
     }
 
+    /// The theme; Paper unless the file names another.
+    pub(crate) fn theme(&self) -> &'static Theme {
+        let name = self.0.get(THEME).map(String::as_str);
+        let named = THEMES.iter().find(|t| Some(t.name) == name);
+        named.copied().unwrap_or(&PAPER)
+    }
+
+    pub(crate) fn set_theme(&mut self, theme: &Theme) {
+        self.0.insert(THEME.into(), theme.name.into());
+    }
+
     pub(crate) fn set_f32(&mut self, key: &str, value: f32) {
         self.0.insert(key.into(), value.to_string());
     }
@@ -122,6 +134,17 @@ mod tests {
             let mut p = Prefs::default();
             p.set_alignment(a);
             assert_eq!(Prefs::parse(&p.text()).alignment(), a);
+        }
+    }
+
+    #[test]
+    fn the_theme_survives_a_reload_and_defaults_to_paper() {
+        assert_eq!(Prefs::default().theme().name, "Paper");
+        assert_eq!(Prefs::parse("theme=bogus").theme().name, "Paper");
+        for t in THEMES {
+            let mut p = Prefs::default();
+            p.set_theme(t);
+            assert_eq!(Prefs::parse(&p.text()).theme().name, t.name);
         }
     }
 

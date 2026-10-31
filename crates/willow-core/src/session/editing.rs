@@ -248,7 +248,7 @@ impl Session {
         let (x, y) = self.drawn_at(shape);
         Point {
             x: x as f32 + self.theme.shape.pad_x,
-            y: y as f32 + self.theme.shape.pad_y,
+            y: y as f32 + self.theme.shape.pad_top,
         }
     }
 

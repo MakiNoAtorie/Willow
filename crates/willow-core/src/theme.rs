@@ -32,7 +32,10 @@ pub struct Shadow {
 pub struct ShapeStyle {
     pub radius: f32,
     pub pad_x: f32,
+    /// Below the text.
     pub pad_y: f32,
+    /// Above the text.
+    pub pad_top: f32,
     /// Resting shadow layers, bottom first.
     pub shadow: [Shadow; 2],
 }
@@ -158,10 +161,12 @@ pub struct ZoomPillStyle {
     pub fade: Transition,
 }
 
-/// App menus drawn in the window (Windows' menu button), in screen pixels. Text is the
-/// system UI font. macOS uses the native menus instead.
+/// App menus drawn in the window (context menus, Windows' menu button), in screen pixels.
+/// macOS' menu bar is native.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MenuStyle {
+    /// `None` is the system UI font.
+    pub font: Option<&'static str>,
     pub bg: Rgba,
     pub ink: Rgba,
     pub hover: Rgba,
@@ -487,6 +492,7 @@ pub const PAPER: Theme = Theme {
         radius: 14.0,
         pad_x: 16.0,
         pad_y: 13.0,
+        pad_top: 13.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -633,6 +639,7 @@ pub const PAPER: Theme = Theme {
         },
     },
     menu: MenuStyle {
+        font: None,
         bg: hex(0xfffdf8),
         ink: hex(0x3b342c),
         hover: hex(0xf1ebe0),
@@ -795,3 +802,211 @@ pub const PAPER: Theme = Theme {
         },
     },
 };
+
+/// Typewritten index cards on a linen desk. Only what differs from Paper, as in
+/// `design/visual-language.md`.
+pub const DESK: Theme = Theme {
+    name: "Desk",
+    font: "Courier Prime",
+    font_size: 14.0,
+    canvas: hex(0xe6dfd1),
+    ink: hex(0x2b2621),
+    accent: hex(0x2b2621),
+    // No dot grid.
+    grid_dot: rgba(0, 0, 0, 0.0),
+    shape: ShapeStyle {
+        radius: 4.0,
+        pad_x: 15.0,
+        // 12 under the 6 tall tab.
+        pad_top: 18.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.18),
+            },
+            Shadow {
+                x: 0.0,
+                y: 4.0,
+                blur: 10.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.14),
+            },
+        ],
+        ..PAPER.shape
+    },
+    connector: ConnectorStyle {
+        color: hex(0x9b8c74),
+        width: 1.5,
+        hover: hex(0x2b2621),
+        hover_width: 2.5,
+        ..PAPER.connector
+    },
+    zone: ZoneStyle {
+        radius: 6.0,
+        fill_mix: 0.16,
+        nested_fill_mix: 0.3,
+        edge_width: 0.0,
+        title_size: 12.0,
+        title_weight: 700.0,
+        ..PAPER.zone
+    },
+    selection: SelectionStyle {
+        gap: 0.0,
+        ring: 1.5,
+        color: hex(0x2b2621),
+        text: rgba(199, 154, 62, 0.32),
+        marquee: rgba(43, 38, 33, 0.6),
+        marquee_fill: rgba(43, 38, 33, 0.05),
+        marquee_radius: 2.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 16.0,
+                blur: 30.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.28),
+            },
+            Shadow {
+                x: 0.0,
+                y: 3.0,
+                blur: 6.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.12),
+            },
+        ],
+        fade: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+        },
+        ..PAPER.selection
+    },
+    caret: CaretStyle {
+        color: hex(0x2b2621),
+        ..PAPER.caret
+    },
+    pastel: [
+        hex(0xfbfaf6),
+        hex(0xfff3f1),
+        hex(0xfff6ec),
+        hex(0xfffbea),
+        hex(0xf5fbf1),
+        hex(0xf2f7fc),
+        hex(0xf8f4fc),
+    ],
+    picker: [
+        hex(0xb9b1a3),
+        hex(0xd8574c),
+        hex(0xe8873a),
+        hex(0xe2b52c),
+        hex(0x5c9d4d),
+        hex(0x4a84c4),
+        hex(0x8a66c0),
+    ],
+    chrome: ChromeStyle {
+        title: rgba(43, 38, 33, 0.55),
+        button_hover: rgba(70, 50, 20, 0.08),
+        ..PAPER.chrome
+    },
+    zoom: ZoomStyle {
+        fade_end: 0.52,
+        block_mix: 0.6,
+        ..PAPER.zoom
+    },
+    zoom_pill: ZoomPillStyle {
+        bg: rgba(43, 38, 33, 0.88),
+        ink: hex(0xfffdf7),
+        ..PAPER.zoom_pill
+    },
+    menu: MenuStyle {
+        font: Some("Courier Prime"),
+        bg: hex(0xfffdf7),
+        ink: hex(0x2b2621),
+        hover: hex(0xf3ead6),
+        destructive: hex(0xb8483e),
+        // The mockups' ink at 0x18 alpha.
+        separator: rgba(43, 38, 33, 0.094),
+        radius: 4.0,
+        item_radius: 2.0,
+        font_weight: 400.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.2),
+            },
+            Shadow {
+                x: 0.0,
+                y: 14.0,
+                blur: 30.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.25),
+            },
+        ],
+        ..PAPER.menu
+    },
+    midpoint: MidpointStyle {
+        size: 10.0,
+        fill: hex(0xc79a3e),
+        stroke: hex(0xfff7e6),
+        ..PAPER.midpoint
+    },
+    tab_picker: TabPickerStyle {
+        radius: 3.0,
+        fill: hex(0xfffdf7),
+        shadow: [
+            // Two layers in the mockups.
+            Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 0.0,
+                spread: 0.0,
+                color: rgba(0, 0, 0, 0.0),
+            },
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.25),
+            },
+            Shadow {
+                x: 0.0,
+                y: 3.0,
+                blur: 6.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.15),
+            },
+        ],
+        glyph: hex(0x2b2621),
+        stub: rgba(43, 38, 33, 0.45),
+        ..PAPER.tab_picker
+    },
+    code: CodeStyle {
+        bg: hex(0xfbf8f1),
+        border: rgba(70, 50, 20, 0.15),
+        font: "Courier Prime",
+        font_size: 13.0,
+        line_height: 1.6,
+        // Courier Prime's advance, 1228 of 2048 units.
+        advance: 1228.0 / 2048.0,
+        gutter: hex(0xc4b8a2),
+        keyword: hex(0x8a6a2c),
+        id: hex(0x2b2621),
+        string: hex(0x5c7d46),
+        direction: hex(0x7a5aa8),
+        layout: hex(0xa89d8a),
+        invalid: hex(0xd8574c),
+        ..PAPER.code
+    },
+    ..PAPER
+};
+
+/// Every theme, as View > Theme lists them. A new theme is a const over `PAPER` naming what
+/// differs, one entry here and its line in the app's `view_menu`. A new field needs only
+/// Paper's value: the others inherit it.
+pub static THEMES: [&Theme; 2] = [&PAPER, &DESK];

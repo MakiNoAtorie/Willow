@@ -322,8 +322,9 @@ fn panel(m: &MenuStyle) -> gpui::Div {
         .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
         .text_color(color(m.ink))
         .text_size(px(m.font_size))
-        .line_height(relative(1.2))
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .line_height(relative(m.line_height))
+        .font_weight(gpui::FontWeight(m.font_weight))
+        .when_some(m.font, |d, f| d.font_family(f))
         // Keep clicks off the canvas and title bar beneath.
         .occlude()
 }

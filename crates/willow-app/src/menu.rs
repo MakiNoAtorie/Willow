@@ -30,6 +30,7 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
         .text_size(px(m.font_size))
         .line_height(relative(m.line_height))
         .font_weight(gpui::FontWeight(m.font_weight))
+        .when_some(m.font, |d, f| d.font_family(f))
         // Keep presses off the backdrop beneath.
         .occlude()
         .children(menu.entries.iter().enumerate().map(|(i, e)| {
