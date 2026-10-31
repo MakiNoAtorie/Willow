@@ -5,13 +5,14 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use common::{Fake, text};
+use willow_core::Align;
 use willow_core::{Caret, Layout, Line, Measure, PAPER, Paragraph, Point, Session, Theme, layout};
 
 /// Content width of a default 210-wide Paper shape (16 padding each side).
 const W: f32 = 178.0;
 
 fn lay(s: &str) -> Layout {
-    layout(&text(s), W, &PAPER, &Fake)
+    layout(&text(s), W, &PAPER, Align::Justified, &Fake)
 }
 
 /// Each line's text, from the cluster ranges.
@@ -75,7 +76,7 @@ fn every_paragraph_starts_a_line_and_empty_text_is_one_line_tall() {
     assert_eq!(l.lines[2].range, 4..6);
     assert_eq!(l.height, 67.5);
 
-    let empty = layout(&Default::default(), W, &PAPER, &Fake);
+    let empty = layout(&Default::default(), W, &PAPER, Align::Justified, &Fake);
     assert_eq!(empty.height, 22.5);
 }
 
@@ -174,26 +175,16 @@ fn ascii_text_is_one_cluster_per_byte_except_cr_lf() {
         ..Default::default()
     };
     let paragraphs = vec![Paragraph { runs: vec![run] }];
-    let l = layout(&willow_core::RichText { paragraphs }, W, &PAPER, &Fake);
+    let l = layout(
+        &willow_core::RichText { paragraphs },
+        W,
+        &PAPER,
+        Align::Justified,
+        &Fake,
+    );
 
     let clusters: Vec<Range<usize>> = (l.lines.iter().flat_map(|l| &l.clusters))
         .map(|c| c.range.clone())
         .collect();
     assert_eq!(clusters, [0..1, 1..3, 3..4, 4..5, 5..6]);
-}
-
-#[test]
-fn measuring_ahead_in_steps_leaves_nothing_for_a_save_to_measure() {
-    let calls = Rc::new(Cell::new(0));
-    let doc = willow_core::generate(5, 1);
-    let mut s = Session::new(doc, &PAPER, Box::new(Counting(calls.clone())));
-
-    assert!(!s.measure_ahead(2));
-    assert_eq!(calls.get(), 2);
-    assert!(!s.measure_ahead(2));
-    assert!(s.measure_ahead(2));
-    assert_eq!(calls.get(), 5);
-
-    s.save(|_| Ok(())).unwrap();
-    assert_eq!(calls.get(), 5);
 }

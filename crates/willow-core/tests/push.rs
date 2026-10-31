@@ -1,10 +1,13 @@
 //! Insert-and-push: creating a linked shape on a side that already has one relinks the nearest
-//! neighbor there to the new shape and pushes that neighbor's subtree clear.
+//! neighbor there to the new shape and pushes that neighbor's subtree clear, the one push saved
+//! as a move (ADR 0006).
 mod common;
 
 use std::time::Duration;
 
-use willow_core::{Color, Document, Input, Link, Point, Session, Shape, ShapeId, Side, Zone};
+use willow_core::{
+    Color, Document, Input, Link, Point, ResizeTo, Session, Shape, ShapeId, Side, Zone,
+};
 
 const T: Duration = Duration::ZERO;
 
@@ -28,6 +31,11 @@ fn session(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {
 }
 
 fn at(s: &Session, name: &str) -> (i32, i32) {
+    let r = s.drawn_rect(&id(name)).expect(name);
+    (r.x as i32, r.y as i32)
+}
+
+fn placed(s: &Session, name: &str) -> (i32, i32) {
     let sh = s.document().shapes.iter().find(|x| x.id.0 == name);
     sh.map(|x| (x.x, x.y)).expect(name)
 }
@@ -59,6 +67,9 @@ fn inserting_mid_trunk_relinks_through_the_new_shape_and_pushes_the_subtree_one_
         assert_eq!(at(&s, "b"), (b.0 + pushed.0, b.1 + pushed.1), "{side:?}");
         assert_eq!(at(&s, "c"), (c.0 + pushed.0, c.1 + pushed.1), "{side:?}");
         assert_eq!(at(&s, "a"), (0, 0), "{side:?}");
+        // Saved: only the command knows which of the two goes below the other.
+        assert_eq!(placed(&s, "b"), at(&s, "b"), "{side:?}");
+        assert_eq!(placed(&s, "c"), at(&s, "c"), "{side:?}");
     }
 }
 
@@ -124,11 +135,29 @@ fn one_undo_restores_links_and_positions_and_zones_stay() {
     );
     // The push moved c out of the zone's rectangle; membership is unchanged.
     assert_eq!(at(&s, "c"), (0, 291));
+    assert_eq!(placed(&s, "c"), (0, 291));
     assert_eq!(s.document().zones[0].members, [id("b"), id("c")]);
     s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(*s.document(), doc);
     assert!(!s.can_undo());
+}
+
+#[test]
+fn an_insertion_from_a_grown_shape_lands_a_gap_below_it_and_keeps_its_order() {
+    let mut s = session(&[("a", 0, 0), ("b", 0, 97)], &[("a", "b")]);
+    let r = ResizeTo {
+        x: 0,
+        width: 210,
+        extra_height: 300,
+    };
+    s.resize_shape(&id("a"), r);
+    // a's bottom at 348.5; b is drawn at 397 but placed at 97.
+    assert_eq!((at(&s, "b"), placed(&s, "b")), ((0, 397), (0, 97)));
+    s.create_linked(&id("a"), Side::Bottom);
+    assert_eq!(at(&s, "c"), (0, 397));
+    assert_eq!(at(&s, "b"), (0, 494));
+    assert_eq!(placed(&s, "b"), (0, 494));
 }
 
 #[test]
@@ -159,4 +188,65 @@ fn the_pushed_subtree_slides_from_its_old_place_over_220_ms() {
     assert!(!s.animating(Duration::from_millis(220)));
     // The new shape and the source don't slide.
     assert_eq!((slide(0, "a"), slide(0, "d")), ((0.0, 0.0), (0.0, 0.0)));
+}
+
+/// How far `name` is drawn off its rest position at `ms`, slides only.
+fn slide(s: &Session, name: &str, ms: u64) -> (f32, f32) {
+    let (from, to) = (
+        Point {
+            x: -1000.0,
+            y: -1000.0,
+        },
+        Point {
+            x: 1000.0,
+            y: 1000.0,
+        },
+    );
+    let f = s.draw(from, to, Duration::from_millis(ms));
+    let v = f.shapes.iter().find(|v| v.shape.id.0 == name).expect(name);
+    (v.slide.x, v.slide.y)
+}
+
+/// `a`, then the new `d`, then `b` and `c` pushed one slot down, with `d` no longer edited.
+fn inserted() -> Session {
+    let mut s = session(
+        &[("a", 0, 0), ("b", 0, 97), ("c", 0, 194)],
+        &[("a", "b"), ("b", "c")],
+    );
+    s.create_linked(&id("a"), Side::Bottom);
+    s.handle(Input::Escape, T);
+    s
+}
+
+#[test]
+fn undoing_and_redoing_an_insertion_slides_the_subtree_there_and_back() {
+    let mut s = inserted();
+    let (settled, later) = (Duration::from_millis(300), Duration::from_millis(600));
+    assert_eq!(at(&s, "b"), (0, 194));
+    s.handle(Input::Undo, settled);
+    // Drawn where they were (97 units down), easing up to where they were placed.
+    assert_eq!((at(&s, "b"), at(&s, "c")), ((0, 97), (0, 194)));
+    assert_eq!(
+        (slide(&s, "b", 300), slide(&s, "c", 300)),
+        ((0.0, 97.0), (0.0, 97.0))
+    );
+    assert_eq!(slide(&s, "a", 300), (0.0, 0.0));
+    assert_eq!(slide(&s, "b", 520), (0.0, 0.0));
+
+    s.handle(Input::Redo, later);
+    assert_eq!(at(&s, "b"), (0, 194));
+    assert_eq!(slide(&s, "b", 600), (0.0, -97.0));
+}
+
+#[test]
+fn undoing_an_insertion_during_its_slide_retargets_it() {
+    let mut s = inserted();
+    let left = slide(&s, "b", 110).1;
+    assert!(-97.0 < left && left < 0.0, "{left}");
+    s.handle(Input::Undo, Duration::from_millis(110));
+    // Still drawn at 194 + left, now off a rest position 97 units higher.
+    assert_eq!(at(&s, "b"), (0, 97));
+    assert_eq!(slide(&s, "b", 110), (0.0, left + 97.0));
+    assert!(s.animating(Duration::from_millis(329)));
+    assert!(!s.animating(Duration::from_millis(330)));
 }

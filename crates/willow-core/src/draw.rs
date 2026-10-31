@@ -10,8 +10,8 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    CaretView, Color, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId, Side, Zone,
-    side,
+    CaretView, Color, DrawnRect, Layout, Paragraph, Point, Rgba, Run, Session, Shape, ShapeId,
+    Side, Zone, ZoneStyle, side,
 };
 
 /// One frame's worth of drawing: zones, then connectors, then shapes.
@@ -29,13 +29,17 @@ pub struct Frame<'a> {
     pub connectors: Vec<Connector>,
     /// Connector stroke in canvas units: the theme's, or one screen pixel if wider.
     pub connector_width: f32,
+    /// Shape border and zone edge widths in canvas units, for `ShapeStyle::border_color` and
+    /// `VisibleZone::edge`: the theme's, or `Theme.border_min_screen` if wider.
+    pub shape_border: f32,
+    pub zone_edge: f32,
     /// Shapes intersecting the rectangle, in draw order (later on top).
     pub shapes: Vec<Visible<'a>>,
     /// Shape text opacity: 1 at `fade_start` and above, 0 at `fade_end` and below.
     pub text_opacity: f32,
     /// How far fills have moved from pastel toward the picker color, 0 to `block_mix`.
     pub deepen: f32,
-    /// Shape shadows and the dot grid are drawn (dropped below `fade_end`).
+    /// Shape shadows and the dot grid or weave are drawn (dropped below `fade_end`).
     pub shadows: bool,
     pub grid: bool,
     /// The hovered shape's edge midpoints, canvas units; paint them over every shape at the
@@ -92,6 +96,13 @@ pub struct VisibleZone<'a> {
     /// glyphs centered in it, in the bold face if `ZoneStyle::title_bold`.
     pub title_at: Point,
     pub title_size: f32,
+    /// The title as drawn (capitals if `ZoneStyle::title_upper`), and the space after each
+    /// letter in canvas units.
+    pub text: String,
+    pub title_spacing: f32,
+    /// `ZoneStyle::pill`'s capsule behind a shown title with text or being edited: top-left and
+    /// bottom-right in canvas units.
+    pub pill: Option<(Point, Point)>,
     /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
     /// edited; else paint none.
     pub show_title: bool,
@@ -107,15 +118,23 @@ pub struct VisibleZone<'a> {
 pub struct Visible<'a> {
     /// The resize preview's shape while the shape is being resized.
     pub shape: Cow<'a, Shape>,
-    /// Top-left in canvas units: the drag preview's while the shape is dragged.
+    /// Drawn top-left in canvas units: the drag preview's while the shape is dragged. Read
+    /// this, not `shape.x` and `shape.y`, which are the placed position.
     pub x: i32,
     pub y: i32,
     /// Drawn height in canvas units.
     pub height: f32,
     /// Fill color, deepened.
     pub fill: Rgba,
+    /// The tab's color (`ShapeStyle::tab` tall along the top edge); the picker color, rippling
+    /// with the fill.
+    pub tab: Rgba,
+    /// Canvas units to paint the shape off `x`, `y` while it is selected (`SelectionStyle::lift_*`
+    /// scaled by the ring); hit-testing ignores it.
+    pub lift: Point,
     pub layout: Rc<Layout>,
-    /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out.
+    /// Selection ring opacity, 0 to 1; a deselected shape's ring is still fading out. An
+    /// overshooting `SelectionStyle::fade` passes both ends on the way.
     pub ring: f32,
     /// While text shows, on the edited shape only: the text selection highlight in canvas
     /// units, one (top-left, bottom-right) per line; the IME marked text; and the caret,
@@ -150,18 +169,16 @@ impl Session {
             None => (None, HashSet::new()),
         };
         let doc = self.document();
-        // A shape as the gesture in progress previews it: its shape and top-left.
-        let placed = |s: &'a Shape| {
+        // A shape as the gesture in progress previews it: its shape and drawn top-left.
+        let shown = |i: usize, s: &'a Shape| {
             let s = match &resized {
                 Some(r) if r.id == s.id => Cow::Owned(r.clone()),
                 _ => Cow::Borrowed(s),
             };
-            let (x, y) = match preview {
-                Some(p) if *p.id == s.id => (p.x, p.y),
-                _ => (s.x, s.y),
-            };
-            let (x, y) = match group {
-                Some((dx, dy)) if moved.contains(&s.id) => (s.x + dx, s.y + dy),
+            let (x, y) = s.moved_by(self.drawn_offset_at(i));
+            let (x, y) = match (group, preview) {
+                (Some((dx, dy)), _) if moved.contains(&s.id) => (x + dx, y + dy),
+                (_, Some(p)) if *p.id == s.id => (p.x, p.y),
                 _ => (x, y),
             };
             (s, x, y)
@@ -170,11 +187,11 @@ impl Session {
         let link_drag = self.link_drag();
         let target = link_drag.and_then(|l| l.target);
         let mut connectors = Vec::new();
-        for &(p, q) in self.link_ends().iter() {
-            let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
+        for &(i, j) in self.link_ends().iter() {
+            let (Some(p), Some(q)) = (doc.shapes.get(i), doc.shapes.get(j)) else {
                 continue;
             };
-            let ((p, px, py), (q, qx, qy)) = (placed(p), placed(q));
+            let ((p, px, py), (q, qx, qy)) = (shown(i, p), shown(j, q));
             // Cull on what's known without layout first.
             let (left, right) = (px.min(qx), (px + p.width as i32).max(qx + q.width as i32));
             if left as f32 > b.x || (right as f32) < a.x || py.min(qy) as f32 > b.y {
@@ -185,19 +202,17 @@ impl Session {
                 continue;
             }
             // A sliding shape's connector end slides with it, a previewed one with the preview.
-            let center = |s: &Shape, x: i32, y: i32, h: f32| {
-                let (c, o) = (s.center(h), self.sliding(&s.id, now));
-                Point {
-                    x: c.x + (x - s.x) as f32 + o.x,
-                    y: c.y + (y - s.y) as f32 + o.y,
+            let rect = |s: &Shape, x: i32, y: i32, h: f32| {
+                let o = self.sliding(&s.id, now);
+                DrawnRect {
+                    x: x as f32 + o.x,
+                    y: y as f32 + o.y,
+                    width: s.width as f32,
+                    height: h,
                 }
             };
-            let (pc, qc) = (center(&p, px, py, ph), center(&q, qx, qy, qh));
-            let (from_side, to_side) = (side(pc, qc), side(qc, pc));
-            let (mut from, mut to) = (
-                midpoint(pc, p.width, ph, from_side),
-                midpoint(qc, q.width, qh, to_side),
-            );
+            let ((mut from, from_side), (mut to, to_side)) =
+                connector_ends(rect(&p, px, py, ph), rect(&q, qx, qy, qh));
             // A new shape's connector draws out from the other end.
             match creating {
                 Some((id, k)) if *id == q.id => to = lerp(from, to, k),
@@ -243,12 +258,25 @@ impl Session {
                 } else {
                     zt.fill_mix
                 };
+                let source = match zt.fill_picker {
+                    true => t.picker[zone.color as usize],
+                    false => pastel,
+                };
                 VisibleZone {
                     nested,
-                    fill: mix(t.canvas, pastel, fill),
-                    edge: mix(pastel, t.picker[zone.color as usize], zt.edge_mix),
+                    fill: mix(t.canvas, source, fill),
+                    edge: zt.edge_color.unwrap_or(mix(
+                        pastel,
+                        t.picker[zone.color as usize],
+                        zt.edge_mix,
+                    )),
                     title_at: self.title_at(&zone),
                     title_size,
+                    text: title_text(zt, &zone.title).into_owned(),
+                    title_spacing: zt.title_spacing * title_size,
+                    pill: (e.is_some() || !zone.title.is_empty())
+                        .then(|| self.title_pill(&zone, title_size))
+                        .flatten(),
                     show_title: e.is_some()
                         || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
                             <= zone.width as f32,
@@ -259,9 +287,9 @@ impl Session {
                 }
             })
             .collect();
-        let shapes = (doc.shapes.iter())
-            .filter_map(|s| {
-                let (s, x, y) = placed(s);
+        let shapes = (doc.shapes.iter().enumerate())
+            .filter_map(|(i, s)| {
+                let (s, x, y) = shown(i, s);
                 let (fx, fy) = (x as f32, y as f32);
                 // Cull on what's known without layout first: layout is the costly part.
                 if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {
@@ -275,11 +303,18 @@ impl Session {
                 let ring = if target == Some(&s.id) { 1.0 } else { ring };
                 let e = edited.filter(|e| e.id == s.id);
                 let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
-                    opacity: k,
+                    // `k` passes 1 on a curve that overshoots.
+                    opacity: k.min(1.0),
                     dy: t.create.rise * (1.0 - k),
                     scale: t.create.scale + (1.0 - t.create.scale) * k,
                 });
+                let picker = |c: Color| t.picker[c as usize];
                 Some(Visible {
+                    tab: match self.rippling(&s.id, now) {
+                        Some((from, p)) => mix(picker(from), picker(s.color), p),
+                        None => picker(s.color),
+                    },
+                    lift: self.lift(ring),
                     fill: match self.rippling(&s.id, now) {
                         Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
                         None => fills[s.color as usize],
@@ -299,18 +334,21 @@ impl Session {
             })
             .collect();
         let full = vp.zoom >= z.fade_end;
+        let border = t.border_min_screen / vp.zoom;
         Frame {
             zones,
             zone_ring: self.drop_zone().or(self.band_ring()),
             zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
+            shape_border: t.shape.border.max(border),
+            zone_edge: t.zone.edge_width.max(border),
             shapes,
             text_opacity: fade,
             deepen,
             shadows: full,
             grid: full,
-            midpoints: self.midpoints(),
+            midpoints: self.midpoints(now),
             marquee: self.marquee(),
             link_drag,
             tab_picker: self.tab_picker(),
@@ -319,6 +357,16 @@ impl Session {
 }
 
 impl Session {
+    /// How far a shape at ring opacity `ring` paints off where it is drawn; hit-testing
+    /// ignores it.
+    pub(crate) fn lift(&self, ring: f32) -> Point {
+        let s = &self.theme().selection;
+        Point {
+            x: s.lift_x * ring,
+            y: s.lift_y * ring,
+        }
+    }
+
     /// Zone titles' size in canvas units: never under the theme's minimum on screen.
     pub(crate) fn title_size(&self) -> f32 {
         let zt = &self.theme().zone;
@@ -335,38 +383,93 @@ impl Session {
         }
     }
 
+    /// The capsule around `zone`'s title at `size`: top-left and bottom-right in canvas units.
+    fn title_pill(&self, zone: &Zone, size: f32) -> Option<(Point, Point)> {
+        let t = self.theme();
+        let pill = t.zone.pill?;
+        let (at, k) = (self.title_at(zone), 1.0 / self.viewport().zoom.min(1.0));
+        let (x, y) = (pill.pad_x * k, pill.pad_y * k);
+        let width = self.title_width(&zone.title, size);
+        let from = Point {
+            x: at.x - x,
+            y: at.y - y,
+        };
+        let to = Point {
+            x: at.x + width + x,
+            y: at.y + t.line_height * size + y,
+        };
+        Some((from, to))
+    }
+
     /// `title`'s width at `size`, canvas units. Measured on every draw: the app's word cache
     /// makes a known title a few lookups. Shaped at the shape font's size in the face titles
     /// draw with, then scaled to `size`.
     pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
         let t = self.theme();
+        // One cluster per grapheme of the title as drawn, so capitals can change its length.
+        let (mut shown, mut clusters, mut letters) = (String::new(), Vec::new(), 0);
+        for g in title.graphemes(true) {
+            let start = shown.len();
+            shown.push_str(&title_text(&t.zone, g));
+            clusters.push(start..shown.len());
+            letters += 1;
+        }
         let para = Paragraph {
             runs: vec![Run {
-                text: title.into(),
+                text: shown,
                 bold: t.zone.title_bold(),
                 ..Run::default()
             }],
         };
-        let clusters: Vec<_> = (title.grapheme_indices(true))
-            .map(|(i, g)| i..i + g.len())
-            .collect();
         let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
-        w * size / t.font_size
+        w * size / t.font_size + letters as f32 * t.zone.title_spacing * size
     }
 }
 
-/// The midpoint of `side` of a `w` x `h` shape centered at `c`.
-fn midpoint(c: Point, w: u32, h: f32, side: Side) -> Point {
-    let (dx, dy) = match side {
-        Side::Top => (0.0, -h / 2.0),
-        Side::Bottom => (0.0, h / 2.0),
-        Side::Left => (-(w as f32) / 2.0, 0.0),
-        Side::Right => (w as f32 / 2.0, 0.0),
-    };
-    Point {
-        x: c.x + dx,
-        y: c.y + dy,
+/// `title` as the theme draws it.
+fn title_text<'a>(zt: &ZoneStyle, title: &'a str) -> Cow<'a, str> {
+    if zt.title_upper {
+        title.to_uppercase().into()
+    } else {
+        title.into()
     }
+}
+
+/// Both ends of the connector between drawn rectangles `a` and `b`, each with the side it
+/// leaves. The one place that decides them; the hit test reads it too. Straight across, at
+/// the middle of the overlap, where the shapes overlap on the axis across the connector;
+/// else midpoint to midpoint.
+pub(crate) fn connector_ends(a: DrawnRect, b: DrawnRect) -> ((Point, Side), (Point, Side)) {
+    let (sa, sb) = (side(a.center(), b.center()), side(b.center(), a.center()));
+    let vertical = matches!(sa, Side::Top | Side::Bottom);
+    let (lo, hi) = if vertical {
+        (a.x.max(b.x), a.right().min(b.right()))
+    } else {
+        (a.y.max(b.y), a.bottom().min(b.bottom()))
+    };
+    let end = |r: DrawnRect, s: Side| {
+        let across = if lo < hi {
+            (lo + hi) / 2.0
+        } else if vertical {
+            r.x + r.width / 2.0
+        } else {
+            r.y + r.height / 2.0
+        };
+        let p = match s {
+            Side::Top => Point { x: across, y: r.y },
+            Side::Bottom => Point {
+                x: across,
+                y: r.bottom(),
+            },
+            Side::Left => Point { x: r.x, y: across },
+            Side::Right => Point {
+                x: r.right(),
+                y: across,
+            },
+        };
+        (p, s)
+    };
+    (end(a, sa), end(b, sb))
 }
 
 /// `a` moved `k` (0 to 1) of the way toward `b`.

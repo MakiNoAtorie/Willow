@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use super::drawn::land;
 use super::{Gesture, Session};
 use crate::{Document, Point, ShapeId};
 
@@ -88,17 +89,13 @@ impl Session {
 
     /// Moves zone `index` by (dx, dy) with everything it carries, as one undo step: it nests
     /// in the top-level zone under its new center, or none, and draws above its siblings.
-    /// Pushes nothing.
     pub(super) fn drop_zone_by(&mut self, index: usize, dx: i32, dy: i32) {
         let carried: HashSet<ShapeId> = self.carried(index).into_iter().cloned().collect();
         let id = self.doc.zones[index].id.clone();
         let nest = self.nest_change(index, dx, dy);
+        let landing = self.landing(&carried, dx, dy);
         self.history.step(&mut self.doc, |h, doc| {
-            for i in 0..doc.shapes.len() {
-                if carried.contains(&doc.shapes[i].id) {
-                    h.change_at(doc, i, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
-                }
-            }
+            land(h, doc, landing);
             for z in &carried {
                 h.change_zone(doc, z, |z| (z.x, z.y) = (z.x + dx, z.y + dy));
             }

@@ -6,9 +6,9 @@ use std::collections::HashSet;
 use super::menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind};
 use super::midpoints::edge_midpoint;
 use super::{Gesture, Session};
-use crate::draw::LinkDrag;
+use crate::draw::{LinkDrag, connector_ends};
 use crate::input::Point;
-use crate::{Link, ShapeId, side};
+use crate::{Link, ShapeId};
 
 /// A link drag in progress and the hovered connector.
 #[derive(Debug, Default)]
@@ -73,9 +73,8 @@ impl Session {
         else {
             return None;
         };
-        let s = &self.doc.shapes[index];
         Some(LinkDrag {
-            from: edge_midpoint(s, self.shape_height(s), side),
+            from: edge_midpoint(self.drawn(&self.doc.shapes[index]), side),
             to: self.viewport.to_canvas(d.to),
             target: self.link_target().map(|t| &self.doc.shapes[t].id),
         })
@@ -96,10 +95,9 @@ impl Session {
             let (Some(a), Some(b)) = (shapes.get(ends[k].0), shapes.get(ends[k].1)) else {
                 return false;
             };
-            let (ah, bh) = (self.shape_height(a), self.shape_height(b));
-            let (ac, bc) = (a.center(ah), b.center(bh));
-            let from = vp.to_screen(edge_midpoint(a, ah, side(ac, bc)));
-            let to = vp.to_screen(edge_midpoint(b, bh, side(bc, ac)));
+            let (a, b) = (self.drawn(a), self.drawn(b));
+            let ((from, _), (to, _)) = connector_ends(a, b);
+            let (from, to) = (vp.to_screen(from), vp.to_screen(to));
             distance(p, from, to) <= hit
         })?;
         Some(self.doc.links[k].clone())

@@ -4,6 +4,9 @@ use std::time::Duration;
 
 use crate::{Point, Theme, Viewport};
 
+/// Screen pixels of wheel one Zoom In / Zoom Out command counts as: one Windows notch.
+pub(crate) const ZOOM_NOTCH_PX: f32 = 60.0;
+
 /// Zoom factor per screen pixel of Ctrl/Cmd+wheel: one 60 px Windows notch is about 1.2x.
 // ponytail: calibration knob, tune per device if a notch feels too big or small.
 const WHEEL_ZOOM_PER_PX: f32 = 0.003;

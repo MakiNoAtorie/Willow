@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use gpui::Global;
+use gpui::{App, Global};
+use willow_core::{Align, PAPER, THEMES, Theme};
 
 /// `~/Library/Application Support/Willow` or `%APPDATA%\Willow`.
 pub(crate) fn app_dir() -> Option<PathBuf> {
@@ -20,6 +21,19 @@ pub(crate) fn app_dir() -> Option<PathBuf> {
 /// The preferences file.
 pub(crate) fn file() -> Option<PathBuf> {
     Some(app_dir()?.join("preferences.txt"))
+}
+
+const ALIGNMENT: &str = "text_alignment";
+const THEME: &str = "theme";
+
+/// Writes the preferences off the UI thread.
+pub(crate) fn save_later(cx: &App) {
+    if let Some(file) = file() {
+        let prefs = cx.global::<Prefs>().clone();
+        cx.background_executor()
+            .spawn(async move { prefs.save(&file) })
+            .detach();
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -60,6 +74,35 @@ impl Prefs {
         self.0.get(key)?.parse().ok()
     }
 
+    /// The text alignment; Justified unless the file says otherwise.
+    pub(crate) fn alignment(&self) -> Align {
+        match self.0.get(ALIGNMENT).map(String::as_str) {
+            Some("left") => Align::Left,
+            Some("centered") => Align::Centered,
+            _ => Align::Justified,
+        }
+    }
+
+    pub(crate) fn set_alignment(&mut self, align: Align) {
+        let name = match align {
+            Align::Justified => "justified",
+            Align::Left => "left",
+            Align::Centered => "centered",
+        };
+        self.0.insert(ALIGNMENT.into(), name.into());
+    }
+
+    /// The theme; Paper unless the file names another.
+    pub(crate) fn theme(&self) -> &'static Theme {
+        let name = self.0.get(THEME).map(String::as_str);
+        let named = THEMES.iter().find(|t| Some(t.name) == name);
+        named.copied().unwrap_or(&PAPER)
+    }
+
+    pub(crate) fn set_theme(&mut self, theme: &Theme) {
+        self.0.insert(THEME.into(), theme.name.into());
+    }
+
     pub(crate) fn set_f32(&mut self, key: &str, value: f32) {
         self.0.insert(key.into(), value.to_string());
     }
@@ -78,6 +121,31 @@ mod tests {
         p.save(&path);
         assert_eq!(Prefs::load(&path).get_f32("panel_width"), Some(512.5));
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_alignment_survives_a_reload_and_defaults_to_justified() {
+        assert_eq!(Prefs::default().alignment(), Align::Justified);
+        assert_eq!(
+            Prefs::parse("text_alignment=bogus").alignment(),
+            Align::Justified
+        );
+        for a in [Align::Justified, Align::Left, Align::Centered] {
+            let mut p = Prefs::default();
+            p.set_alignment(a);
+            assert_eq!(Prefs::parse(&p.text()).alignment(), a);
+        }
+    }
+
+    #[test]
+    fn the_theme_survives_a_reload_and_defaults_to_paper() {
+        assert_eq!(Prefs::default().theme().name, "Paper");
+        assert_eq!(Prefs::parse("theme=bogus").theme().name, "Paper");
+        for t in THEMES {
+            let mut p = Prefs::default();
+            p.set_theme(t);
+            assert_eq!(Prefs::parse(&p.text()).theme().name, t.name);
+        }
     }
 
     #[test]

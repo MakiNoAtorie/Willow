@@ -247,13 +247,8 @@ fn text_growth_pushes_and_insert_and_push_never_change_membership_or_zone_sizes(
         s.handle(Input::NewLine, T);
     }
     s.handle(Input::Escape, T);
-    let c = s
-        .document()
-        .shapes
-        .iter()
-        .find(|x| x.id == id("c"))
-        .unwrap();
-    assert!(c.y > 300 && c.y < 550, "c pushed into q, at {}", c.y);
+    let c = s.drawn_rect(&id("c")).unwrap();
+    assert!(c.y > 300.0 && c.y < 550.0, "c pushed into q, at {}", c.y);
     assert_eq!(s.document().zones, before);
 }
 

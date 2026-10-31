@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::{Gesture, Session};
+use super::{DrawnRect, Gesture, Session};
 use crate::input::Point;
 use crate::{Shape, ShapeId, Side};
 
@@ -21,9 +21,14 @@ pub(super) struct Midpoints {
     created: Option<(ShapeId, Duration)>,
 }
 
-/// The midpoint of `side` of shape `s`, `h` tall, in canvas units.
-pub(super) fn edge_midpoint(s: &Shape, h: f32, side: Side) -> Point {
-    let (x, y, w) = (s.x as f32, s.y as f32, s.width as f32);
+/// The midpoint of `side` of a drawn rectangle, in canvas units.
+pub(super) fn edge_midpoint(r: DrawnRect, side: Side) -> Point {
+    let DrawnRect {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = r;
     match side {
         Side::Top => Point { x: x + w / 2.0, y },
         Side::Bottom => Point {
@@ -46,8 +51,9 @@ impl Session {
             self.viewport.to_canvas(p),
             MIDPOINT_HIT / self.viewport.zoom,
         );
-        let i = self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = (s.x as f32, s.y as f32);
+        let i = (0..self.doc.shapes.len()).rfind(|&i| {
+            let (s, (x, y)) = (&self.doc.shapes[i], self.drawn_top_left(i));
+            let (x, y) = (x as f32, y as f32);
             (x - r..=x + s.width as f32 + r).contains(&c.x)
                 && (y - r..=y + self.shape_height(s) + r).contains(&c.y)
         })?;
@@ -58,10 +64,9 @@ impl Session {
     /// The midpoint under screen point `p`: its shape's index and side.
     pub(super) fn midpoint_at(&self, p: Point) -> Option<(usize, Side)> {
         let i = self.near(p)?;
-        let (s, vp) = (&self.doc.shapes[i], self.viewport);
-        let h = self.shape_height(s);
+        let (r, vp) = (self.drawn(&self.doc.shapes[i]), self.viewport);
         let hit = |&side: &Side| {
-            let m = vp.to_screen(edge_midpoint(s, h, side));
+            let m = vp.to_screen(edge_midpoint(r, side));
             (m.x - p.x).hypot(m.y - p.y) <= MIDPOINT_HIT
         };
         SIDES.into_iter().find(hit).map(|side| (i, side))
@@ -74,11 +79,15 @@ impl Session {
         hover != std::mem::replace(&mut self.mid.hover, hover.clone())
     }
 
-    /// The hovered shape's four edge midpoints in canvas units, or none: not on the shape
-    /// being edited, nor during a gesture other than a midpoint press.
-    pub(crate) fn midpoints(&self) -> Vec<Point> {
-        let idle = matches!(self.gesture, None | Some(Gesture::Midpoint { .. }));
-        let Some(id) = self.mid.hover.as_ref().filter(|_| idle && !self.space_held) else {
+    /// The hovered shape's four edge midpoints in canvas units as painted at `now`, on the
+    /// lifted shape, or none: not on the shape being edited, nor during a gesture other than a
+    /// midpoint press, nor under an open menu or picker.
+    pub(crate) fn midpoints(&self, now: Duration) -> Vec<Point> {
+        let idle = matches!(self.gesture, None | Some(Gesture::Midpoint { .. }))
+            && !self.space_held
+            && self.menu.is_none()
+            && !self.tab_picker;
+        let Some(id) = self.mid.hover.as_ref().filter(|_| idle) else {
             return Vec::new();
         };
         if self.editing.as_ref().is_some_and(|e| &e.id == id) {
@@ -87,8 +96,15 @@ impl Session {
         let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
             return Vec::new();
         };
-        let h = self.shape_height(s);
-        SIDES.map(|side| edge_midpoint(s, h, side)).to_vec()
+        let (r, lift) = (self.drawn(s), self.lift(self.ring(id, now)));
+        let lifted = |side| {
+            let p = edge_midpoint(r, side);
+            Point {
+                x: p.x + lift.x,
+                y: p.y + lift.y,
+            }
+        };
+        SIDES.map(lifted).to_vec()
     }
 
     /// Creates an empty shape linked to `id` on `side`, one creation gap away (placed as the
@@ -119,8 +135,6 @@ impl Session {
                 n,
             )
         });
-        // Then other chains it or the pushed block land on are pushed clear.
-        let mut movers = vec![(self.doc.shapes.len(), None)];
         // `start_editing`'s group is this one; `stop_editing` closes both as one step.
         self.history.begin();
         self.history.add(&mut self.doc, new);
@@ -130,14 +144,10 @@ impl Session {
         }
         self.history.link(&mut self.doc, id, &new_id);
         if let Some(((dx, dy), block, n)) = insert {
-            if (dx, dy) != (0, 0) {
-                movers.extend(block.iter().map(|&k| (k, self.rect_at(k))));
-            }
             self.push(&block, dx, dy);
             self.history.unlink(&mut self.doc, id, &n);
             self.history.link(&mut self.doc, &new_id, &n);
         }
-        self.clear_others(side, movers);
         self.select([new_id.clone()]);
         self.start_editing(new_id.clone());
         self.mid = Midpoints {

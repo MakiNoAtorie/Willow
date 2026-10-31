@@ -2,7 +2,8 @@ mod common;
 
 use common::{doc_with, session_of};
 use willow_core::{
-    Color, Document, Point, Rgba, Session, Shape, ShapeId, Side, Viewport, VisibleZone, Zone,
+    Color, Document, Input, Modifiers, Point, Rgba, Session, Shape, ShapeId, Side, Viewport,
+    VisibleZone, Zone,
 };
 
 const T: std::time::Duration = std::time::Duration::ZERO;
@@ -310,4 +311,61 @@ fn a_zone_draws_its_title_only_while_the_title_fits_inside_it_on_screen() {
     // At 50% the title is 24 canvas units (86.4 wide) and the inset 32: 150.4 does not fit.
     look_at(&mut s, 0.5);
     assert!(!s.draw(SCREEN.0, SCREEN.1, T).zones[0].show_title);
+}
+
+/// Empty shapes at `(id, x, y, width)`, 48.5 tall, linked in pairs.
+fn linked(shapes: &[(&str, i32, i32, u32)], links: &[(&str, &str)]) -> Session {
+    let mut doc = Document::default();
+    let id = |i: &str| ShapeId(i.into());
+    for &(i, x, y, w) in shapes {
+        let mut s = Shape::new(id(i), x, y);
+        s.width = w;
+        doc.shapes.push(s);
+    }
+    for &(a, b) in links {
+        assert!(doc.link(&id(a), &id(b)));
+    }
+    session_of(doc)
+}
+
+fn ends(s: &mut Session) -> Vec<(Point, Point)> {
+    look_at(s, 1.0);
+    let f = s.draw(SCREEN.0, SCREEN.1, T);
+    f.connectors.iter().map(|c| (c.from, c.to)).collect()
+}
+
+#[test]
+fn a_connector_runs_straight_through_the_middle_of_the_overlap() {
+    // Vertical: a spans x 0..210, c spans 150..300: they overlap on 150..210.
+    let mut s = linked(&[("a", 0, 0, 210), ("c", 150, 200, 150)], &[("a", "c")]);
+    assert_eq!(ends(&mut s), [(pt(180.0, 48.5), pt(180.0, 200.0))]);
+    // Horizontal: b is 20 down, so they overlap on y 20..48.5.
+    let mut s = linked(&[("a", 0, 0, 210), ("b", 300, 20, 210)], &[("a", "b")]);
+    assert_eq!(ends(&mut s), [(pt(210.0, 34.25), pt(300.0, 34.25))]);
+}
+
+#[test]
+fn without_an_overlap_a_connector_runs_midpoint_to_midpoint() {
+    // Touching edges do not overlap.
+    let mut s = linked(&[("a", 0, 0, 210), ("d", 210, 200, 100)], &[("a", "d")]);
+    assert_eq!(ends(&mut s), [(pt(105.0, 48.5), pt(260.0, 200.0))]);
+}
+
+#[test]
+fn the_connector_hit_test_follows_the_straightened_line() {
+    let mut s = linked(&[("a", 0, 0, 210), ("c", 150, 200, 150)], &[("a", "c")]);
+    look_at(&mut s, 1.0);
+    let mut hovered = |x: f32| {
+        s.handle(
+            Input::PointerMove {
+                pos: pt(x, 120.0),
+                mods: Modifiers::default(),
+            },
+            T,
+        );
+        s.draw(SCREEN.0, SCREEN.1, T).connectors[0].hovered
+    };
+    // The line is x = 180; the old slanted one passed x = 161 at this height.
+    assert!(hovered(186.0));
+    assert!(!hovered(160.0));
 }

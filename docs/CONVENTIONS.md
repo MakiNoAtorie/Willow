@@ -21,7 +21,7 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 - Derived indexes cached in `Session` are validated on read.
 
 ## Files
-- Heights for `save` come from `Session::heights()` on the UI thread. Golden files `tests/golden/*.willow`, repairs as `repair-<case>.willow`.
+- Saved data is `Session::heights()` plus `drawn_positions()`, gathered on the UI thread. Golden files `tests/golden/*.willow`, repairs as `repair-<case>.willow`.
 - `Theme.creation_gap` is the one creation gap.
 - File state and recovery timing live in `session/file.rs`; the app only does I/O, recovery off the UI thread.
 - `file::settle` is the one Save / Don't Save / Cancel routine. Window closes go through `file::close` (or `quit`) and delete recovery via `discard_recovery(cx)`.
@@ -31,11 +31,11 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 
 ## Theme
 - Every visual value is a `Theme` field in the core; the app holds no visual constants.
+- Adding a theme, a theme field, a bundled font or a View choice: read `docs/conventions/themes.md`.
 - Shadows keep `themes.js` values; the app passes `blur / 2` as `blur_radius`.
 
 ## Text
 - Offsets are UTF-8 bytes; outside offsets are clamped with `floor_char_boundary` on entry. Shape text's selection is set publicly only through `Session::set_text_selection`.
-- After any open, call `Session::measure_ahead(n)` from idle.
 - Layout is the pure `layout(..)` in `layout.rs`; read it through `Session::layout` / `Session::shape_height` (cached on text + width). Edit shape text only through `RichText::replace`.
 - The app writes `Session::clipboard_text()` before Cut/Copy and sends `Input::Paste(text)`; the core never touches the clipboard.
 - IME marked text (`Editing.marked`) sits outside `History`; `handle` commits it before every input except Mark/Text and view-only inputs. Only the app converts UTF-16 (`text.rs`).
@@ -55,8 +55,8 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 
 ## Chains
 - Menus are core data (`Session::menu()`); clipboard items go through `Willow::choose`.
-- `new_shape_at(c, push)` is the one New shape path.
-- Pushes go through `session/push.rs`: saved moves in the open step, never touching zones. Anything that makes a shape bigger takes `rect_of(id)` before and calls `make_room(id, old)` after. Moves, drags, pastes and text edits never push.
+- `new_shape_at(c)` is the one New shape path.
+- Touching placed or drawn positions, the spacing pass, moves or slides: read `docs/conventions/spacing.md`.
 
 ## Zones
 - Every rule that puts a shape or zone in a zone uses `Session::zone_at(c, keep)`; the holder of X is `Document::parent_zone(id)`. New and dropped zones are ordered by `band::raised`.
@@ -67,9 +67,9 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 - Touching `session/panel*.rs`, `format::check` or the app's `panel.rs`: read `docs/conventions/code-panel.md`.
 
 ## Drawing
-- Canvas paint reads only `Session::draw(from, to, now)`, previews and overlays included. Paint order: zone fills, `Frame.zone_ring`, titles, connectors, shapes; draw-query geometry is canvas units, multiplied by `vp.zoom` in paint.
+- Canvas paint reads only `Session::draw(from, to, now)`, previews and overlays included; large overlapping runs go in `paint_layer`. Paint order: zone fills, `Frame.zone_ring`, titles, connectors, shapes; draw-query geometry is canvas units, multiplied by `vp.zoom` in paint.
 
 ## Tests
 - Drive the core's public API; tests of `pub(crate)` types go in `src/<module>/<name>_tests.rs`. Core tests use `tests/common::Fake` (`session_of` / `doc_with`) and `s.viewport().to_screen(..)` for screen points.
 - Property tests use the built-in fixed-seed xorshift; large inputs come from `willow_core::generate`. Tests with panel text pending must type it: a paste applies at once.
-- Bench: `cargo run --release -p willow-app -- --bench --machine NAME` appends to `bench/results.csv`. Bench rows go in their own commit after the code they measure. Scenarios press only where the core's hit-test (e.g. `band_at`) confirms the target. Time a background job's UI-thread and off-thread parts as separate metrics.
+- Bench: `cargo run --release -p willow-app -- --bench --machine NAME [--theme NAME] [--shapes N]` appends to `bench/results.csv`. Bench rows go in their own commit after the code they measure. Scenarios press only where the core's hit-test (e.g. `band_at`) confirms the target. Time a background job's UI-thread and off-thread parts as separate metrics.

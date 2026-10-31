@@ -6,6 +6,9 @@ mod beside;
 mod clipboard;
 mod color_picker;
 mod delete;
+mod drawn;
+#[cfg(test)]
+mod drawn_tests;
 mod drop;
 mod editing;
 mod file;
@@ -26,6 +29,7 @@ mod panel_edit;
 mod panel_select;
 mod push;
 mod select;
+mod spacing;
 mod tab_picker;
 mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
@@ -38,10 +42,11 @@ use std::time::Duration;
 use crate::Side;
 use crate::history::History;
 use crate::input::{Button, Cursor, Input, Key, Point, Response};
-use crate::layout::{Layout, Measure, layout};
-use crate::zoom::{Zoom, ZoomPill};
+use crate::layout::{Align, Layout, Measure, layout};
+use crate::zoom::{ZOOM_NOTCH_PX, Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
 
+pub use drawn::DrawnRect;
 pub use editing::{CaretView, Editing};
 pub use panel::{Panel, PanelRow, Regenerated, Regeneration, Span};
 pub use panel_apply::{TextCheck, TextChecked};
@@ -60,10 +65,15 @@ pub struct Viewport {
 impl Viewport {
     /// The canvas point at the view's center.
     pub fn center(&self) -> Point {
-        self.to_canvas(Point {
+        self.to_canvas(self.screen_center())
+    }
+
+    /// The view's center in screen pixels.
+    fn screen_center(&self) -> Point {
+        Point {
             x: self.size.x / 2.0,
             y: self.size.y / 2.0,
-        })
+        }
     }
 
     pub fn to_screen(&self, p: Point) -> Point {
@@ -111,7 +121,7 @@ enum Gesture {
         click: Option<Point>,
     },
     /// Left press on the shape at `index`. Once dragged past `DRAG_START`, `to` is the
-    /// previewed top-left; release then moves the shape there instead of selecting it.
+    /// previewed top-left; release then moves the shape as far instead of selecting it.
     Press {
         index: usize,
         from: Point,
@@ -193,6 +203,7 @@ impl Ring {
 struct Cached {
     text: RichText,
     width: u32,
+    align: Align,
     layout: Rc<Layout>,
 }
 
@@ -200,10 +211,10 @@ pub struct Session {
     doc: Document,
     history: History,
     theme: &'static Theme,
+    /// App-wide, never in the document or history; see `set_align`.
+    align: Align,
     pub(crate) measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
-    /// Where `measure_ahead` goes on: a shape index.
-    ahead: Cell<usize>,
     /// Each link's shape indices, for drawing; see `link_ends`.
     link_ends: RefCell<Vec<(usize, usize)>>,
     viewport: Viewport,
@@ -227,8 +238,6 @@ pub struct Session {
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
     mid: midpoints::Midpoints,
-    /// Shapes sliding to where a push moved them.
-    slides: push::Slides,
     /// The selection when the marquee started.
     marquee_base: Vec<ShapeId>,
     /// A link drag in progress and the hovered connector.
@@ -239,6 +248,8 @@ pub struct Session {
     now: Duration,
     /// The document as last read or written; `None` after a load that needed repairs.
     saved: Option<Document>,
+    /// The revision `doc` was last compared with `saved` at, and the answer.
+    same_as_saved: Cell<Option<(u64, bool)>>,
     /// The bytes last read or written.
     bytes: Vec<u8>,
     /// First and last change not yet in a recovery file.
@@ -253,6 +264,11 @@ pub struct Session {
     key_pan: Vec<keypan::Press>,
     /// The code panel.
     panel: panel::Panel,
+    /// The last spacing pass; see `spaced`.
+    spaced: RefCell<drawn::Spaced>,
+    /// Offsets tests set by hand, so that a read of the placed position shows.
+    #[cfg(test)]
+    drawn_offsets: HashMap<ShapeId, (i32, i32)>,
 }
 
 impl Session {
@@ -260,6 +276,7 @@ impl Session {
     pub fn new(doc: Document, theme: &'static Theme, measure: Box<dyn Measure>) -> Self {
         Session {
             saved: Some(doc.clone()),
+            same_as_saved: Cell::default(),
             bytes: Vec::new(),
             unrecovered: None,
             recovery_written: false,
@@ -270,9 +287,9 @@ impl Session {
             doc,
             history: History::default(),
             theme,
+            align: Align::default(),
             measure,
             layouts: RefCell::default(),
-            ahead: Cell::default(),
             link_ends: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
@@ -292,11 +309,13 @@ impl Session {
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
-            slides: HashMap::new(),
             marquee_base: Vec::new(),
             links: Default::default(),
             pointer: None,
             now: Duration::ZERO,
+            spaced: RefCell::default(),
+            #[cfg(test)]
+            drawn_offsets: HashMap::new(),
         }
     }
 
@@ -306,6 +325,15 @@ impl Session {
 
     pub fn theme(&self) -> &'static Theme {
         self.theme
+    }
+
+    /// Changes the look: every shape is measured again and spaced, with nothing sliding. The
+    /// document, its saved state and the undo history are untouched.
+    pub fn set_theme(&mut self, theme: &'static Theme) {
+        self.theme = theme;
+        self.layouts.get_mut().clear();
+        self.respace();
+        self.drawn_changed();
     }
 
     /// The selected shapes, in the order selected. The shape being edited is `editing()`.
@@ -321,6 +349,16 @@ impl Session {
         }
     }
 
+    pub fn align(&self) -> Align {
+        self.align
+    }
+
+    /// Sets how every shape's words sit in their lines. Moves words only: line breaks and
+    /// heights stay, and the document, its saved state and the undo history are untouched.
+    pub fn set_align(&mut self, align: Align) {
+        self.align = align;
+    }
+
     /// `shape`'s text layout, positioned from the text's top-left inside the padding. Cached
     /// per shape; recomputed only when its text or width changed.
     pub fn layout(&self, shape: &Shape) -> Rc<Layout> {
@@ -328,17 +366,25 @@ impl Session {
         if let Some(c) = cache.get(&shape.id)
             && c.text == shape.text
             && c.width == shape.width
+            && c.align == self.align
         {
             return c.layout.clone();
         }
         let width = (shape.width as f32 - 2.0 * self.theme.shape.pad_x).max(0.0);
-        let l = Rc::new(layout(&shape.text, width, self.theme, &*self.measure));
+        let l = Rc::new(layout(
+            &shape.text,
+            width,
+            self.theme,
+            self.align,
+            &*self.measure,
+        ));
         let (text, width, layout) = (shape.text.clone(), shape.width, l.clone());
         cache.insert(
             shape.id.clone(),
             Cached {
                 text,
                 width,
+                align: self.align,
                 layout,
             },
         );
@@ -369,29 +415,8 @@ impl Session {
 
     /// Drawn height in canvas units: text, padding and extra height.
     pub fn shape_height(&self, shape: &Shape) -> f32 {
-        self.layout(shape).height + 2.0 * self.theme.shape.pad_y + shape.extra_height as f32
-    }
-
-    /// Every shape's drawn height, in document order: what `save` needs for the side rule.
-    pub fn heights(&self) -> Vec<f32> {
-        self.doc
-            .shapes
-            .iter()
-            .map(|s| self.shape_height(s))
-            .collect()
-    }
-
-    /// Lays out the next `n` shapes in document order, drawn or not, so that `heights` (every
-    /// save and recovery write) finds them cached. True once it has been through them all.
-    /// The app calls it in small steps while idle after opening a document.
-    pub fn measure_ahead(&self, n: usize) -> bool {
-        let (shapes, from) = (&self.doc.shapes, self.ahead.get());
-        let to = (from + n).min(shapes.len());
-        for s in &shapes[from.min(to)..to] {
-            self.layout(s);
-        }
-        self.ahead.set(to);
-        to == shapes.len()
+        let pad = &self.theme.shape;
+        self.layout(shape).height + pad.pad_top + pad.pad_y + shape.extra_height as f32
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
@@ -504,21 +529,11 @@ impl Session {
         }
     }
 
-    /// Sets a shape's x, width and extra height, pushing what it grows into: one undo step.
+    /// Sets a shape's x, width and extra height: one undo step.
     pub fn resize_shape(&mut self, id: &ShapeId, r: ResizeTo) {
-        // One step written out by hand, not `history.step`: `make_room` needs `&mut self`,
-        // which the step's closure can't have. Inside an open group it just joins it.
-        let (opened, old) = (!self.history.is_open(), self.rect_of(id));
-        self.history.begin();
         self.history.change(&mut self.doc, id, |s| {
             (s.x, s.width, s.extra_height) = (r.x, r.width, r.extra_height)
         });
-        if let Some(old) = old {
-            self.make_room(id, old);
-        }
-        if opened {
-            self.history.end(&self.doc);
-        }
     }
 
     /// Drops a shape's extra height so it fits its text; the width stays.
@@ -532,7 +547,7 @@ impl Session {
     fn min_width(&self, shape: &Shape) -> u32 {
         let t = self.theme;
         // Wide enough that only paragraph breaks wrap.
-        let l = layout(&shape.text, 1e6, t, &*self.measure);
+        let l = layout(&shape.text, 1e6, t, Align::Left, &*self.measure);
         let widest = (l.lines.iter().flat_map(|l| &l.clusters))
             .map(|c| c.width)
             .fold(0.0, f32::max);
@@ -549,10 +564,14 @@ impl Session {
         (self.min_width(shape) as i32 - shape.width as i32 + 1).div_euclid(2)
     }
 
-    /// Moves a shape's top-left to (x, y): one discrete change to the document.
+    /// Moves a shape's drawn top-left to (x, y): one discrete change to the document.
     pub fn move_shape(&mut self, id: &ShapeId, x: i32, y: i32) {
-        self.history
-            .change(&mut self.doc, id, |s| (s.x, s.y) = (x, y));
+        let Some(s) = self.doc.shapes.iter().find(|s| &s.id == id) else {
+            return;
+        };
+        let (from_x, from_y) = self.drawn_at(s);
+        let landing = self.landing([id], x - from_x, y - from_y);
+        (self.history).step(&mut self.doc, |h, doc| drawn::land(h, doc, landing));
     }
 
     /// Links `a` to `b` as one undo step; refused (false, no change) for the same shape, an
@@ -598,10 +617,10 @@ impl Session {
             y: height,
         };
         if first && let Some(s) = self.doc.shapes.first() {
-            let (w, h) = (s.width as f32, self.shape_height(s));
+            let r = self.drawn(s);
             self.viewport.origin = Point {
-                x: s.x as f32 - ((width - w) / 2.0).round(),
-                y: s.y as f32 - ((height - h) / 2.0).round(),
+                x: r.x - ((width - r.width) / 2.0).round(),
+                y: r.y - ((height - r.height) / 2.0).round(),
             };
         }
         self.respond(true)
@@ -650,7 +669,11 @@ impl Session {
         match input {
             Input::Mark { .. } | Input::Text { .. } | Input::KeyDown(_) | Input::KeyUp(_) => {}
             Input::PointerMove { .. } | Input::Wheel { .. } | Input::Pinch { .. } => {}
-            Input::ResetZoom | Input::PointerLeft | Input::ModifiersChanged => {}
+            Input::ResetZoom
+            | Input::ZoomIn
+            | Input::ZoomOut
+            | Input::PointerLeft
+            | Input::ModifiersChanged => {}
             _ => {
                 self.unmark();
                 self.panel_unmark();
@@ -811,6 +834,12 @@ impl Session {
                 self.respond(true)
             }
             Input::PointerMove { pos, .. }
+                if matches!(self.gesture, Some(Gesture::Press { .. })) =>
+            {
+                let dragged = self.drag_to(pos);
+                self.respond(dragged)
+            }
+            Input::PointerMove { pos, .. }
                 if matches!(self.gesture, Some(Gesture::ZoneResize { .. })) =>
             {
                 self.zone_resize_to(pos);
@@ -832,18 +861,6 @@ impl Session {
                     self.viewport.pan(d);
                     self.respond(true)
                 }
-                Some(Gesture::Press { index, from, to }) => {
-                    let d = pos - *from;
-                    if to.is_none() && d.x.hypot(d.y) < DRAG_START {
-                        return self.respond(false);
-                    }
-                    let (s, z) = (&self.doc.shapes[*index], self.viewport.zoom);
-                    *to = Some((
-                        (s.x as f32 + d.x / z).round() as i32,
-                        (s.y as f32 + d.y / z).round() as i32,
-                    ));
-                    self.respond(true)
-                }
                 Some(Gesture::Band { index, from, to }) => {
                     let d = pos - *from;
                     if to.is_none() && d.x.hypot(d.y) < DRAG_START {
@@ -861,7 +878,9 @@ impl Session {
                     self.extend_to(caret, None);
                     self.respond(true)
                 }
-                Some(Gesture::Resize { .. } | Gesture::ZoneResize { .. }) => self.respond(false),
+                Some(
+                    Gesture::Press { .. } | Gesture::Resize { .. } | Gesture::ZoneResize { .. },
+                ) => self.respond(false),
                 Some(Gesture::Midpoint { from, dragged, .. }) => {
                     let d = pos - *from;
                     *dragged |= d.x.hypot(d.y) >= DRAG_START;
@@ -906,9 +925,8 @@ impl Session {
                         self.gesture = None;
                         let id = self.doc.shapes[index].id.clone();
                         match to {
-                            Some((x, y)) => {
-                                let s = &self.doc.shapes[index];
-                                let (dx, dy) = (x - s.x, y - s.y);
+                            Some(to) => {
+                                let (dx, dy) = self.dragged(index, to);
                                 self.drop_shapes(&[id], dx, dy);
                             }
                             None if mods.shift => self.toggle_selected(id),
@@ -1043,11 +1061,10 @@ impl Session {
                 } else {
                     self.history.redo(&mut self.doc);
                 }
+                self.spaced.get_mut().undone = true;
                 self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
-                // Undone pushes jump back; a slide still running would draw them off.
-                self.slides.clear();
                 self.respond(true)
             }
             Input::Nudge(side) => {
@@ -1097,12 +1114,14 @@ impl Session {
                 self.respond(true)
             }
             Input::ResetZoom => {
-                let size = self.viewport.size;
-                let center = Point {
-                    x: size.x / 2.0,
-                    y: size.y / 2.0,
-                };
+                let center = self.viewport.screen_center();
                 (self.zoom).ease_to(&mut self.viewport, self.theme, 1.0, center, now);
+                self.respond(true)
+            }
+            Input::ZoomIn | Input::ZoomOut => {
+                let center = self.viewport.screen_center();
+                let dy = if input == Input::ZoomIn { 1.0 } else { -1.0 } * ZOOM_NOTCH_PX;
+                (self.zoom).wheel(&mut self.viewport, self.theme, center, dy, now);
                 self.respond(true)
             }
             Input::Pinch { pos, delta } => {
@@ -1147,6 +1166,7 @@ impl Session {
     /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
     pub fn tick(&mut self, now: Duration) -> Response {
         self.now = now;
+        self.drop_finished_slides(now);
         let followed = self.advance_follow(now);
         let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
         let panned = self.advance_key_pan(now);
@@ -1157,6 +1177,25 @@ impl Session {
     /// The zoom pill to draw at `now`, if visible.
     pub fn zoom_pill(&self, now: Duration) -> Option<ZoomPill> {
         self.zoom.pill(self.theme, now)
+    }
+
+    /// Updates the previewed top-left of the press gesture for the pointer at `pos`; false
+    /// while it hasn't become a drag.
+    fn drag_to(&mut self, pos: Point) -> bool {
+        let Some(Gesture::Press { index, from, to }) = self.gesture else {
+            return false;
+        };
+        let (d, z) = (pos - from, self.viewport.zoom);
+        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+            return false;
+        }
+        let (x, y) = self.drawn_at(&self.doc.shapes[index]);
+        let to = Some((
+            (x as f32 + d.x / z).round() as i32,
+            (y as f32 + d.y / z).round() as i32,
+        ));
+        self.gesture = Some(Gesture::Press { index, from, to });
+        true
     }
 
     /// Updates the previewed size of the resize gesture for the pointer at `pos`.
@@ -1206,13 +1245,11 @@ impl Session {
     /// A shape's interior under `p` hides the edges of shapes below it.
     fn edge_at(&self, p: Point) -> Option<(usize, Edge)> {
         let g = EDGE_GRAB;
-        for (i, s) in self.doc.shapes.iter().enumerate().rev() {
-            let tl = self.viewport.to_screen(Point {
-                x: s.x as f32,
-                y: s.y as f32,
-            });
+        for i in (0..self.doc.shapes.len()).rev() {
+            let r = self.drawn_index(i);
+            let tl = self.viewport.to_screen(Point { x: r.x, y: r.y });
             let z = self.viewport.zoom;
-            let (w, h) = (s.width as f32 * z, self.shape_height(s) * z);
+            let (w, h) = (r.width * z, r.height * z);
             if !(tl.x - g..=tl.x + w + g).contains(&p.x)
                 || !(tl.y - g..=tl.y + h + g).contains(&p.y)
             {
@@ -1237,8 +1274,9 @@ impl Session {
     /// Index of the topmost shape under screen point `p`.
     fn shape_at(&self, p: Point) -> Option<usize> {
         let c = self.viewport.to_canvas(p);
-        self.doc.shapes.iter().rposition(|s| {
-            let (x, y) = (s.x as f32, s.y as f32);
+        (0..self.doc.shapes.len()).rfind(|&i| {
+            let (s, (x, y)) = (&self.doc.shapes[i], self.drawn_top_left(i));
+            let (x, y) = (x as f32, y as f32);
             (x..=x + s.width as f32).contains(&c.x) && (y..=y + self.shape_height(s)).contains(&c.y)
         })
     }

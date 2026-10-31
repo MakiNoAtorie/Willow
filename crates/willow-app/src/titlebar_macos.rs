@@ -1,9 +1,17 @@
 //! macOS: transparent title bar over the canvas; the traffic lights are native.
 
 use gpui::{App, Window, div, prelude::*, px};
+use objc2_foundation::NSUserDefaults;
 use willow_core::Session;
 
 use crate::{color, panel};
+
+/// Keeps AppKit from adding its own Enter Full Screen item (fn-F) under the View menu's. Call
+/// before the menu is built.
+pub fn one_full_screen_item() {
+    let key = objc2_foundation::ns_string!("NSFullScreenMenuItemEverywhere");
+    NSUserDefaults::standardUserDefaults().setBool_forKey(false, key);
+}
 
 pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
     let c = session.theme().chrome;

@@ -62,7 +62,7 @@ fn files_without_the_header_from_a_newer_willow_or_not_utf8_do_not_open() {
 /// Canonical text for `doc`, with shape heights from the fake measurer.
 fn saved(doc: &Document) -> String {
     let s = common::session_of(doc.clone());
-    save(s.document(), &s.heights())
+    save(s.document(), &s.heights(), &s.drawn_positions())
 }
 
 /// `doc` without drawing order: shapes, zones, members and links sorted, links unordered.
@@ -244,7 +244,10 @@ fn ties_go_by_x_then_id_in_generation_order() {
         links: vec![link("d", "c"), link("c", "e")],
         ..Document::default()
     };
-    assert_golden(&doc, "ties.willow");
+    // `z` and `aa` tie only as placed: the pass draws them apart.
+    let heights = common::session_of(doc.clone()).heights();
+    let bytes = String::from_utf8(golden("ties.willow")).unwrap();
+    assert_eq!(save(&doc, &heights, &[]), bytes);
 }
 
 #[test]

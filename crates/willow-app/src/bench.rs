@@ -1,5 +1,7 @@
-//! `--bench --machine NAME`: scripts pans, zoom sweeps, typing and idle on the generated
-//! 10,000-shape document in a real window and appends CSV rows to `bench/results.csv`.
+//! `--bench --machine NAME [--theme NAME] [--shapes N]`: scripts pans, zoom sweeps, typing and
+//! idle on a generated document (10,000 shapes unless told otherwise) in a real window and
+//! appends CSV rows to `bench/results.csv`. A run in another theme or on another size names
+//! that in its scenarios; see `scenario_name`.
 //!
 //! Frame timings come from GPUI's profiler: `draw` is `Window::draw` (layout, prepaint, paint;
 //! CPU only), `dirty_to_present` runs from the first invalidation to handing the frame to the
@@ -7,24 +9,32 @@
 //! Scripted input goes through `Session::handle`, one event per frame, as the platform's would.
 //!
 //! `file_10k` times, in milliseconds, saves of the generated document (serialize and write
-//! beside): `save_unwarmed` from a new session that has measured nothing (a save the moment a
-//! file opens), `save` the window's first (after its `measure_ahead` has been through every
-//! shape; the bench finishes it first), `save_again` the next; then `load` of that file (read,
-//! parse, repair, auto-place, a new session). The loaded session replaces the window's, its
-//! `measure_ahead` cancelled, so `open_first_frame` is the first frame with nothing laid out.
+//! beside): `save_unwarmed` from a new session that has measured nothing (no real save: opening
+//! measures every shape), `save` the window's first, `save_again` the next; then `load` of that file
+//! (read, parse, repair, auto-place, measure every shape, the spacing pass, a new session). The
+//! loaded session replaces the window's, so `open_first_frame` is its first frame.
 //!
-//! No `measure_ahead` runs during any later scenario. Each `pan_zoom*_cold` starts on a new
-//! session of the same document (empty layout and word caches; GPUI's glyph atlas stays), so
-//! its first frame lays out everything in view and later frames each shape that comes into
-//! view; `pan_zoom*_warm` then pans back over the same ground on that session. Before the zoom
-//! sweeps the bench lays out every shape, as the app's idle `measure_ahead` would, so the zoom
-//! sweeps, typing and `recovery_take` run on a fully laid-out document.
+//! `spacing_pass_10k` times, in milliseconds, full spacing passes on the laid-out document
+//! (`SPACING_RUNS` of them, median and worst): `pass` as generated, where little crowds, and
+//! `pass_crowded` with every position divided by 3, so that most chains have to move.
+//!
+//! Each `pan_zoom*_cold` starts on a new session of the same document (empty layout and word
+//! caches; GPUI's glyph atlas stays), so its first frame lays out every shape for the spacing
+//! pass, which `open` does before a real first frame; `pan_zoom*_warm` then pans back over the
+//! same ground on that session. Before the zoom sweeps the bench lays out every shape, as
+//! opening a file does, so the zoom sweeps, typing and `recovery_take` run on a fully laid-out
+//! document.
 //!
 //! `zone_drag` drags the largest zone by its title band, out and back over 240 pointer moves,
 //! zoomed to fit it on screen; the drop returns it to where it started.
 //!
 //! `recovery_take` times, in milliseconds, `Session::take_recovery` once the typing has made a
-//! recovery write due: autosave's UI-thread part (clone the document, every shape's height).
+//! recovery write due: autosave's UI-thread part (clone the document, every shape's height
+//! and drawn position).
+//!
+//! `theme_switch_10k`, `switch_max`, is the slowest frame of a switch to each other theme and
+//! back, through `Prefs` as the View menu does it: the whole first frame, shapes measured in the
+//! new theme and the spacing pass included.
 //!
 //! Last, the code panel opens on the document's canonical text. `panel_typing_10k` types into
 //! the first shape's text through the platform path: frame rows, and `keystroke_*`, the time
@@ -33,8 +43,8 @@
 //! the app) and `apply` (update the model and record the text in the history, on the UI
 //! thread), then `undo` (Undo in the panel: the typed text comes back and is checked, on the UI
 //! thread). `panel_regen_10k` nudges a shape
-//! with the panel open and times the regeneration's `take` (clone the document and heights, UI
-//! thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
+//! with the panel open and times the regeneration's `take` (clone the document, heights and
+//! drawn positions, UI thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
 //! `idle_panel_open` is idle with the panel focused, once its caret has stopped blinking.
 
 use std::fs::OpenOptions;
@@ -43,7 +53,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use gpui::{AsyncWindowContext, FrameDurationSnapshot, Keystroke, WeakEntity, Window};
-use willow_core::{Button, Input, Modifiers, Point, Viewport};
+use willow_core::{Button, Input, Modifiers, Point, THEMES, Theme, Viewport};
 
 use crate::Willow;
 
@@ -56,12 +66,16 @@ const SWEEP_FRAMES: usize = 150;
 const KEYSTROKES: usize = 200;
 /// What the typing scenarios type, again and again. ASCII, so every byte is one key.
 const PHRASE: &str = "the quiet harbour remembers everything ";
+/// Full spacing passes per `spacing_pass_10k` row.
+const SPACING_RUNS: usize = 20;
 /// Pointer moves in the zone drag: out for half, back for half.
 const DRAG_FRAMES: usize = 240;
 const IDLE: Duration = Duration::from_secs(5);
 
 pub(crate) struct Bench {
     machine: String,
+    pub(crate) shapes: usize,
+    pub(crate) theme: &'static Theme,
     rows: Vec<(String, &'static str, f64, &'static str)>,
     /// Scripted inputs left, one applied per frame, popped from the back.
     frames: Vec<Input>,
@@ -70,9 +84,11 @@ pub(crate) struct Bench {
 }
 
 impl Bench {
-    pub(crate) fn new(machine: String) -> Self {
+    pub(crate) fn new(machine: String, shapes: usize, theme: &'static Theme) -> Self {
         Bench {
             machine,
+            shapes,
+            theme,
             rows: Vec::new(),
             frames: Vec::new(),
             renders: 0,
@@ -80,8 +96,9 @@ impl Bench {
     }
 
     fn row(&mut self, scenario: &str, metric: &'static str, value: f64, unit: &'static str) {
-        println!("{scenario:<20} {metric:<22} {value:>10.3} {unit}");
-        self.rows.push((scenario.into(), metric, value, unit));
+        let scenario = scenario_name(scenario, self.shapes, self.theme.name);
+        println!("{scenario:<26} {metric:<22} {value:>10.3} {unit}");
+        self.rows.push((scenario, metric, value, unit));
     }
 
     fn write_csv(&self) {
@@ -105,17 +122,28 @@ impl Bench {
     }
 }
 
+/// `base` for a run on `shapes` shapes in `theme`. A Paper run on 10,000 shapes keeps the plain
+/// name, so its rows compare with every earlier run.
+fn scenario_name(base: &str, shapes: usize, theme: &str) -> String {
+    let mut name = base.to_string();
+    if shapes != 10_000 {
+        let size = format!("_{}k", shapes / 1000);
+        name = match name.contains("_10k") {
+            true => name.replace("_10k", &size),
+            false => name + &size,
+        };
+    }
+    if theme != willow_core::PAPER.name {
+        name = format!("{name}_{}", theme.to_lowercase());
+    }
+    name
+}
+
 /// A new session on `w`'s document that has laid nothing out.
 fn unmeasured(w: &Willow, window: &Window) -> willow_core::Session {
     let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
     let doc = w.session.document().clone();
     willow_core::Session::new(doc, w.session.theme(), measure)
-}
-
-/// Stops the window's idle `measure_ahead` and lays out every shape it had left.
-fn measure_all(w: &mut Willow) {
-    w.ahead = None;
-    while !w.session.measure_ahead(1000) {}
 }
 
 /// One CSV line; a field holding a comma, quote or newline is quoted, its quotes doubled.
@@ -302,7 +330,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let t = Instant::now();
         (fresh.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
         let unwarmed = t.elapsed().as_secs_f64() * 1e3;
-        measure_all(w);
+        w.session.heights();
         let (first, again) = (save(w), save(w));
         let t = Instant::now();
         let bytes = std::fs::read(&path).expect("bench read");
@@ -311,7 +339,6 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let vp = w.session.viewport();
         w.show(content, window, cx);
         let load = t.elapsed().as_secs_f64() * 1e3;
-        w.ahead = None;
         w.session.set_viewport(vp);
         let b = w.bench.as_mut().unwrap();
         b.row("file_10k", "save_unwarmed", unwarmed, "ms");
@@ -324,11 +351,68 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     scripted(this, cx, "open_first_frame", None, Vec::new()).await;
 }
 
+/// The median and worst of `SPACING_RUNS` full passes on `session`, in milliseconds.
+fn passes(session: &willow_core::Session) -> (f64, f64) {
+    let mut times: Vec<f64> = (0..SPACING_RUNS)
+        .map(|_| timed(|| session.respace()).0)
+        .collect();
+    times.sort_by(f64::total_cmp);
+    (times[SPACING_RUNS / 2], times[SPACING_RUNS - 1])
+}
+
+/// The `spacing_pass_10k` rows; see the module docs.
+async fn spacing(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    this.update_in(cx, |w, window, _| {
+        let (median, worst) = passes(&w.session);
+        let mut doc = w.session.document().clone();
+        for s in &mut doc.shapes {
+            (s.x, s.y) = (s.x / 3, s.y / 3);
+        }
+        let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
+        let crowded = willow_core::Session::new(doc, w.session.theme(), measure);
+        crowded.respace();
+        let (crowded_median, crowded_worst) = passes(&crowded);
+        let b = w.bench.as_mut().unwrap();
+        b.row("spacing_pass_10k", "pass_p50", median, "ms");
+        b.row("spacing_pass_10k", "pass_max", worst, "ms");
+        b.row("spacing_pass_10k", "pass_crowded_p50", crowded_median, "ms");
+        b.row("spacing_pass_10k", "pass_crowded_max", crowded_worst, "ms");
+    })
+    .unwrap();
+}
+
 /// Milliseconds `f` takes, and what it returns.
 fn timed<T>(f: impl FnOnce() -> T) -> (f64, T) {
     let t = Instant::now();
     let out = f();
     (t.elapsed().as_secs_f64() * 1e3, out)
+}
+
+/// The `theme_switch_10k` row; see the module docs.
+async fn theme_switch(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
+    let home = (this.update(cx, |w, _| w.session.theme())).unwrap();
+    let others = THEMES.iter().filter(|t| t.name != home.name);
+    let mut worst = 0.0f64;
+    for &theme in others.chain([&home]) {
+        let before = this
+            .update_in(cx, |_, window, cx| {
+                cx.global_mut::<crate::prefs::Prefs>().set_theme(theme);
+                cx.refresh_windows();
+                window.frame_duration_snapshot()
+            })
+            .unwrap();
+        wait(cx, Duration::from_millis(500)).await;
+        let frame = this.update_in(cx, |_, window, _| {
+            let mut draw = window.frame_duration_snapshot().draw_duration_histogram;
+            let _ = draw.subtract(&before.draw_duration_histogram);
+            ms(draw.max())
+        });
+        worst = worst.max(frame.unwrap());
+    }
+    this.update(cx, |w, _| {
+        (w.bench.as_mut().unwrap()).row("theme_switch_10k", "switch_max", worst, "ms");
+    })
+    .ok();
 }
 
 /// The `panel_*` and `idle_panel_open` rows; see the module docs.
@@ -467,6 +551,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         mods,
     };
     files(&this, cx).await;
+    spacing(&this, cx).await;
     // Each zoom pans right over new ground on a new session (cold: first layout of every shape
     // in view), then back over the same ground (warm).
     let origin = Point { x: -40.0, y: -40.0 };
@@ -479,7 +564,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         scripted(&this, cx, &format!("pan_zoom{name}_warm"), None, warm).await;
     }
     idle(&this, cx, "idle_after_pan").await;
-    this.update(cx, |w, _| measure_all(w)).unwrap();
+    this.update(cx, |w, _| drop(w.session.heights())).unwrap();
 
     // 100% to 10% and back around the canvas center, twice: cold rasterizes glyphs at each
     // size, warm reuses the atlas.
@@ -627,6 +712,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     })
     .ok();
     idle(&this, cx, "idle_after_anim").await;
+    theme_switch(&this, cx).await;
     code_panel(&this, cx).await;
     this.update(cx, |w, cx| {
         w.bench.as_ref().unwrap().write_csv();
@@ -637,6 +723,25 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
 
 #[cfg(test)]
 mod tests {
+    use super::scenario_name;
+
+    #[test]
+    fn a_plain_run_keeps_the_names_earlier_runs_used() {
+        assert_eq!(scenario_name("typing_10k", 10_000, "Paper"), "typing_10k");
+        assert_eq!(scenario_name("zone_drag", 10_000, "Paper"), "zone_drag");
+    }
+
+    #[test]
+    fn a_run_on_other_shapes_or_another_theme_names_them() {
+        assert_eq!(scenario_name("typing_10k", 50_000, "Paper"), "typing_50k");
+        assert_eq!(scenario_name("zone_drag", 50_000, "Paper"), "zone_drag_50k");
+        assert_eq!(scenario_name("zone_drag", 10_000, "Desk"), "zone_drag_desk");
+        assert_eq!(
+            scenario_name("typing_10k", 10_000, "Poster"),
+            "typing_10k_poster"
+        );
+    }
+
     #[test]
     fn csv_row_quotes_fields_with_commas_quotes_or_newlines() {
         let row = super::csv_row(&["a,b", "4cf2ae8", "say \"hi\"", "two\nlines", "1.000", "ms"]);

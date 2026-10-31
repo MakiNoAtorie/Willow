@@ -122,6 +122,16 @@ impl Session {
         }
     }
 
+    /// Drawn positions moved with the document unchanged: plain regenerated text may now read
+    /// in another word order, so it regenerates and Save writes the document. Text the writer
+    /// typed stays.
+    pub(super) fn drawn_changed(&mut self) {
+        let v = &self.panel.versions;
+        if self.history.text.is_none() && v.now == v.state {
+            (self.panel.held, self.panel.regenerated) = (None, None);
+        }
+    }
+
     /// Panel text was typed since it was last saved, loaded or regenerated.
     pub(super) fn text_unsaved(&self) -> bool {
         self.panel.versions.now != self.panel.versions.saved

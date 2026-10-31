@@ -166,6 +166,31 @@ fn no_midpoints_on_the_shape_being_edited() {
 }
 
 #[test]
+fn an_open_menu_or_picker_hides_the_midpoints() {
+    let mid = |s: &Session| s.draw(pt(0.0, 0.0), pt(1000.0, 800.0), T).midpoints;
+    let mut s = session();
+    let (pos, button, mods) = (pt(500.0, 400.0), Button::Right, Modifiers::default());
+    hover(&mut s, pos);
+    assert_eq!(mid(&s).len(), 4);
+
+    input(&mut s, Input::PointerDown { pos, button, mods });
+    input(&mut s, Input::PointerUp { pos, button, mods });
+    assert!(s.menu().is_some());
+    assert!(mid(&s).is_empty(), "the context menu");
+    input(&mut s, Input::Escape);
+    assert_eq!(mid(&s).len(), 4);
+
+    input(&mut s, Input::OpenColorPicker);
+    assert!(mid(&s).is_empty(), "the color picker");
+    input(&mut s, Input::Escape);
+
+    input(&mut s, Input::Tab);
+    assert!(mid(&s).is_empty(), "the Tab picker");
+    input(&mut s, Input::Escape);
+    assert_eq!(mid(&s).len(), 4);
+}
+
+#[test]
 fn a_midpoint_hit_beats_the_resize_edge_under_it() {
     let mut s = session();
     // On the bottom edge at its midpoint: no resize cursor, and a click creates.

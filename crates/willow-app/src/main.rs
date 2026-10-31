@@ -5,15 +5,15 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
-    App, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase, ElementInputHandler,
-    FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, QuitMode,
-    ScrollEvent, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, canvas, div, point,
-    prelude::*, px, quad, size,
+    App, BorderStyle, Bounds, BoxShadow, Context, Corners, CursorStyle, DispatchPhase,
+    ElementInputHandler, FocusHandle, Hsla, KeyBinding, KeyDownEvent, KeyUpEvent,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, PinchEvent, Pixels, QuitMode, ScrollEvent, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, actions, canvas, div, point, prelude::*, px, quad, size,
 };
 use willow_core::{
     Button, Cursor, Document, Input, Key, Loaded, Modifiers, Motion, PAPER, Rgba, Session, Shadow,
-    Side, Theme, ZoomPill,
+    Side, THEMES, Theme, ZoomPill,
 };
 mod bench;
 mod file;
@@ -24,6 +24,7 @@ mod recovery;
 mod text;
 #[cfg(not(target_os = "windows"))]
 mod titlebar_macos;
+mod view_menu;
 #[cfg(not(target_os = "windows"))]
 use titlebar_macos::title_bar;
 #[cfg(target_os = "windows")]
@@ -32,6 +33,10 @@ mod titlebar_windows;
 use titlebar_windows::title_bar;
 
 actions!(willow, [Quit, ResetZoom]);
+// View menu: Cmd/Ctrl+= and Cmd/Ctrl+-, and full screen.
+actions!(willow, [ZoomIn, ZoomOut, ToggleFullScreen]);
+// Window menu (macOS).
+actions!(willow, [Minimize, Zoom]);
 // File menu: New and Open are app-wide; Close, Save and Save As belong to the focused window.
 actions!(willow, [NewFile, OpenFile, CloseWindow, Save, SaveAs]);
 // Edit menu. Each item enables only while its handler is registered.
@@ -159,8 +164,6 @@ struct Willow {
     start: Instant,
     /// Redraws at the caret's next blink edge; replacing it cancels the old timer.
     wake: Option<gpui::Task<()>>,
-    /// Lays the document out ahead of the first save; see `measure_ahead`.
-    ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
     /// Sends keys to the Tab picker while it is open (`tab_picker_keys`).
@@ -222,11 +225,11 @@ impl Content {
         Content::new(loaded, Vec::new(), None, None)
     }
 
-    fn session(self, window: &Window) -> (Session, Option<PathBuf>) {
+    fn session(self, theme: &'static Theme, window: &Window) -> (Session, Option<PathBuf>) {
         let measure = Box::new(text::TextMeasure::new(window.text_system().clone()));
         let session = match self.recovery {
-            Some(_) => Session::recover(self.loaded, &self.bytes, &PAPER, measure),
-            None => Session::open(self.loaded, self.bytes, &PAPER, measure),
+            Some(_) => Session::recover(self.loaded, &self.bytes, theme, measure),
+            None => Session::open(self.loaded, self.bytes, theme, measure),
         };
         (session, self.path)
     }
@@ -257,7 +260,7 @@ impl Willow {
         // Paint sizes the new session's viewport.
         let panel = self.session.panel().open;
         let path;
-        (self.session, path) = content.session(window);
+        (self.session, path) = content.session(self.session.theme(), window);
         // Checks and regenerations of the old document never land in the new one.
         (self.text_wake, self.text_check, self.regeneration) = (None, None, None);
         // The panel belongs to the window: still open, it shows the new document.
@@ -266,24 +269,7 @@ impl Willow {
             self.regenerate(cx);
         }
         self.set_path(path, window);
-        self.measure_ahead(cx);
         cx.notify();
-    }
-
-    /// Lays a just-opened document out a few hundred shapes at a time while idle, without
-    /// redrawing, so the first save (which needs every shape's height) doesn't stall on it.
-    fn measure_ahead(&mut self, cx: &mut Context<Self>) {
-        self.ahead = Some(cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(4))
-                    .await;
-                let done = this.update(cx, |w, _| w.session.measure_ahead(200));
-                if done.unwrap_or(true) {
-                    break;
-                }
-            }
-        }));
     }
 
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
@@ -376,7 +362,15 @@ impl Willow {
 impl Render for Willow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         panel::apply_width(&mut self.session, window, cx);
-        let theme = self.session.theme();
+        let prefs = cx.global::<prefs::Prefs>();
+        let (align, theme) = (prefs.alignment(), prefs.theme());
+        self.session.set_align(align);
+        if theme.name != self.session.theme().name {
+            self.session.set_theme(theme);
+            self.arm_recovery(cx);
+            self.regenerate(cx);
+            self.arm_text_check(cx);
+        }
         bench::step(self, window);
         let now = self.start.elapsed();
         // Paint requests the next frame while the session is animating.
@@ -483,6 +477,11 @@ impl Render for Willow {
                 w.input(Input::ModifiersChanged, cx)
             }))
             .on_action(cx.listener(|w, _: &ResetZoom, _, cx| w.input(Input::ResetZoom, cx)))
+            .on_action(cx.listener(|w, _: &ZoomIn, _, cx| w.input(Input::ZoomIn, cx)))
+            .on_action(cx.listener(|w, _: &ZoomOut, _, cx| w.input(Input::ZoomOut, cx)))
+            .on_action(cx.listener(|_, _: &ToggleFullScreen, window, _| window.toggle_fullscreen()))
+            .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
+            .on_action(cx.listener(|_, _: &Zoom, window, _| window.zoom_window()))
             .on_action(cx.listener(|w, _: &DeleteShapes, _, cx| w.input(Input::DeleteShapes, cx)))
             .on_action(cx.listener(|w, _: &Duplicate, _, cx| w.input(Input::Duplicate, cx)))
             .on_action(cx.listener(|w, _: &ShowTabPicker, _, cx| w.input(Input::Tab, cx)))
@@ -646,12 +645,13 @@ fn paint_caret(
     origin: gpui::Point<Pixels>,
     c: willow_core::CaretView,
     t: &Theme,
+    ink: Rgba,
     z: f32,
     k: f32,
 ) {
     let p = origin + point(px(c.pos.x * z - t.caret.width / 2.0), px(c.pos.y * z));
     let b = Bounds::new(p, size(px(t.caret.width), px(c.height * z)));
-    window.paint_quad(gpui::fill(b, color(t.caret.color).opacity(k)));
+    window.paint_quad(gpui::fill(b, color(ink).opacity(k)));
 }
 
 /// Canvas, dot grid, zones, connectors, shapes with their text, and the caret.
@@ -676,25 +676,53 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
         phase(origin.x, bounds.origin.x),
         phase(origin.y, bounds.origin.y),
     );
-    let dot = color(t.grid_dot);
-    let mut y = if frame.grid { y0 } else { f32::INFINITY };
-    while y < f32::from(bounds.size.height) {
-        let mut x = x0;
-        while x < f32::from(bounds.size.width) {
-            let c = bounds.origin + point(px(x), px(y));
-            let b = Bounds::new(c - point(px(r), px(r)), size(px(2. * r), px(2. * r)));
-            window.paint_quad(quad(
-                b,
-                px(r),
-                dot,
-                px(0.),
-                gpui::transparent_black(),
-                Default::default(),
-            ));
-            x += s;
+    // One layer: hundreds of crossing lines cost GPUI's overlap search 6 us each, a third of
+    // Desk's draw, and a layer takes none. Same-layer quads keep their paint order.
+    window.paint_layer(bounds, |window| {
+        let dot = color(t.grid_dot);
+        let mut y = if frame.grid { y0 } else { f32::INFINITY };
+        while y < f32::from(bounds.size.height) {
+            let mut x = x0;
+            while x < f32::from(bounds.size.width) {
+                let c = bounds.origin + point(px(x), px(y));
+                let b = Bounds::new(c - point(px(r), px(r)), size(px(2. * r), px(2. * r)));
+                window.paint_quad(quad(
+                    b,
+                    px(r),
+                    dot,
+                    px(0.),
+                    gpui::transparent_black(),
+                    Default::default(),
+                ));
+                x += s;
+            }
+            y += s;
         }
-        y += s;
-    }
+
+        // The weave: lines at a fixed screen size at any zoom, moving with the canvas.
+        let weave = t.weave.iter().filter(|_| frame.grid);
+        for (vertical, wv) in weave.flat_map(|w| [(false, w.horizontal), (true, w.vertical)]) {
+            let ink = color(wv.color);
+            let (len, across) = match vertical {
+                true => (bounds.size.height, bounds.size.width),
+                false => (bounds.size.width, bounds.size.height),
+            };
+            let o = if vertical {
+                origin.x - bounds.origin.x
+            } else {
+                origin.y - bounds.origin.y
+            };
+            let mut d = f32::from(o).rem_euclid(wv.period);
+            while d < f32::from(across) {
+                let (at, extent) = match vertical {
+                    true => (point(px(d), px(0.)), size(px(wv.width), len)),
+                    false => (point(px(0.), px(d)), size(len, px(wv.width))),
+                };
+                window.paint_quad(gpui::fill(Bounds::new(bounds.origin + at, extent), ink));
+                d += wv.period;
+            }
+        }
+    });
 
     // Zones, then their titles (so a nested zone never covers its parent's), then
     // connectors, under the shapes.
@@ -714,10 +742,15 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             zone_bounds(&v.zone),
             px(zt.radius * z),
             color(v.fill),
-            px(zt.edge_width * z),
+            px(frame.zone_edge * z),
             color(v.edge),
             Default::default(),
         ));
+        window.paint_inset_shadows(
+            zone_bounds(&v.zone),
+            Corners::all(px(zt.radius * z)),
+            &[box_shadow(&zt.inset, z, true)],
+        );
     }
     // The hover ring over the edge, after every fill so an overlapping zone never hides it.
     let ringed = (frame.zones.iter()).find(|v| Some(&v.zone.id) == frame.zone_ring);
@@ -733,29 +766,34 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     }
     let sel = &t.selection;
     for v in frame.zones.iter().filter(|v| v.show_title) {
+        if let (Some((a, c)), Some(p)) = (v.pill, zt.pill) {
+            let b = Bounds::from_corners(at(a), at(c));
+            window.paint_quad(gpui::fill(b, color(p.fill)).corner_radii(b.size.height / 2.0));
+        }
         for (a, c) in &v.selection {
             window.paint_quad(gpui::fill(
                 Bounds::from_corners(at(*a), at(*c)),
-                color(sel.text),
+                color(t.title_selection()),
             ));
         }
         text::paint_line(
             window,
             at(v.title_at),
-            &v.zone.title,
+            &v.text,
             t,
             zt.title_bold(),
             v.title_size * z,
+            v.title_spacing * z,
         );
         if let Some((a, c)) = v.marked {
             let b = Bounds::new(
                 at(a),
                 size(px((c.x - a.x) * z), px(t.caret.marked_underline)),
             );
-            window.paint_quad(gpui::fill(b, color(t.ink)));
+            window.paint_quad(gpui::fill(b, color(t.title_ink())));
         }
         if let Some(c) = v.caret {
-            paint_caret(window, origin, c, t, z, 1.0);
+            paint_caret(window, origin, c, t, t.title_caret(), z, 1.0);
         }
     }
     let width = frame.connector_width * z;
@@ -765,15 +803,19 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
     for c in &frame.connectors {
         let (p, q) = (at(c.from), at(c.to));
         if c.hovered {
-            line(window, p, q, hover_width, hover);
+            line(window, p, q, hover_width, hover, cs.square);
         } else {
-            line(window, p, q, width, ink);
+            line(window, p, q, width, ink, cs.square);
         }
     }
 
     for v in &frame.shapes {
         // A pushed shape paints off its place while it slides there.
-        let origin = origin + point(px(v.slide.x * z), px(v.slide.y * z));
+        let origin = origin
+            + point(
+                px((v.slide.x + v.lift.x) * z),
+                px((v.slide.y + v.lift.y) * z),
+            );
         // A shape being created paints faded (`k`), offset and scaled around its center.
         let (origin, z, k) = match v.appear {
             Some(a) => {
@@ -797,7 +839,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
                 .for_each(|s| s.color = s.color.opacity(k));
             window.paint_drop_shadows(b, Corners::all(radius), &shadows);
         }
-        if ring > 0.0 {
+        if ring > 0.0 && sel.gap + sel.ring > 0.0 {
             // As the mockups' box-shadow spreads: a canvas gap, then the accent ring, both growing.
             let out = (sel.gap + sel.ring) * ring * z;
             let ring_bounds = b.dilate(px(out));
@@ -814,10 +856,30 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             b,
             radius,
             color(v.fill).opacity(k),
-            px(0.),
-            gpui::transparent_black(),
+            px(frame.shape_border * z),
+            color(t.shape.border_color).opacity(k),
             Default::default(),
         ));
+        if t.shape.tab > 0.0 {
+            let tab = Bounds::new(
+                b.origin,
+                size(b.size.width, px(t.shape.tab * z).min(b.size.height)),
+            );
+            let corners = Corners {
+                top_left: radius,
+                top_right: radius,
+                bottom_right: px(0.),
+                bottom_left: px(0.),
+            };
+            window.paint_quad(quad(
+                tab,
+                corners,
+                color(v.tab).opacity(k),
+                px(0.),
+                gpui::transparent_black(),
+                Default::default(),
+            ));
+        }
         // The text selection, under the edited shape's text.
         for (a, c) in &v.selection {
             let tl = origin + point(px(a.x * z), px(a.y * z));
@@ -825,7 +887,7 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             window.paint_quad(gpui::fill(Bounds::from_corners(tl, br), color(sel.text)));
         }
         if frame.text_opacity > 0.0 {
-            let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_y * z));
+            let o = b.origin + point(px(t.shape.pad_x * z), px(t.shape.pad_top * z));
             text::paint_text(
                 window,
                 o,
@@ -840,25 +902,19 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             }
         }
         if let Some(c) = v.caret {
-            paint_caret(window, origin, c, t, z, k);
+            paint_caret(window, origin, c, t, t.caret.color, z, k);
         }
     }
 
     // A link drag's band over every shape, in the hovered connector's style.
     if let Some(l) = frame.link_drag {
-        line(window, at(l.from), at(l.to), hover_width, hover);
+        line(window, at(l.from), at(l.to), hover_width, hover, cs.square);
     }
 
     // Midpoints over every shape, constant on screen: the stroke sits outside `size`.
     let m = &t.midpoint;
-    let (d, sh) = (m.size + 2.0 * m.stroke_width, m.shadow);
-    let shadow = [BoxShadow {
-        color: color(sh.color),
-        offset: point(px(sh.x), px(sh.y)),
-        blur_radius: px(sh.blur / 2.0),
-        spread_radius: px(sh.spread),
-        inset: false,
-    }];
+    let d = m.size + 2.0 * m.stroke_width;
+    let shadow = [box_shadow(&m.shadow, 1.0, false)];
     for &p in &frame.midpoints {
         let b = Bounds::new(at(p) - point(px(d / 2.0), px(d / 2.0)), size(px(d), px(d)));
         window.paint_drop_shadows(b, Corners::all(px(d / 2.0)), &shadow);
@@ -885,7 +941,11 @@ fn paint(bounds: Bounds<Pixels>, session: &Session, now: Duration, window: &mut 
             color(sel.marquee_fill),
             px(sel.marquee_width),
             color(sel.marquee),
-            Default::default(),
+            if sel.marquee_dashed {
+                BorderStyle::Dashed
+            } else {
+                Default::default()
+            },
         ));
     }
     let picker: Vec<_> = (frame.tab_picker.iter())
@@ -920,32 +980,35 @@ fn paint_tab_picker(
     t: &willow_core::TabPickerStyle,
     picker: &[(Side, gpui::Point<Pixels>)],
 ) {
-    let shadow = t.shadow.map(|s| BoxShadow {
-        color: color(s.color),
-        offset: point(px(s.x), px(s.y)),
-        blur_radius: px(s.blur / 2.0),
-        spread_radius: px(s.spread),
-        inset: false,
-    });
+    let shadow = t.shadow.map(|s| box_shadow(&s, 1.0, false));
     for &(side, m) in picker {
         let (dx, dy) = side.unit();
         let (dx, dy) = (dx as f32, dy as f32);
         let along = |d: f32| m + point(px(dx * d), px(dy * d));
         let mut d = 0.0;
         while d < t.stub_length {
-            let end = (d + t.dash).min(t.stub_length);
-            line(window, along(d), along(end), t.stub_width, color(t.stub));
+            // Butt ends: a dash is `dash` long, its gap as long.
+            let (a, b) = (along(d), along((d + t.dash).min(t.stub_length)));
+            let half = t.stub_width / 2.0;
+            let across = point(px(dy.abs() * half), px(dx.abs() * half));
+            let dash = Bounds::from_corners(a.min(&b) - across, a.max(&b) + across);
+            window.paint_quad(gpui::fill(dash, color(t.stub)));
             d += 2.0 * t.dash;
         }
         let c = along(t.offset);
         let half = point(px(t.size / 2.0), px(t.size / 2.0));
         let b = Bounds::new(c - half, size(px(t.size), px(t.size)));
         window.paint_drop_shadows(b, Corners::all(px(t.radius)), &shadow);
-        window.paint_quad(gpui::fill(b, color(t.fill)).corner_radii(px(t.radius)));
+        window.paint_quad(
+            gpui::fill(b, color(t.fill))
+                .corner_radii(px(t.radius))
+                .border_widths(px(t.border))
+                .border_color(color(t.border_color)),
+        );
         // The arrow: a shaft and two wings at its tip.
         let (g, ink) = (t.glyph_size / 2.0, color(t.glyph));
         let at = |a: f32, b: f32| c + point(px(dx * a - dy * b), px(dy * a + dx * b));
-        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink);
+        line(window, at(-g, 0.0), at(g, 0.0), t.glyph_width, ink, false);
         for w in [-1.0, 1.0] {
             line(
                 window,
@@ -953,18 +1016,33 @@ fn paint_tab_picker(
                 at(g, 0.0),
                 t.glyph_width,
                 ink,
+                false,
             );
         }
     }
 }
 
-/// A straight line from `p` to `q`, `width` screen pixels wide.
+/// `s` as GPUI draws it at zoom `z`, inside the box if `inset`.
+fn box_shadow(s: &Shadow, z: f32, inset: bool) -> BoxShadow {
+    BoxShadow {
+        color: color(s.color),
+        offset: point(px(s.x * z), px(s.y * z)),
+        // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
+        blur_radius: px(s.blur * z / 2.0),
+        spread_radius: px(s.spread * z),
+        inset,
+    }
+}
+
+/// A straight line from `p` to `q`, `width` screen pixels wide, with square caps if `square`;
+/// the quad it draws for a straight line has them anyway.
 fn line(
     window: &mut Window,
     p: gpui::Point<Pixels>,
     q: gpui::Point<Pixels>,
     width: f32,
     ink: Hsla,
+    square: bool,
 ) {
     let (dx, dy) = (f32::from(q.x - p.x).abs(), f32::from(q.y - p.y).abs());
     if dx.max(dy) < 1.0 {
@@ -978,12 +1056,30 @@ fn line(
         window.paint_quad(gpui::fill(Bounds::from_corners(lo, hi), ink));
         return;
     }
+    let (p, q) = if square {
+        square_ends(p, q, width)
+    } else {
+        (p, q)
+    };
     let mut path = gpui::PathBuilder::stroke(px(width));
     path.move_to(p);
     path.line_to(q);
     if let Ok(path) = path.build() {
         window.paint_path(path, ink);
     }
+}
+
+/// `p` and `q` pushed apart by half of `width`: a butt-capped stroke drawn between them has
+/// square caps.
+fn square_ends(
+    p: gpui::Point<Pixels>,
+    q: gpui::Point<Pixels>,
+    width: f32,
+) -> (gpui::Point<Pixels>, gpui::Point<Pixels>) {
+    let (dx, dy) = (f32::from(q.x - p.x), f32::from(q.y - p.y));
+    let k = width / 2.0 / dx.hypot(dy);
+    let d = point(px(dx * k), px(dy * k));
+    (p - d, q + d)
 }
 
 /// The resting shadow eased toward the selected one by `k` (0 to 1), scaled by zoom `z`.
@@ -994,28 +1090,39 @@ pub(crate) fn shadows(
     z: f32,
 ) -> Vec<BoxShadow> {
     let mix = |a: f32, b: f32| a + (b - a) * k;
-    let zmix = |a: f32, b: f32| mix(a, b) * z;
     rest.iter()
         .zip(selected)
         .map(|(a, b)| {
             let (ca, cb) = (a.color.0.to_be_bytes(), b.color.0.to_be_bytes());
             let c: [u8; 4] = std::array::from_fn(|i| mix(ca[i] as f32, cb[i] as f32).round() as u8);
-            BoxShadow {
-                color: color(Rgba(u32::from_be_bytes(c))),
-                offset: point(px(zmix(a.x, b.x)), px(zmix(a.y, b.y))),
-                // GPUI's blur radius is the Gaussian sigma; CSS blur is 2 sigma.
-                blur_radius: px(zmix(a.blur, b.blur) / 2.0),
-                spread_radius: px(zmix(a.spread, b.spread)),
-                inset: false,
-            }
+            let mixed = Shadow {
+                color: Rgba(u32::from_be_bytes(c)),
+                x: mix(a.x, b.x),
+                y: mix(a.y, b.y),
+                blur: mix(a.blur, b.blur),
+                spread: mix(a.spread, b.spread),
+            };
+            box_shadow(&mixed, z, false)
         })
         .collect()
 }
 
-/// The native menu bar: app menu and Edit. Items enable while their action has a handler.
+/// The native menu bar: app menu, File, Edit, View and Window (no Help). Items enable while their action has a handler.
 #[cfg(target_os = "macos")]
 fn set_menus(cx: &mut App) {
+    let prefs = cx.global::<prefs::Prefs>();
+    let (theme, align) = (prefs.theme(), prefs.alignment());
     use gpui::{Menu, MenuItem, OsAction};
+    /// A submenu of checkable entries.
+    fn choices(name: &'static str, entries: Vec<view_menu::Choice>) -> Menu {
+        Menu::new(name).items(entries.into_iter().map(|c| MenuItem::Action {
+            name: c.label.into(),
+            action: c.action,
+            os_action: None,
+            checked: c.checked,
+            disabled: false,
+        }))
+    }
     cx.set_menus([
         Menu::new("Willow").items([MenuItem::action("Quit Willow", Quit)]),
         Menu::new("File").items([
@@ -1035,7 +1142,22 @@ fn set_menus(cx: &mut App) {
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
             MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
         ]),
-        Menu::new("View").items([MenuItem::action("Code Panel", TogglePanel)]),
+        Menu::new("View").items([
+            MenuItem::action("Show Code Panel", TogglePanel),
+            MenuItem::separator(),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::action("Actual Size", ResetZoom),
+            MenuItem::separator(),
+            MenuItem::submenu(choices("Theme", view_menu::themes(theme))),
+            MenuItem::submenu(choices("Text Alignment", view_menu::alignments(align))),
+            MenuItem::separator(),
+            MenuItem::action("Enter Full Screen", ToggleFullScreen),
+        ]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", Minimize),
+            MenuItem::action("Zoom", Zoom),
+        ]),
     ]);
 }
 
@@ -1044,22 +1166,37 @@ const GENERATE_SEED: u64 = 1;
 
 fn main() {
     // `--generate N`: open a generated document of N shapes instead of a new one.
-    // `--bench --machine NAME`: run the scripted bench on 10,000 generated shapes, then quit.
+    // `--bench --machine NAME [--theme NAME] [--shapes N]`: run the scripted bench on generated
+    // shapes (10,000 unless told otherwise), then quit.
     let args: Vec<String> = std::env::args().collect();
     let arg = |flag: &str| args.iter().position(|a| a == flag).map(|i| args.get(i + 1));
     let bench = args.iter().any(|a| a == "--bench").then(|| {
         let machine = arg("--machine").flatten();
-        machine.expect("--bench needs --machine NAME").clone()
+        let machine = machine.expect("--bench needs --machine NAME").clone();
+        let shapes = arg("--shapes").map(|n| n.and_then(|n| n.parse().ok()));
+        let shapes = shapes.map_or(10_000, |n| n.expect("--shapes takes a shape count"));
+        let theme = arg("--theme").map(|n| {
+            let named = THEMES
+                .iter()
+                .find(|t| Some(t.name) == n.map(String::as_str));
+            *named.expect("--theme takes a theme's name")
+        });
+        bench::Bench::new(machine, shapes, theme.unwrap_or(&PAPER))
     });
     let recover = bench.is_none() && arg("--generate").is_none();
     let doc = match arg("--generate") {
-        _ if bench.is_some() => willow_core::generate(10_000, GENERATE_SEED),
+        _ if bench.is_some() => {
+            let shapes = bench.as_ref().map_or(0, |b| b.shapes);
+            willow_core::generate(shapes, GENERATE_SEED)
+        }
         Some(n) => {
             let n = n.and_then(|n| n.parse().ok());
             willow_core::generate(n.expect("--generate takes a shape count"), GENERATE_SEED)
         }
         None => Document::new(),
     };
+    #[cfg(target_os = "macos")]
+    titlebar_macos::one_full_screen_item();
     gpui_platform::application().run(move |cx: &mut App| {
         let reset_zoom = if cfg!(target_os = "macos") {
             "cmd-0"
@@ -1067,6 +1204,26 @@ fn main() {
             "ctrl-0"
         };
         cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
+        let (zoom_in, zoom_in_plus, zoom_out) = if cfg!(target_os = "macos") {
+            ("cmd-=", "cmd-+", "cmd--")
+        } else {
+            ("ctrl-=", "ctrl-+", "ctrl--")
+        };
+        // The native menu shows the first binding: Zoom In reads as Cmd +.
+        cx.bind_keys([
+            KeyBinding::new(zoom_in_plus, ZoomIn, None),
+            KeyBinding::new(zoom_in, ZoomIn, None),
+            KeyBinding::new(zoom_out, ZoomOut, None),
+        ]);
+        let full_screen = if cfg!(target_os = "macos") {
+            "ctrl-cmd-f"
+        } else {
+            "f11"
+        };
+        cx.bind_keys([KeyBinding::new(full_screen, ToggleFullScreen, None)]);
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([KeyBinding::new("cmd-m", Minimize, None)]);
+        }
         let toggle_panel = if cfg!(target_os = "macos") {
             "cmd-e"
         } else {
@@ -1210,23 +1367,21 @@ fn main() {
             ]);
         }
         cx.text_system()
-            .add_fonts(vec![
-                Cow::Borrowed(include_bytes!("../assets/Literata-Regular.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-Bold.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-Italic.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice()),
-                Cow::Borrowed(include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice()),
-            ])
+            .add_fonts(bundled_fonts())
             .expect("bundled fonts");
-        #[cfg(target_os = "macos")]
-        set_menus(cx);
         cx.on_action(|_: &Quit, cx| file::quit(cx));
         cx.on_action(|_: &NewFile, cx| file::new_file(cx));
         cx.on_action(|_: &OpenFile, cx| file::open_file(cx));
-        // Preferences are the same in every window; a bench run keeps the defaults.
+        // Preferences are the same in every window; a bench run keeps the defaults but its theme.
         let prefs = prefs::file().filter(|_| bench.is_none());
-        cx.set_global(prefs.map_or_else(Default::default, |f| prefs::Prefs::load(&f)));
+        let mut prefs = prefs.map_or_else(prefs::Prefs::default, |f| prefs::Prefs::load(&f));
+        if let Some(b) = &bench {
+            prefs.set_theme(b.theme);
+        }
+        cx.set_global(prefs);
+        #[cfg(target_os = "macos")]
+        set_menus(cx);
+        view_menu::register(cx);
         cx.set_quit_mode(QuitMode::LastWindowClosed);
         // A plain launch applies the recovery files instead of opening a new document.
         if recover {
@@ -1238,9 +1393,31 @@ fn main() {
     });
 }
 
+/// Every face the themes draw with, in family order.
+fn bundled_fonts() -> Vec<Cow<'static, [u8]>> {
+    [
+        include_bytes!("../assets/Literata-Regular.ttf").as_slice(),
+        include_bytes!("../assets/Literata-Bold.ttf").as_slice(),
+        include_bytes!("../assets/Literata-Italic.ttf").as_slice(),
+        include_bytes!("../assets/Literata-BoldItalic.ttf").as_slice(),
+        include_bytes!("../assets/JetBrainsMono-Regular.ttf").as_slice(),
+        include_bytes!("../assets/JetBrainsMono-SemiBold.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Regular.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Bold.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-Italic.ttf").as_slice(),
+        include_bytes!("../assets/CourierPrime-BoldItalic.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-Medium.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-Bold.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-MediumItalic.ttf").as_slice(),
+        include_bytes!("../assets/SpaceGrotesk-BoldItalic.ttf").as_slice(),
+    ]
+    .map(Cow::Borrowed)
+    .into()
+}
+
 /// Opens a window showing `content`; `bench` runs the scripted bench in it.
-fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
-    let c = &PAPER.chrome;
+fn open_window(content: Content, bench: Option<bench::Bench>, cx: &mut App) {
+    let c = cx.global::<prefs::Prefs>().theme().chrome;
     let bounds = Bounds::centered(None, size(px(c.window_width), px(c.window_height)), cx);
     cx.open_window(
         WindowOptions {
@@ -1280,19 +1457,18 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 });
                 let _tab_picker_keys = tab_picker_keys(cx, window);
                 let recovery = content.recovery.clone();
-                let (session, path) = content.session(window);
-                let mut w = Willow {
+                let (session, path) = content.session(cx.global::<prefs::Prefs>().theme(), window);
+                Willow {
                     session,
                     focus,
                     cursor: Cursor::Arrow,
                     canvas_origin: Default::default(),
                     start: Instant::now(),
                     wake: None,
-                    ahead: None,
                     _activation,
                     _tab_picker_keys,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
-                    bench: bench.map(bench::Bench::new),
+                    bench,
                     path,
                     mtime: None,
                     settling: false,
@@ -1300,11 +1476,20 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     text_wake: None,
                     text_check: None,
                     panel_drag: None,
-                };
-                w.measure_ahead(cx);
-                w
+                }
             })
         },
     )
     .expect("open window");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_square_cap_extends_a_line_half_its_width_along_itself() {
+        let (p, q) = square_ends(point(px(0.), px(0.)), point(px(30.), px(40.)), 10.0);
+        assert_eq!((p, q), (point(px(-3.), px(-4.)), point(px(33.), px(44.))));
+    }
 }

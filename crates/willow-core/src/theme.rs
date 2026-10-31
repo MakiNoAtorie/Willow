@@ -32,7 +32,16 @@ pub struct Shadow {
 pub struct ShapeStyle {
     pub radius: f32,
     pub pad_x: f32,
+    /// Below the text.
     pub pad_y: f32,
+    /// Above the text.
+    pub pad_top: f32,
+    /// A strip this tall along the top edge in the picker color; 0 for none. Inside `pad_top`.
+    pub tab: f32,
+    /// An outline this wide inside the shape's edge, in `border_color`; 0 for none. Padding
+    /// includes it.
+    pub border: f32,
+    pub border_color: Rgba,
     /// Resting shadow layers, bottom first.
     pub shadow: [Shadow; 2],
 }
@@ -47,6 +56,8 @@ pub struct ConnectorStyle {
     /// Hovered: `hover` color, `hover_width` canvas units (same floor).
     pub hover: Rgba,
     pub hover_width: f32,
+    /// Ends run half the width past the line, as SVG's square linecap does.
+    pub square: bool,
     /// Screen pixels either side of the line that hover or right-click it.
     pub hit: f32,
 }
@@ -59,9 +70,15 @@ pub struct ZoneStyle {
     /// How far the fill moves from the canvas toward the pastel; deeper for nested zones.
     pub fill_mix: f32,
     pub nested_fill_mix: f32,
+    /// The fill moves from the canvas toward the picker color rather than the pastel.
+    pub fill_picker: bool,
+    /// A soft shadow inside the zone's edge (a transparent color for none).
+    pub inset: Shadow,
     /// The inset edge: the pastel moved this far toward the picker color, `edge_width` wide.
     pub edge_mix: f32,
     pub edge_width: f32,
+    /// This color for the edge instead of the mix.
+    pub edge_color: Option<Rgba>,
     /// The hover ring on a zone's edge (a hovered band, a drop's target), in `accent`.
     pub ring: f32,
     /// Title in the theme font, ink color; never smaller than `title_min_screen` screen px and
@@ -69,6 +86,10 @@ pub struct ZoneStyle {
     /// text) has its top-left `title_x`, `title_y` in, constant on screen when zoomed out.
     pub title_size: f32,
     pub title_weight: f32,
+    /// Titles drawn in capitals, with `title_spacing` (a multiple of the size) after each letter.
+    pub title_upper: bool,
+    pub title_spacing: f32,
+    pub pill: Option<TitlePill>,
     pub title_min_screen: f32,
     pub title_x: f32,
     pub title_y: f32,
@@ -76,6 +97,19 @@ pub struct ZoneStyle {
     pub band: f32,
     /// Room around the members of a zone the loader wraps (clears the title).
     pub padding: f32,
+}
+
+/// A capsule behind a zone title. `title_x` and `title_y` place the text, as without one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TitlePill {
+    pub fill: Rgba,
+    /// The title, its caret and IME underline on the fill.
+    pub ink: Rgba,
+    /// The title's text selection on the fill.
+    pub selection: Rgba,
+    /// Past the text's line box; screen px when zoomed out, scaled with the title zoomed in.
+    pub pad_x: f32,
+    pub pad_y: f32,
 }
 
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing curve.
@@ -87,6 +121,8 @@ impl CubicBezier {
     pub const EASE_IN: CubicBezier = CubicBezier(0.42, 0.0, 1.0, 1.0);
     /// CSS `ease-out`.
     pub const EASE_OUT: CubicBezier = CubicBezier(0.0, 0.0, 0.58, 1.0);
+    /// CSS `linear`.
+    pub const LINEAR: CubicBezier = CubicBezier(0.0, 0.0, 1.0, 1.0);
 
     /// Eased progress for linear progress `x` (clamped to 0..=1).
     pub fn at(&self, x: f32) -> f32 {
@@ -158,10 +194,12 @@ pub struct ZoomPillStyle {
     pub fade: Transition,
 }
 
-/// App menus drawn in the window (Windows' menu button), in screen pixels. Text is the
-/// system UI font. macOS uses the native menus instead.
+/// App menus drawn in the window (context menus, Windows' menu button), in screen pixels.
+/// macOS' menu bar is native.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MenuStyle {
+    /// `None` is the system UI font.
+    pub font: Option<&'static str>,
     pub bg: Rgba,
     pub ink: Rgba,
     pub hover: Rgba,
@@ -198,9 +236,15 @@ pub struct MenuStyle {
     /// The color row's circles: diameter, space between, and the current one's ring width and
     /// its gap from the circle.
     pub swatch: f32,
+    /// Corner radius: half of `swatch` for circles.
+    pub swatch_radius: f32,
+    /// An `ink` outline inside every swatch; 0 for none.
+    pub swatch_edge: f32,
     pub swatch_gap: f32,
     pub swatch_ring: f32,
     pub swatch_ring_gap: f32,
+    /// The ring's color; `None` is the swatch's own picker color.
+    pub swatch_ring_color: Option<Rgba>,
     /// Ring, then drop shadow.
     pub shadow: [Shadow; 2],
     /// The menu's left edge from the window's.
@@ -215,6 +259,19 @@ pub struct MenuStyle {
 pub struct RippleStyle {
     pub fade: Transition,
     pub step: Duration,
+    /// The fade jumps in this many equal steps, as CSS `steps(n, end)`; 0 runs it smoothly.
+    pub steps: u32,
+}
+
+impl RippleStyle {
+    /// How far a shape's fade has come `elapsed` after it started: 0 to 1.
+    pub fn progress(&self, elapsed: Duration) -> f32 {
+        let p = self.fade.progress(elapsed);
+        match self.steps {
+            0 => p,
+            n => (p * n as f32).floor() / n as f32,
+        }
+    }
 }
 
 /// The window's title bar, in screen pixels.
@@ -261,6 +318,25 @@ pub struct SelectionStyle {
     pub marquee_fill: Rgba,
     pub marquee_width: f32,
     pub marquee_radius: f32,
+    pub marquee_dashed: bool,
+    /// How far a selected shape moves from where it is drawn, canvas units, as the ring fades in.
+    pub lift_x: f32,
+    pub lift_y: f32,
+}
+
+/// One set of parallel lines in the canvas texture: `width` thick every `period`, screen px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeaveLines {
+    pub color: Rgba,
+    pub width: f32,
+    pub period: f32,
+}
+
+/// A canvas texture, at a fixed screen size at any zoom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weave {
+    pub horizontal: WeaveLines,
+    pub vertical: WeaveLines,
 }
 
 /// The text caret while editing: `width` wide in `color`, blinking every `blink` until `idle`
@@ -296,6 +372,9 @@ pub struct TabPickerStyle {
     pub offset: f32,
     pub radius: f32,
     pub fill: Rgba,
+    /// An outline this wide inside the keycap's edge; 0 for none.
+    pub border: f32,
+    pub border_color: Rgba,
     pub shadow: [Shadow; 3],
     pub glyph: Rgba,
     pub glyph_size: f32,
@@ -416,7 +495,10 @@ pub struct Theme {
     pub grid_dot: Rgba,
     pub grid_dot_radius: f32,
     pub grid_spacing: f32,
+    pub weave: Option<Weave>,
     pub shape: ShapeStyle,
+    /// Screen pixels shape borders and zone edges never get thinner than; 0 lets them scale away.
+    pub border_min_screen: f32,
     /// Edge-to-edge distance, either direction, from a shape to a new or auto-placed shape
     /// linked to it.
     pub creation_gap: f32,
@@ -441,7 +523,7 @@ pub struct Theme {
     pub midpoint: MidpointStyle,
     pub tab_picker: TabPickerStyle,
     pub create: CreateStyle,
-    /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
+    /// Pushed shapes sliding to where the spacing pass, or insert-and-push, sends them.
     pub push: Transition,
     /// The view panning to show a shape the keyboard moved to, and the screen pixels it then
     /// keeps between the shape and the screen's edge.
@@ -467,6 +549,21 @@ impl Theme {
         self.font_size * self.line_height
     }
 
+    /// Zone title text.
+    pub fn title_ink(&self) -> Rgba {
+        self.zone.pill.map_or(self.ink, |p| p.ink)
+    }
+
+    /// Selected zone title text's highlight.
+    pub fn title_selection(&self) -> Rgba {
+        self.zone.pill.map_or(self.selection.text, |p| p.selection)
+    }
+
+    /// The caret in a zone title.
+    pub fn title_caret(&self) -> Rgba {
+        self.zone.pill.map_or(self.caret.color, |p| p.ink)
+    }
+
     pub fn pastel(&self, c: Color) -> Rgba {
         self.pastel[c as usize]
     }
@@ -483,10 +580,15 @@ pub const PAPER: Theme = Theme {
     grid_dot: rgba(70, 50, 20, 0.10),
     grid_dot_radius: 1.0,
     grid_spacing: 24.0,
+    weave: None,
     shape: ShapeStyle {
         radius: 14.0,
         pad_x: 16.0,
         pad_y: 13.0,
+        pad_top: 13.0,
+        tab: 0.0,
+        border: 0.0,
+        border_color: rgba(0, 0, 0, 0.0),
         shadow: [
             Shadow {
                 x: 0.0,
@@ -504,6 +606,7 @@ pub const PAPER: Theme = Theme {
             },
         ],
     },
+    border_min_screen: 0.0,
     creation_gap: 48.0,
     min_gap: 24.0,
     connector: ConnectorStyle {
@@ -512,17 +615,30 @@ pub const PAPER: Theme = Theme {
         min_screen: 1.0,
         hover: hex(0x8b7760),
         hover_width: 3.0,
+        square: false,
         hit: 8.0,
     },
     zone: ZoneStyle {
         radius: 22.0,
+        fill_picker: false,
+        inset: Shadow {
+            x: 0.0,
+            y: 0.0,
+            blur: 0.0,
+            spread: 0.0,
+            color: rgba(0, 0, 0, 0.0),
+        },
         fill_mix: 0.45,
         nested_fill_mix: 0.7,
         edge_mix: 0.35,
         edge_width: 1.0,
+        edge_color: None,
         ring: 2.0,
         title_size: 13.0,
         title_weight: 600.0,
+        title_upper: false,
+        title_spacing: 0.0,
+        pill: None,
         title_min_screen: 12.0,
         title_x: 16.0,
         title_y: 12.0,
@@ -538,6 +654,9 @@ pub const PAPER: Theme = Theme {
         marquee_fill: rgba(139, 119, 96, 0.08),
         marquee_width: 1.0,
         marquee_radius: 3.0,
+        marquee_dashed: false,
+        lift_x: 0.0,
+        lift_y: 0.0,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -618,6 +737,7 @@ pub const PAPER: Theme = Theme {
             easing: CubicBezier::EASE_OUT,
         },
         step: Duration::from_millis(40),
+        steps: 0,
     },
     zoom_pill: ZoomPillStyle {
         bg: rgba(59, 52, 44, 0.84),
@@ -633,6 +753,7 @@ pub const PAPER: Theme = Theme {
         },
     },
     menu: MenuStyle {
+        font: None,
         bg: hex(0xfffdf8),
         ink: hex(0x3b342c),
         hover: hex(0xf1ebe0),
@@ -658,9 +779,12 @@ pub const PAPER: Theme = Theme {
         shortcut_opacity: 0.45,
         disabled_opacity: 0.4,
         swatch: 18.0,
+        swatch_radius: 9.0,
+        swatch_edge: 0.0,
         swatch_gap: 7.0,
         swatch_ring: 1.5,
         swatch_ring_gap: 2.0,
+        swatch_ring_color: None,
         shadow: [
             Shadow {
                 x: 0.0,
@@ -698,6 +822,8 @@ pub const PAPER: Theme = Theme {
         offset: 30.0,
         radius: 8.0,
         fill: hex(0xfffdf8),
+        border: 0.0,
+        border_color: rgba(0, 0, 0, 0.0),
         shadow: [
             Shadow {
                 x: 0.0,
@@ -764,8 +890,8 @@ pub const PAPER: Theme = Theme {
         font_size: 12.5,
         line_height: 1.65,
         advance: 0.6,
-        // The mockup's 46 px under the title bar, plus its 14 px padding.
-        pad_top: 60.0,
+        // The mockup's 46 px, which replace its 14 px padding at the top.
+        pad_top: 46.0,
         pad_bottom: 14.0,
         gutter_width: 40.0,
         gutter_gap: 14.0,
@@ -795,3 +921,465 @@ pub const PAPER: Theme = Theme {
         },
     },
 };
+
+/// Typewritten index cards on a linen desk. Only what differs from Paper, as in
+/// `design/visual-language.md`.
+pub const DESK: Theme = Theme {
+    name: "Desk",
+    font: "Courier Prime",
+    font_size: 14.0,
+    canvas: hex(0xe6dfd1),
+    ink: hex(0x2b2621),
+    accent: hex(0x2b2621),
+    // No dot grid.
+    grid_dot: rgba(0, 0, 0, 0.0),
+    // The mockups' two repeating gradients.
+    weave: Some(Weave {
+        horizontal: WeaveLines {
+            color: rgba(120, 100, 70, 0.035),
+            width: 1.0,
+            period: 3.0,
+        },
+        vertical: WeaveLines {
+            color: rgba(120, 100, 70, 0.03),
+            width: 1.0,
+            period: 4.0,
+        },
+    }),
+    shape: ShapeStyle {
+        radius: 4.0,
+        pad_x: 15.0,
+        // 12 under the 6 tall tab.
+        pad_top: 18.0,
+        tab: 6.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.18),
+            },
+            Shadow {
+                x: 0.0,
+                y: 4.0,
+                blur: 10.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.14),
+            },
+        ],
+        ..PAPER.shape
+    },
+    connector: ConnectorStyle {
+        color: hex(0x9b8c74),
+        width: 1.5,
+        hover: hex(0x2b2621),
+        hover_width: 2.5,
+        ..PAPER.connector
+    },
+    zone: ZoneStyle {
+        radius: 6.0,
+        fill_picker: true,
+        inset: Shadow {
+            x: 0.0,
+            y: 1.0,
+            blur: 2.0,
+            spread: 0.0,
+            color: rgba(70, 50, 20, 0.12),
+        },
+        fill_mix: 0.16,
+        nested_fill_mix: 0.3,
+        edge_width: 0.0,
+        title_size: 12.0,
+        title_weight: 700.0,
+        title_upper: true,
+        title_spacing: 0.08,
+        // The mockups' normal line box is about 4 px shorter than this 1.5: same glyphs.
+        title_y: 10.0,
+        ..PAPER.zone
+    },
+    selection: SelectionStyle {
+        gap: 0.0,
+        ring: 1.5,
+        color: hex(0x2b2621),
+        text: rgba(199, 154, 62, 0.32),
+        marquee: rgba(43, 38, 33, 0.6),
+        marquee_fill: rgba(43, 38, 33, 0.05),
+        marquee_radius: 2.0,
+        marquee_dashed: true,
+        lift_y: -4.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 16.0,
+                blur: 30.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.28),
+            },
+            Shadow {
+                x: 0.0,
+                y: 3.0,
+                blur: 6.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.12),
+            },
+        ],
+        fade: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier(0.2, 0.8, 0.2, 1.0),
+        },
+        ..PAPER.selection
+    },
+    caret: CaretStyle {
+        color: hex(0x2b2621),
+        ..PAPER.caret
+    },
+    pastel: [
+        hex(0xfbfaf6),
+        hex(0xfff3f1),
+        hex(0xfff6ec),
+        hex(0xfffbea),
+        hex(0xf5fbf1),
+        hex(0xf2f7fc),
+        hex(0xf8f4fc),
+    ],
+    picker: [
+        hex(0xb9b1a3),
+        hex(0xd8574c),
+        hex(0xe8873a),
+        hex(0xe2b52c),
+        hex(0x5c9d4d),
+        hex(0x4a84c4),
+        hex(0x8a66c0),
+    ],
+    chrome: ChromeStyle {
+        title: rgba(43, 38, 33, 0.55),
+        button_hover: rgba(70, 50, 20, 0.08),
+        ..PAPER.chrome
+    },
+    zoom: ZoomStyle {
+        fade_end: 0.52,
+        block_mix: 0.6,
+        ..PAPER.zoom
+    },
+    zoom_pill: ZoomPillStyle {
+        bg: rgba(43, 38, 33, 0.88),
+        ink: hex(0xfffdf7),
+        ..PAPER.zoom_pill
+    },
+    menu: MenuStyle {
+        font: Some("Courier Prime"),
+        bg: hex(0xfffdf7),
+        ink: hex(0x2b2621),
+        hover: hex(0xf3ead6),
+        destructive: hex(0xb8483e),
+        // The mockups' ink at 0x18 alpha.
+        separator: rgba(43, 38, 33, 0.094),
+        radius: 4.0,
+        item_radius: 2.0,
+        swatch_radius: 3.0,
+        font_weight: 400.0,
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.2),
+            },
+            Shadow {
+                x: 0.0,
+                y: 14.0,
+                blur: 30.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.25),
+            },
+        ],
+        ..PAPER.menu
+    },
+    midpoint: MidpointStyle {
+        size: 10.0,
+        fill: hex(0xc79a3e),
+        stroke: hex(0xfff7e6),
+        ..PAPER.midpoint
+    },
+    tab_picker: TabPickerStyle {
+        radius: 3.0,
+        fill: hex(0xfffdf7),
+        shadow: [
+            // Two layers in the mockups.
+            Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 0.0,
+                spread: 0.0,
+                color: rgba(0, 0, 0, 0.0),
+            },
+            Shadow {
+                x: 0.0,
+                y: 1.0,
+                blur: 1.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.25),
+            },
+            Shadow {
+                x: 0.0,
+                y: 3.0,
+                blur: 6.0,
+                spread: 0.0,
+                color: rgba(70, 50, 20, 0.15),
+            },
+        ],
+        glyph: hex(0x2b2621),
+        stub: rgba(43, 38, 33, 0.45),
+        ..PAPER.tab_picker
+    },
+    code: CodeStyle {
+        bg: hex(0xfbf8f1),
+        border: rgba(70, 50, 20, 0.15),
+        font: "Courier Prime",
+        font_size: 13.0,
+        line_height: 1.6,
+        // Courier Prime's advance, 1228 of 2048 units.
+        advance: 1228.0 / 2048.0,
+        gutter: hex(0xc4b8a2),
+        keyword: hex(0x8a6a2c),
+        id: hex(0x2b2621),
+        string: hex(0x5c7d46),
+        direction: hex(0x7a5aa8),
+        layout: hex(0xa89d8a),
+        invalid: hex(0xd8574c),
+        ..PAPER.code
+    },
+    ..PAPER
+};
+
+/// Poster's ink.
+const INK: Rgba = hex(0x111111);
+
+/// Pads a shadow array that has fewer layers in the mockups.
+const NO_SHADOW: Shadow = Shadow {
+    x: 0.0,
+    y: 0.0,
+    blur: 0.0,
+    spread: 0.0,
+    color: rgba(0, 0, 0, 0.0),
+};
+
+/// Poster's shadow: solid ink, `d` down and right.
+const fn hard_shadow(d: f32) -> Shadow {
+    Shadow {
+        x: d,
+        y: d,
+        blur: 0.0,
+        spread: 0.0,
+        color: INK,
+    }
+}
+
+/// Neo-brutalist: thick outlines, hard offset shadows, punchy pastels. Only what differs from
+/// Paper, as in `design/visual-language.md`.
+pub const POSTER: Theme = Theme {
+    name: "Poster",
+    font: "Space Grotesk",
+    font_size: 14.5,
+    line_height: 1.45,
+    canvas: hex(0xfbf6ea),
+    ink: INK,
+    accent: INK,
+    // No dot grid.
+    grid_dot: rgba(0, 0, 0, 0.0),
+    shape: ShapeStyle {
+        radius: 10.0,
+        // Inside the border: the mockups' 12 padding, and across the 178 of text they show in
+        // a default shape, which decides where words wrap.
+        pad_x: 16.0,
+        pad_y: 14.5,
+        pad_top: 14.5,
+        border: 2.5,
+        border_color: INK,
+        // One layer in the mockups.
+        shadow: [NO_SHADOW, hard_shadow(4.0)],
+        ..PAPER.shape
+    },
+    border_min_screen: 1.0,
+    connector: ConnectorStyle {
+        color: INK,
+        width: 2.5,
+        hover: hex(0xff4d1a),
+        hover_width: 4.5,
+        square: true,
+        ..PAPER.connector
+    },
+    zone: ZoneStyle {
+        radius: 16.0,
+        fill_mix: 0.5,
+        nested_fill_mix: 0.85,
+        edge_width: 2.5,
+        edge_color: Some(INK),
+        // The mockups' hover ring would vanish into the edge; this matches a hovered connector.
+        ring: 4.5,
+        title_size: 12.0,
+        title_weight: 700.0,
+        title_upper: true,
+        title_spacing: 0.06,
+        pill: Some(TitlePill {
+            fill: INK,
+            ink: hex(0xffffff),
+            selection: rgba(255, 224, 102, 0.35),
+            pad_x: 9.0,
+            // 21.4 tall in all: the mockups' 3 padding around a normal line height.
+            pad_y: 2.0,
+        }),
+        // The pill's left and top 16 and 12 in from inside the edge, plus its padding.
+        title_x: 27.5,
+        title_y: 16.5,
+        ..PAPER.zone
+    },
+    selection: SelectionStyle {
+        // The border and the grown shadow mark it; no ring.
+        gap: 0.0,
+        ring: 0.0,
+        color: INK,
+        text: hex(0xffe066),
+        marquee: INK,
+        marquee_fill: rgba(255, 224, 102, 0.25),
+        marquee_width: 2.0,
+        marquee_radius: 4.0,
+        marquee_dashed: true,
+        lift_x: -3.0,
+        lift_y: -3.0,
+        shadow: [NO_SHADOW, hard_shadow(8.0)],
+        fade: Transition {
+            duration: Duration::from_millis(100),
+            easing: CubicBezier(0.3, 1.6, 0.5, 1.0),
+        },
+    },
+    caret: CaretStyle {
+        color: INK,
+        width: 2.0,
+        ..PAPER.caret
+    },
+    pastel: [
+        hex(0xe9e7e1),
+        hex(0xffb8b0),
+        hex(0xffc994),
+        hex(0xffe57a),
+        hex(0xb6eda9),
+        hex(0xa9d6ff),
+        hex(0xd2bbff),
+    ],
+    picker: [
+        hex(0x8f8b82),
+        hex(0xff4f3f),
+        hex(0xff8a1f),
+        hex(0xffc800),
+        hex(0x2fbf4a),
+        hex(0x1f8bff),
+        hex(0x8b4dff),
+    ],
+    chrome: ChromeStyle {
+        title: rgba(17, 17, 17, 0.6),
+        button_hover: rgba(17, 17, 17, 0.08),
+        ..PAPER.chrome
+    },
+    zoom: ZoomStyle {
+        block_mix: 0.2,
+        ..PAPER.zoom
+    },
+    ripple: RippleStyle {
+        fade: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier::LINEAR,
+        },
+        steps: 2,
+        ..PAPER.ripple
+    },
+    zoom_pill: ZoomPillStyle {
+        bg: INK,
+        ink: hex(0xffe57a),
+        fade: Transition {
+            duration: Duration::from_millis(300),
+            easing: CubicBezier::EASE_IN,
+        },
+        ..PAPER.zoom_pill
+    },
+    menu: MenuStyle {
+        font: Some("Space Grotesk"),
+        bg: hex(0xffffff),
+        ink: INK,
+        hover: hex(0xffe57a),
+        destructive: hex(0xe03131),
+        // The mockups' ink at 0x18 alpha.
+        separator: rgba(17, 17, 17, 0.094),
+        radius: 8.0,
+        item_radius: 4.0,
+        // The Bold face: Medium and Bold are bundled, and CSS matching takes Bold from 600.
+        font_weight: 600.0,
+        swatch: 22.0,
+        swatch_radius: 6.0,
+        swatch_edge: 2.0,
+        swatch_ring: 2.5,
+        swatch_ring_color: Some(INK),
+        shadow: [
+            Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 0.0,
+                spread: 2.5,
+                color: INK,
+            },
+            Shadow {
+                x: 5.0,
+                y: 5.0,
+                blur: 0.0,
+                spread: 2.5,
+                color: INK,
+            },
+        ],
+        ..PAPER.menu
+    },
+    midpoint: MidpointStyle {
+        size: 11.0,
+        stroke: INK,
+        stroke_width: 2.5,
+        ..PAPER.midpoint
+    },
+    tab_picker: TabPickerStyle {
+        radius: 6.0,
+        fill: hex(0xffffff),
+        border: 2.5,
+        border_color: INK,
+        // One layer in the mockups.
+        shadow: [NO_SHADOW, NO_SHADOW, hard_shadow(3.0)],
+        glyph: INK,
+        stub: INK,
+        ..PAPER.tab_picker
+    },
+    create: CreateStyle {
+        motion: Transition {
+            duration: Duration::from_millis(160),
+            easing: CubicBezier(0.3, 1.4, 0.5, 1.0),
+        },
+        ..PAPER.create
+    },
+    code: CodeStyle {
+        bg: hex(0xfffaf0),
+        border: INK,
+        border_width: 2.5,
+        gutter: hex(0xb5ae9f),
+        keyword: hex(0xd9480f),
+        id: INK,
+        string: hex(0x2b8a3e),
+        direction: hex(0x6741d9),
+        layout: hex(0x8f8b82),
+        invalid: hex(0xff4f3f),
+        ..PAPER.code
+    },
+    ..PAPER
+};
+
+/// Every theme, as View > Theme lists them. A new theme is a const over `PAPER` naming what
+/// differs, one entry here and its line in the app's `view_menu`. A new field needs only
+/// Paper's value: the others inherit it.
+pub static THEMES: [&Theme; 3] = [&PAPER, &DESK, &POSTER];

@@ -199,7 +199,7 @@ fn invalid_rows(s: &Session) -> Vec<usize> {
 }
 
 fn canonical(s: &Session) -> String {
-    willow_core::save(s.document(), &s.heights())
+    willow_core::save(s.document(), &s.heights(), &s.drawn_positions())
 }
 
 /// `TWO` with `b` linked below a missing `azz`: line 4 is invalid.

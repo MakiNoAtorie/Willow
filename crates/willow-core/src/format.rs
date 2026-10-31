@@ -6,7 +6,8 @@ use std::fmt::{self, Write};
 use crate::check::{LineKind, check};
 use crate::edit::build;
 use crate::{
-    Color, DEFAULT_WIDTH, Document, Link, Point, RichText, Shape, ShapeId, Side, Theme, side,
+    Color, DEFAULT_WIDTH, Document, DrawnRect, Link, Point, RichText, Shape, ShapeId, Side, Theme,
+    side,
 };
 
 /// Loaded text: the document built from the lines that parse, whether loading had to repair
@@ -350,8 +351,36 @@ pub(crate) fn parse_shape(line: &str) -> Option<(&str, RichText, Option<&str>)> 
 /// generation order (a … z, aa).
 type Key<'a> = (i32, i32, usize, &'a str);
 
-fn key(s: &Shape) -> Key<'_> {
-    (s.y, s.x, s.id.0.len(), &s.id.0)
+/// Shapes as the writer sees them: what story order and direction words read (ADR 0006).
+#[derive(Clone, Copy)]
+struct Drawn<'a> {
+    shapes: &'a [Shape],
+    heights: &'a [f32],
+    positions: &'a [(i32, i32)],
+}
+
+impl<'a> Drawn<'a> {
+    fn at(&self, i: usize) -> (i32, i32) {
+        let s = &self.shapes[i];
+        self.positions.get(i).copied().unwrap_or((s.x, s.y))
+    }
+
+    fn center(&self, i: usize) -> Point {
+        let (x, y) = self.at(i);
+        let rect = DrawnRect {
+            x: x as f32,
+            y: y as f32,
+            width: self.shapes[i].width as f32,
+            height: self.heights.get(i).copied().unwrap_or(0.0),
+        };
+        rect.center()
+    }
+
+    fn key(&self, i: usize) -> Key<'a> {
+        let (x, y) = self.at(i);
+        let id = &self.shapes[i].id.0;
+        (y, x, id.len(), id)
+    }
 }
 
 /// Something written inside a block: a chain's shapes in that block (walk order), or a zone.
@@ -361,9 +390,10 @@ enum Unit {
 }
 
 /// Canonical text for `doc` in story order (ADR 0002): header, blocks, then the layout.
-/// `heights[i]` is `doc.shapes[i]`'s drawn height (`Session::heights`), which the side rule
-/// needs.
-pub fn save(doc: &Document, heights: &[f32]) -> String {
+/// `heights[i]` and `drawn[i]` are `doc.shapes[i]`'s height and drawn top-left (`Session::heights`
+/// and `drawn_positions`): only `@layout` reads placed positions. A shape past the end of
+/// `drawn` is drawn where it is placed.
+pub fn save(doc: &Document, heights: &[f32], drawn: &[(i32, i32)]) -> String {
     let (shapes, zones) = (&doc.shapes, &doc.zones);
     let index: HashMap<&ShapeId, usize> =
         shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
@@ -381,8 +411,12 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         }
     }
 
-    let center = |i: usize| shapes[i].center(heights.get(i).copied().unwrap_or(0.0));
-    let Walks { walks, chain, from } = walks(doc, &center);
+    let drawn = Drawn {
+        shapes,
+        heights,
+        positions: drawn,
+    };
+    let Walks { walks, chain, from } = walks(doc, drawn);
 
     // Units per block, each keyed by its topmost shape.
     let mut units: Vec<Vec<(Key, Unit)>> = (0..=zones.len()).map(|_| Vec::new()).collect();
@@ -392,7 +426,7 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
         for &i in walk {
             parts.entry(block[i]).or_default().push(i);
             // Every enclosing zone sorts by its topmost shape.
-            let (k, mut b) = (key(&shapes[i]), block[i]);
+            let (k, mut b) = (drawn.key(i), block[i]);
             for _ in 0..zones.len() {
                 if b == 0 {
                     break;
@@ -402,7 +436,7 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
             }
         }
         for (b, part) in parts {
-            let k = (part.iter().map(|&i| key(&shapes[i])).min()).expect("a part has shapes");
+            let k = (part.iter().map(|&i| drawn.key(i)).min()).expect("a part has shapes");
             units[b].push((k, Unit::Chain(part)));
         }
     }
@@ -417,7 +451,7 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
 
     let mut w = Writer {
         doc,
-        center: &center,
+        drawn,
         units: &units,
         chain: &chain,
         from: &from,
@@ -460,9 +494,13 @@ pub fn save(doc: &Document, heights: &[f32]) -> String {
 
 /// Every shape (indices into `doc.shapes`) in story order within its chain: chains from their
 /// topmost shape, each walked as `save` walks it. Chains come in no particular order.
-pub(crate) fn story_order(doc: &Document, heights: &[f32]) -> Vec<usize> {
-    let center = |i: usize| doc.shapes[i].center(heights.get(i).copied().unwrap_or(0.0));
-    walks(doc, &center).walks.concat()
+pub(crate) fn story_order(doc: &Document, heights: &[f32], drawn: &[(i32, i32)]) -> Vec<usize> {
+    let drawn = Drawn {
+        shapes: &doc.shapes,
+        heights,
+        positions: drawn,
+    };
+    walks(doc, drawn).walks.concat()
 }
 
 /// Every chain walked depth-first from its topmost shape (`walk`), chains in order of their
@@ -474,16 +512,16 @@ struct Walks {
     from: Vec<Option<usize>>,
 }
 
-fn walks(doc: &Document, center: &dyn Fn(usize) -> Point) -> Walks {
+fn walks(doc: &Document, drawn: Drawn) -> Walks {
     let (shapes, next) = (&doc.shapes, neighbors(doc));
     let mut tops: Vec<usize> = (0..shapes.len()).collect();
-    tops.sort_by_key(|&i| key(&shapes[i]));
+    tops.sort_by_key(|&i| drawn.key(i));
     let (mut chain, mut from) = (vec![usize::MAX; shapes.len()], vec![None; shapes.len()]);
     let mut walks = Vec::new();
     for top in tops {
         if chain[top] == usize::MAX {
             let c = walks.len();
-            walks.push(walk(top, c, &next, shapes, center, &mut chain, &mut from));
+            walks.push(walk(top, c, &next, drawn, &mut chain, &mut from));
         }
     }
     Walks { walks, chain, from }
@@ -511,8 +549,7 @@ fn walk(
     top: usize,
     c: usize,
     next: &[Vec<usize>],
-    shapes: &[Shape],
-    center: &dyn Fn(usize) -> Point,
+    drawn: Drawn,
     chain: &mut [usize],
     from: &mut [Option<usize>],
 ) -> Vec<usize> {
@@ -523,11 +560,11 @@ fn walk(
         }
         (chain[i], from[i]) = (c, f);
         walk.push(i);
-        let at = center(i);
+        let at = drawn.center(i);
         let mut ns: Vec<usize> = (next[i].iter().copied())
             .filter(|&n| chain[n] == usize::MAX)
             .collect();
-        ns.sort_by_key(|&n| (rank(side(at, center(n))), key(&shapes[n])));
+        ns.sort_by_key(|&n| (rank(side(at, drawn.center(n))), drawn.key(n)));
         stack.extend(ns.into_iter().rev().map(|n| (n, Some(i))));
     }
     walk
@@ -546,7 +583,7 @@ fn rank(s: Side) -> u8 {
 /// Writes blocks, remembering the order shapes and zones were written in for the layout.
 struct Writer<'a> {
     doc: &'a Document,
-    center: &'a dyn Fn(usize) -> Point,
+    drawn: Drawn<'a>,
     units: &'a [Vec<(Key<'a>, Unit)>],
     chain: &'a [usize],
     from: &'a [Option<usize>],
@@ -588,7 +625,7 @@ impl Writer<'_> {
         let s = &self.doc.shapes[i];
         let _ = write!(self.out, "{indent}{}: \"{}\"", s.id.0, text(&s.text));
         if let Some(f) = self.from[i] {
-            let word = match side((self.center)(f), (self.center)(i)) {
+            let word = match side(self.drawn.center(f), self.drawn.center(i)) {
                 Side::Bottom => "below",
                 Side::Top => "above",
                 Side::Right => "right of",

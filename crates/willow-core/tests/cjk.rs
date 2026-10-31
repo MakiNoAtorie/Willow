@@ -1,13 +1,13 @@
 mod common;
 
 use common::{Fake, text};
-use willow_core::{Layout, PAPER, layout};
+use willow_core::{Align, Layout, PAPER, layout};
 
 /// Content width of a default 210-wide Paper shape; the fake measures CJK at 15.
 const W: f32 = 178.0;
 
 fn lay(s: &str) -> Layout {
-    layout(&text(s), W, &PAPER, &Fake)
+    layout(&text(s), W, &PAPER, Align::Justified, &Fake)
 }
 
 fn lines(s: &str, l: &Layout) -> Vec<String> {

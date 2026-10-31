@@ -135,6 +135,15 @@ struct Group {
     set: HashSet<ShapeId>,
 }
 
+/// The latest unbroken run of changes that left every shape's box alone but for text height:
+/// revisions `from` to `to`, the shapes they touched by index.
+#[derive(Debug, Default)]
+struct TextEdits {
+    from: u64,
+    to: u64,
+    shapes: Vec<usize>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct History {
     undo: Vec<Step>,
@@ -143,6 +152,7 @@ pub(crate) struct History {
     open: Option<Group>,
     /// Counts changes to the document (including undo and redo); crash recovery watches it.
     revision: u64,
+    text_edits: TextEdits,
     /// The panel text for the document as it is now, when it isn't plain regenerated text.
     pub text: Option<String>,
 }
@@ -187,9 +197,31 @@ impl History {
         if *shape == before {
             return;
         }
+        let same_box = (shape.x, shape.y, shape.width, shape.extra_height)
+            == (before.x, before.y, before.width, before.extra_height);
         // A group's first `Set` for a shape restores it whole; later ones would add nothing.
         let first = (self.open.as_mut()).is_none_or(|g| g.set.insert(before.id.clone()));
         self.record(first.then_some(Op::Set(before)));
+        if same_box {
+            let edits = &mut self.text_edits;
+            if edits.to + 1 != self.revision {
+                *edits = TextEdits {
+                    from: self.revision - 1,
+                    ..TextEdits::default()
+                };
+            }
+            edits.to = self.revision;
+            if edits.shapes.last() != Some(&i) {
+                edits.shapes.push(i);
+            }
+        }
+    }
+
+    /// The shapes (by index) that may have changed since `revision`, when nothing but their
+    /// text did; `None` when anything else may have.
+    pub(crate) fn text_changed_since(&self, revision: u64) -> Option<&[usize]> {
+        let edits = &self.text_edits;
+        (edits.to == self.revision && edits.from <= revision).then_some(&edits.shapes[..])
     }
 
     /// Runs `f` as one step; inside an open group, its changes join the group.

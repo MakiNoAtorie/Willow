@@ -8,7 +8,7 @@ fn canonical_lines_are_what_the_line_check_says() {
     for seed in 0..20 {
         let doc = generate(200, seed);
         let heights = vec![60.0; doc.shapes.len()];
-        let text = save(&doc, &heights);
+        let text = save(&doc, &heights, &[]);
         assert_eq!(
             canonical_lines(&text, &doc),
             check(&text).lines,

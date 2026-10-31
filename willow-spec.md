@@ -404,6 +404,7 @@ Every shape keeps a gap from every other shape: the creation gap between two lin
 - The **spacing pass** works out every drawn position from the placed positions, sizes and links and the theme's gaps. It reads nothing else, so the same document in the same theme always gives the same picture, on reopening too.
 - It runs after every change: edits, undo and redo, text applied from the code panel, a load and a theme switch. Shapes added or grown in text push their neighbors clear like any other growth.
 - A push is never saved, never an undo step, and never marks the document unsaved. Undo reverts only what the writer changed, and pushed shapes settle back because the pass runs again.
+- An open IME composition counts as growth while it lasts: neighbors stay clear of it, and cancelling it lets them settle back. Its text and the positions it pushes reach no saved data; a recovery write waits until it ends.
 - Everything the writer sees or points at reads drawn positions: painting, connectors, hit-testing, the marquee, arrow-key navigation, midpoints, keeping a shape in view, drop targets, Copy, Paste, Duplicate and Create zone.
 - A file's direction words and story order read drawn positions too; only `@layout` reads placed ones. T2 linked below a very tall T stays `below T`, even when T's placed center has passed T2's. So the word order of saved text can vary by theme: a switch leaves the document saved, and the code panel and the next save pick up the new order. Load then save stays byte-identical within one theme.
 
@@ -435,7 +436,7 @@ Every shape keeps a gap from every other shape: the creation gap between two lin
 ### Themes and alignment
 
 - Add Desk and Poster and View > Theme, matching `design/visual-language.md` and their Phase 1 mockups. Both use Paper's gaps, so a switch reflows only through fonts.
-- Bundle Courier Prime and Space Grotesk (Medium and Bold). Space Grotesk has no italic and GPUI doesn't fake one, so slanted Regular and Bold faces are generated once from the font and bundled as TTFs.
+- Bundle Courier Prime and Space Grotesk (Medium and Bold). Space Grotesk has no italic and GPUI doesn't fake one, so slanted Medium and Bold faces are generated once from the font and bundled as TTFs.
 - Add View > Text Alignment (see Text alignment).
 
 ### Menus

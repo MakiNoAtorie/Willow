@@ -16,17 +16,16 @@ impl Session {
             self.stop_editing();
         }
         let doomed: HashSet<&ShapeId> = ids.iter().collect();
-        let heights = self.heights();
         let shapes = &self.doc.shapes;
-        let order: Vec<ShapeId> = (crate::format::story_order(&self.doc, &heights).into_iter())
+        let order: Vec<ShapeId> = (self.story_order().into_iter())
             .map(|i| shapes[i].id.clone())
             .filter(|id| doomed.contains(id))
             .collect();
         if order.is_empty() {
             return;
         }
-        let center: HashMap<ShapeId, Point> = (shapes.iter().zip(&heights))
-            .map(|(s, &h)| (s.id.clone(), s.center(h)))
+        let center: HashMap<ShapeId, Point> = (shapes.iter().enumerate())
+            .map(|(i, s)| (s.id.clone(), self.drawn_index(i).center()))
             .collect();
         self.history.step(&mut self.doc, |h, doc| {
             for id in &order {

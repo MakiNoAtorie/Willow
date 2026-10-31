@@ -243,6 +243,15 @@ impl Session {
         since >= c.idle || (since.as_millis() / c.blink.as_millis()) % 2 == 0
     }
 
+    /// Where `shape`'s text starts as drawn, in canvas units.
+    fn text_origin(&self, shape: &Shape) -> Point {
+        let (x, y) = self.drawn_at(shape);
+        Point {
+            x: x as f32 + self.theme.shape.pad_x,
+            y: y as f32 + self.theme.shape.pad_top,
+        }
+    }
+
     /// The caret to draw at `now`, while editing.
     pub fn caret(&self, now: Duration) -> Option<CaretView> {
         let (e, t) = (self.editing.as_ref()?, self.theme);
@@ -250,10 +259,13 @@ impl Session {
             (self.title_point(e.caret.offset)?, self.title_line())
         } else {
             let shape = self.doc.shapes.iter().find(|s| s.id == e.id)?;
-            let p = self.layout(shape).caret_point(e.caret);
+            let (p, o) = (
+                self.layout(shape).caret_point(e.caret),
+                self.text_origin(shape),
+            );
             let pos = Point {
-                x: shape.x as f32 + t.shape.pad_x + p.x,
-                y: shape.y as f32 + t.shape.pad_y + p.y,
+                x: o.x + p.x,
+                y: o.y + p.y,
             };
             (pos, t.line_height())
         };
@@ -276,11 +288,10 @@ impl Session {
             offset,
             upstream: false,
         };
-        let p = self.layout(shape).caret_point(c);
-        let pad = &self.theme.shape;
+        let (p, o) = (self.layout(shape).caret_point(c), self.text_origin(shape));
         Some(Point {
-            x: shape.x as f32 + pad.pad_x + p.x,
-            y: shape.y as f32 + pad.pad_y + p.y,
+            x: o.x + p.x,
+            y: o.y + p.y,
         })
     }
 
@@ -305,16 +316,16 @@ impl Session {
     /// The shape whose center is nearest the view center; ties go in generation order.
     fn nearest_view_center(&self) -> Option<ShapeId> {
         let c = self.viewport.center();
-        let dist = |s: &Shape| {
-            let p = s.center(self.shape_height(s));
+        let dist = |i: usize| {
+            let p = self.drawn_index(i).center();
             (p.x - c.x).hypot(p.y - c.y)
         };
-        (self.doc.shapes.iter())
-            .min_by(|a, b| {
-                (dist(a).total_cmp(&dist(b)))
+        (self.doc.shapes.iter().enumerate())
+            .min_by(|&(i, a), &(j, b)| {
+                (dist(i).total_cmp(&dist(j)))
                     .then_with(|| a.id.generation_order().cmp(&b.id.generation_order()))
             })
-            .map(|s| s.id.clone())
+            .map(|(_, s)| s.id.clone())
     }
 
     /// Opens an editing session on shape `id`, or zone `id`'s title, caret at the end.
@@ -358,6 +369,11 @@ impl Session {
         Some((shape, shape.text.plain()))
     }
 
+    /// Whether marked text sits in the document: saved data waits until it doesn't.
+    pub(super) fn composing(&self) -> bool {
+        self.editing.as_ref().is_some_and(|e| e.marked.is_some())
+    }
+
     /// The edited text: the edited shape's plain text or zone's title. What offsets index.
     pub fn edited_text(&self) -> Option<String> {
         let e = self.editing.as_ref()?;
@@ -399,11 +415,8 @@ impl Session {
         let Some((shape, _)) = self.edited() else {
             return Caret::default();
         };
-        let (c, pad) = (self.viewport.to_canvas(p), &self.theme.shape);
-        self.layout(shape).caret_at(Point {
-            x: c.x - shape.x as f32 - pad.pad_x,
-            y: c.y - shape.y as f32 - pad.pad_y,
-        })
+        self.layout(shape)
+            .caret_at(self.viewport.to_canvas(p) - self.text_origin(shape))
     }
 
     /// Puts the caret at `c` with nothing selected, and restarts the blink.
@@ -439,10 +452,10 @@ impl Session {
         let Some((shape, _)) = self.edited() else {
             return Vec::new();
         };
-        let (pad, lh) = (&self.theme.shape, self.theme.line_height());
+        let (origin, lh) = (self.text_origin(shape), self.theme.line_height());
         let o = |p: Point| Point {
-            x: shape.x as f32 + pad.pad_x + p.x,
-            y: shape.y as f32 + pad.pad_y + p.y,
+            x: origin.x + p.x,
+            y: origin.y + p.y,
         };
         let rects = self.layout(shape).selection_rects(sel, lh);
         rects.into_iter().map(|(a, b)| (o(a), o(b))).collect()
@@ -508,7 +521,6 @@ impl Session {
                 upstream: false,
             });
         }
-        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = pending {
@@ -516,9 +528,6 @@ impl Session {
                 s.text.set_style(range.start..end, Style::Italic, italic);
             }
         });
-        if let Some(old) = old {
-            self.make_room(&id, old);
-        }
         self.set_caret(Caret {
             offset: end,
             upstream: false,
@@ -533,12 +542,14 @@ impl Session {
             if let Some(z) = self.doc.zones.iter_mut().find(|z| z.id == e.id) {
                 z.title.replace_range(range, text);
             }
-        } else if let Some(s) = self.doc.shapes.iter_mut().find(|s| s.id == e.id) {
+        } else if let Some(i) = self.doc.shapes.iter().position(|s| s.id == e.id) {
+            let s = &mut self.doc.shapes[i];
             let end = s.text.replace(range.clone(), text);
             if let Some((bold, italic)) = e.pending {
                 s.text.set_style(range.start..end, Style::Bold, bold);
                 s.text.set_style(range.start..end, Style::Italic, italic);
             }
+            self.spaced.get_mut().composed.push(i);
         }
     }
 
@@ -583,15 +594,10 @@ impl Session {
             }
             return;
         }
-        let old = self.rect_of(&id);
         (self.history).change(&mut self.doc, &id, |s| {
             let on = !s.text.all_styled(sel.clone(), style);
             s.text.set_style(sel, style, on);
         });
-        // Bold is wider: the text may rewrap taller.
-        if let Some(old) = old {
-            self.make_room(&id, old);
-        }
     }
 
     /// Selects `range` of the edited text, caret at its end; ends past the text or inside a

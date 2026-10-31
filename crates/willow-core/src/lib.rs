@@ -21,17 +21,18 @@ pub use draw::{Appear, Connector, Frame, LinkDrag, Visible, VisibleZone};
 pub use format::{LoadError, Loaded, Unplaced, load, save};
 pub use generate::generate;
 pub use input::{Button, Cursor, Input, Key, Modifiers, Motion, Point, Response};
-pub use layout::{Caret, Cluster, Layout, Line, Measure, layout};
+pub use layout::{Align, Caret, Cluster, Layout, Line, Measure, layout};
 pub use recovery::{LaunchPlan, Recovery, RecoveryFile, Reopen, launch_plan};
 pub use session::{
-    CaretView, DragPreview, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Panel,
-    PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck, TextChecked,
-    Viewport,
+    CaretView, DragPreview, DrawnRect, Editing, Menu, MenuAction, MenuEntry, MenuItem, MenuKind,
+    Panel, PanelRow, Regenerated, Regeneration, ResizeTo, Session, Shortcut, Span, TextCheck,
+    TextChecked, Viewport,
 };
 pub use theme::{
-    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, KeyPanStyle,
-    MenuStyle, MidpointStyle, PAPER, Rgba, RippleStyle, SelectionStyle, Shadow, ShapeStyle,
-    TabPickerStyle, Theme, ToggleStyle, Transition, ZoneStyle, ZoomPillStyle, ZoomStyle,
+    CaretStyle, ChromeStyle, CodeStyle, ConnectorStyle, CreateStyle, CubicBezier, DESK,
+    KeyPanStyle, MenuStyle, MidpointStyle, PAPER, POSTER, Rgba, RippleStyle, SelectionStyle,
+    Shadow, ShapeStyle, THEMES, TabPickerStyle, Theme, TitlePill, ToggleStyle, Transition, Weave,
+    WeaveLines, ZoneStyle, ZoomPillStyle, ZoomStyle,
 };
 pub use zoom::ZoomPill;
 
@@ -127,6 +128,11 @@ pub struct Shape {
 }
 
 impl Shape {
+    /// Its top-left moved by (dx, dy): how a drawn position is made from a placed one.
+    pub(crate) fn moved_by(&self, (dx, dy): (i32, i32)) -> (i32, i32) {
+        (self.x.saturating_add(dx), self.y.saturating_add(dy))
+    }
+
     /// An empty neutral shape of the default width with its top-left at (x, y).
     pub fn new(id: ShapeId, x: i32, y: i32) -> Self {
         Shape {
@@ -137,14 +143,6 @@ impl Shape {
             width: DEFAULT_WIDTH,
             extra_height: 0,
             color: Color::Neutral,
-        }
-    }
-
-    /// The center of the shape drawn `height` tall, in canvas units.
-    pub fn center(&self, height: f32) -> Point {
-        Point {
-            x: self.x as f32 + self.width as f32 / 2.0,
-            y: self.y as f32 + height / 2.0,
         }
     }
 }

@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::drawn::land;
 use super::{Gesture, Session};
 use crate::{Point, Shape, ShapeId};
 
@@ -10,7 +11,7 @@ type Change = (Option<ShapeId>, Option<ShapeId>);
 
 impl Session {
     /// Moves shapes `ids` by (dx, dy), each joining the zone under its new center (or none),
-    /// as one undo step. Pushes nothing.
+    /// as one undo step.
     pub(super) fn drop_shapes(&mut self, ids: &[ShapeId], dx: i32, dy: i32) {
         let changes: Vec<Option<Change>> = (ids.iter())
             .map(|id| {
@@ -18,9 +19,10 @@ impl Session {
                 self.drop_change(s, dx, dy)
             })
             .collect();
+        let landing = self.landing(ids, dx, dy);
         self.history.step(&mut self.doc, |h, doc| {
+            land(h, doc, landing);
             for (id, change) in ids.iter().zip(changes) {
-                h.change(doc, id, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
                 let Some((_, to)) = change else { continue };
                 h.leave_zone(doc, id);
                 if let Some(z) = to {
@@ -39,7 +41,7 @@ impl Session {
 
     /// The innermost zone under shape `s`'s center moved by (dx, dy).
     fn zone_under_moved(&self, s: &Shape, dx: i32, dy: i32) -> Option<ShapeId> {
-        let c = s.center(self.shape_height(s));
+        let c = self.drawn(s).center();
         self.innermost_zone(Point {
             x: c.x + dx as f32,
             y: c.y + dy as f32,
@@ -58,8 +60,7 @@ impl Session {
         else {
             return None;
         };
-        let s = &self.doc.shapes[index];
-        let (dx, dy) = (x - s.x, y - s.y);
+        let (s, (dx, dy)) = (&self.doc.shapes[index], self.dragged(index, (x, y)));
         let to = match self.drop_change(s, dx, dy) {
             Some((_, Some(to))) => to,
             _ => self.group_drag().and(self.first_drop_target(dx, dy))?,
@@ -77,7 +78,7 @@ impl Session {
         let selected: HashSet<&ShapeId> = self.selected.iter().collect();
         // ponytail: story order every frame while no pressed-shape target; cache it per
         // gesture if dragging thousands of shapes misses the frame target.
-        (crate::format::story_order(&self.doc, &self.heights()).into_iter())
+        (self.story_order().into_iter())
             .map(|i| &self.doc.shapes[i])
             .filter(|s| selected.contains(&s.id))
             .find_map(|s| {

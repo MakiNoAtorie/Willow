@@ -72,9 +72,9 @@ impl Session {
         else {
             return Vec::new();
         };
-        let h = self.shape_height(s);
+        let r = self.drawn(s);
         [Side::Top, Side::Right, Side::Bottom, Side::Left]
-            .map(|side| (side, edge_midpoint(s, h, side)))
+            .map(|side| (side, edge_midpoint(r, side)))
             .to_vec()
     }
 }

@@ -69,7 +69,7 @@ fn a_multi_selection_places_from_its_first_shape_in_story_order() {
 }
 
 #[test]
-fn it_joins_the_innermost_zone_and_pushes_a_chain_it_lands_on() {
+fn it_joins_the_innermost_zone_and_is_cleared_of_a_chain_it_lands_on() {
     let mut doc = Document {
         shapes: vec![Shape::new(id("a"), 0, 0), Shape::new(id("p"), 300, 0)],
         ..Document::default()
@@ -90,8 +90,11 @@ fn it_joins_the_innermost_zone_and_pushes_a_chain_it_lands_on() {
     s.handle(Input::NewBeside, T);
     let n = created(&s, 2);
     assert_eq!(s.document().zones[0].members.last(), Some(&n.id));
-    let p = &s.document().shapes[1];
-    assert!(p.x >= n.x + n.width as i32, "p {} cleared new {}", p.x, n.x);
+    let p = s.drawn_rect(&s.document().shapes[1].id).expect("p");
+    let n = s.drawn_rect(&n.id).expect("the new shape");
+    // Level with p and further left, the new shape holds.
+    assert_eq!((n.x, n.y), (258.0, 0.0));
+    assert_eq!((p.x, p.y), (300.0, 73.0));
 }
 
 #[test]

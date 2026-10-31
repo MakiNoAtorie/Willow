@@ -1,6 +1,7 @@
 //! Multi-selection: the Shift+drag marquee, Shift+click toggling and moving the whole
 //! selection as one undo step, and selecting whole chains.
 
+use super::drawn::land;
 use super::{Gesture, Session};
 use crate::{Point, ShapeId};
 
@@ -34,17 +35,20 @@ impl Session {
             return None;
         };
         let s = &self.doc.shapes[index];
-        (self.selected.len() > 1 && self.selected.contains(&s.id)).then(|| (x - s.x, y - s.y))
+        (self.selected.len() > 1 && self.selected.contains(&s.id))
+            .then(|| self.dragged(index, (x, y)))
     }
 
-    /// Moves every selected shape by (dx, dy) as one undo step. Pushes nothing.
+    /// How far a drag previewing the shape at `index` at top-left `to` has taken it.
+    pub(super) fn dragged(&self, index: usize, to: (i32, i32)) -> (i32, i32) {
+        let (x, y) = self.drawn_at(&self.doc.shapes[index]);
+        (to.0 - x, to.1 - y)
+    }
+
+    /// Moves every selected shape by (dx, dy) as one undo step.
     pub fn move_selection(&mut self, dx: i32, dy: i32) {
-        let ids = self.selected.clone();
-        self.history.step(&mut self.doc, |h, doc| {
-            for id in &ids {
-                h.change(doc, id, |s| (s.x, s.y) = (s.x + dx, s.y + dy));
-            }
-        });
+        let landing = self.landing(&self.selected, dx, dy);
+        (self.history).step(&mut self.doc, |h, doc| land(h, doc, landing));
     }
 
     /// Shift+click: adds `id` to the selection, or takes it out.
@@ -73,12 +77,13 @@ impl Session {
         *to = self.viewport.to_canvas(pos);
         let (a, b) = self.marquee().expect("marquee");
         // ponytail: scans every shape per move; a spatial index if 10k-shape marquees lag.
-        let touched: Vec<ShapeId> = (self.doc.shapes.iter())
-            .filter(|s| {
-                let (x, y) = (s.x as f32, s.y as f32);
+        let touched: Vec<ShapeId> = (self.doc.shapes.iter().enumerate())
+            .filter(|&(i, s)| {
+                let (x, y) = self.drawn_top_left(i);
+                let (x, y) = (x as f32, y as f32);
                 x <= b.x && x + s.width as f32 >= a.x && y <= b.y && y + self.shape_height(s) >= a.y
             })
-            .map(|s| s.id.clone())
+            .map(|(_, s)| s.id.clone())
             .collect();
         let ids: Vec<ShapeId> = self.marquee_base.iter().cloned().chain(touched).collect();
         self.select(ids);

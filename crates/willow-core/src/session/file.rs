@@ -43,12 +43,14 @@ impl Session {
         let saved = (!loaded.repaired || invalid).then(|| loaded.document.clone());
         let words = words(&loaded);
         put(self, loaded.document);
-        self.saved = saved;
+        self.set_saved(saved);
         if invalid {
             self.hold_text(String::from_utf8_lossy(bytes).into(), loaded.lines, words);
         } else {
             self.release_text();
         }
+        // Every shape measured and spaced before the first paint.
+        self.spaced();
     }
 
     /// A session over a recovery file's document, read from `bytes`, as `open` makes it but
@@ -60,7 +62,7 @@ impl Session {
         measure: Box<dyn Measure>,
     ) -> Self {
         let mut s = Session::open(loaded, bytes.to_vec(), theme, measure);
-        s.saved = None;
+        s.set_saved(None);
         s.bytes.clear();
         s
     }
@@ -74,8 +76,30 @@ impl Session {
     /// The document matches what was last read or written (undoing back to it counts), and
     /// no panel text was typed since that isn't regenerated yet.
     pub fn is_saved(&self) -> bool {
-        // ponytail: compares the whole document per call; a change counter if it shows up in profiles.
-        self.saved.as_ref() == Some(&self.doc) && !self.text_unsaved()
+        self.same_as_saved() && !self.text_unsaved()
+    }
+
+    /// Compares the whole document, a fifth of a frame's draw on 10,000 shapes, so the title
+    /// bar's read every frame keeps the answer per revision. Marked text changes the document
+    /// outside the history, so composing always compares.
+    fn same_as_saved(&self) -> bool {
+        let (revision, composing) = (self.history.revision(), self.composing());
+        match self.same_as_saved.get() {
+            Some((r, same)) if r == revision && !composing => same,
+            _ => {
+                let same = self.saved.as_ref() == Some(&self.doc);
+                if !composing {
+                    self.same_as_saved.set(Some((revision, same)));
+                }
+                same
+            }
+        }
+    }
+
+    /// Replaces what the document is compared with.
+    fn set_saved(&mut self, saved: Option<Document>) {
+        self.saved = saved;
+        self.same_as_saved.set(None);
     }
 
     /// The bytes last read or written; empty for a document never read or saved.
@@ -95,11 +119,11 @@ impl Session {
         }
         let bytes = match self.held_text() {
             Some(text) => text.as_bytes().to_vec(),
-            None => format::save(&self.doc, &self.heights()).into_bytes(),
+            None => format::save(&self.doc, &self.heights(), &self.drawn_positions()).into_bytes(),
         };
         write(&bytes)?;
         (self.unrecovered, self.recovery_written) = (None, false);
-        self.saved = Some(self.doc.clone());
+        self.set_saved(Some(self.doc.clone()));
         self.text_saved();
         self.bytes = bytes;
         Ok(())
@@ -112,7 +136,7 @@ impl Session {
     /// with a recovery due.
     pub fn disk_changed(&mut self, bytes: Option<&[u8]>) {
         let Some(bytes) = bytes else {
-            self.saved = None;
+            self.set_saved(None);
             // A file that comes back is compared afresh.
             self.bytes.clear();
             self.changed(self.now);
@@ -131,9 +155,10 @@ impl Session {
                     s.keep_typing();
                     s.history.replace(&mut s.doc, doc);
                     s.drop_missing_selection();
+                    s.respace();
                 }
             }),
-            _ => self.saved = None,
+            _ => self.set_saved(None),
         }
         self.changed(self.now);
     }
@@ -149,10 +174,11 @@ impl Session {
         self.unrecovered = Some((first, now));
     }
 
-    /// How long after `now` a recovery write is due; `None` while there is nothing to recover.
-    /// The app wakes then and calls `take_recovery`.
+    /// How long after `now` a recovery write is due; `None` while there is nothing to recover
+    /// or a composition is open, which comes due when it ends: marked text and what it pushed
+    /// are never written. The app wakes then and calls `take_recovery`.
     pub fn recovery_wake(&self, now: Duration) -> Option<Duration> {
-        let (first, last) = self.unrecovered?;
+        let (first, last) = self.unrecovered.filter(|_| !self.composing())?;
         let due = (last + RECOVERY_QUIET).min(first + RECOVERY_MAX);
         Some(due.saturating_sub(now))
     }
@@ -172,24 +198,10 @@ impl Session {
         if let Some(text) = self.held_text() {
             return Some(Recovery::Text(text.into()));
         }
-        // The IME may still be composing: leave its marked text out rather than commit it.
-        let mut document = self.doc.clone();
-        if let Some(e) = &self.editing
-            && let Some(m) = e.marked.clone()
-        {
-            if e.zone {
-                if let Some(z) = document.zones.iter_mut().find(|z| z.id == e.id) {
-                    z.title.replace_range(m, "");
-                }
-            } else if let Some(s) = document.shapes.iter_mut().find(|s| s.id == e.id) {
-                s.text.replace(m, "");
-            }
-        }
-        let heights = document
-            .shapes
-            .iter()
-            .map(|s| self.shape_height(s))
-            .collect();
-        Some(Recovery::Write { document, heights })
+        Some(Recovery::Write {
+            document: self.doc.clone(),
+            heights: self.heights(),
+            drawn: self.drawn_positions(),
+        })
     }
 }

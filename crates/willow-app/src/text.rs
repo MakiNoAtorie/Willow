@@ -177,8 +177,8 @@ pub(crate) fn paint_text(
 }
 
 /// Paints one line of plain `text` in the theme font, `bold` or regular, at `size` (screen px),
-/// in ink: its glyphs centered in a `Theme.line_height` times `size` line box whose top-left is
-/// `origin`, as shape text's are.
+/// in the title ink: its glyphs centered in a `Theme.line_height` times `size` line box whose top-left is
+/// `origin`, as shape text's are, with `spacing` screen px after each glyph.
 pub(crate) fn paint_line(
     window: &mut Window,
     origin: gpui::Point<Pixels>,
@@ -186,6 +186,7 @@ pub(crate) fn paint_line(
     t: &Theme,
     bold: bool,
     size: f32,
+    spacing: f32,
 ) {
     if text.is_empty() {
         return;
@@ -200,7 +201,7 @@ pub(crate) fn paint_line(
     let run = TextRun {
         len: text.len(),
         font,
-        color: color(t.ink),
+        color: color(t.title_ink()),
         background_color: None,
         underline: None,
         strikethrough: None,
@@ -208,12 +209,16 @@ pub(crate) fn paint_line(
     // Quantised to half pixels, as shape text is.
     let size = px((size * 2.0).round() / 2.0);
     let l = window.text_system().layout_line(text, size, &[run], None);
-    let ink = color(t.ink);
+    let ink = color(t.title_ink());
     let (a, d): (f32, f32) = (l.ascent.into(), l.descent.into());
     let baseline = px((f32::from(size) * t.line_height - (a + d)) / 2.0 + a);
+    // ponytail: spacing counts glyphs, the core's measure counts graphemes; they differ only
+    // for combining marks, off by one letter-space there.
+    let mut n = 0.0;
     for run in &l.runs {
         for g in &run.glyphs {
-            let o = origin + point(g.position.x, baseline);
+            let o = origin + point(g.position.x + px(n * spacing), baseline);
+            n += 1.0;
             // A missing glyph only loses that glyph; nothing to recover.
             let _ = if g.is_emoji {
                 window.paint_emoji(o, run.font_id, g.id, size)
@@ -410,5 +415,40 @@ impl EntityInputHandler for Willow {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         None
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use gpui::PlatformTextSystem;
+    use gpui_apple::AppleTextSystem;
+    use willow_core::{POSTER, THEMES};
+
+    use super::*;
+
+    #[test]
+    fn every_theme_font_has_its_own_face_for_each_style() {
+        let ts = AppleTextSystem::new();
+        ts.add_fonts(crate::bundled_fonts()).unwrap();
+        for t in THEMES {
+            let styles = [(false, false), (true, false), (false, true), (true, true)];
+            let mut ids = styles.map(|(b, i)| ts.font_id(&font(t, b, i)).unwrap());
+            ids.sort_by_key(|id| id.0);
+            assert!(ids.windows(2).all(|w| w[0] != w[1]), "{}: {ids:?}", t.name);
+        }
+    }
+
+    #[test]
+    fn poster_italics_are_the_body_face_slanted() {
+        let ts = AppleTextSystem::new();
+        ts.add_fonts(crate::bundled_fonts()).unwrap();
+        let advance = |bold, italic| {
+            let id = ts.font_id(&font(&POSTER, bold, italic)).unwrap();
+            let glyph = ts.glyph_for_char(id, 'n').unwrap();
+            ts.advance(id, glyph).unwrap().width
+        };
+        // A slant keeps advances, and each weight has its own.
+        assert_eq!(advance(false, true), advance(false, false));
+        assert_eq!(advance(true, true), advance(true, false));
     }
 }

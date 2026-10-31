@@ -163,6 +163,39 @@ fn reset_eases_back_to_100_percent_around_the_window_center() {
 }
 
 #[test]
+fn zoom_in_and_out_are_one_eased_wheel_notch_around_the_view_center() {
+    let mut s = session();
+    let center = pt(500.0, 400.0);
+    let under = s.viewport().to_canvas(center);
+
+    s.handle(Input::ZoomIn, ms(0));
+    s.tick(ms(60));
+    let mid = s.viewport().zoom;
+    assert!(mid > 1.0 && mid < 1.19, "eases: {mid}");
+    s.tick(ms(120));
+    let notch = s.viewport().zoom;
+    assert!(
+        close(notch, (60.0f32 * 0.003).exp()),
+        "one 60 px notch: {notch}"
+    );
+    assert!(close_pt(s.viewport().to_canvas(center), under));
+
+    s.handle(Input::ZoomOut, ms(1000));
+    s.tick(ms(1120));
+    assert!(close(s.viewport().zoom, 1.0));
+    assert!(close_pt(s.viewport().to_canvas(center), under));
+}
+
+#[test]
+fn a_zoom_step_mid_animation_retargets_from_the_running_target() {
+    let mut s = session();
+    s.handle(Input::ZoomIn, ms(0));
+    s.handle(Input::ZoomIn, ms(30));
+    s.tick(ms(500));
+    assert!(close(s.viewport().zoom, (120.0f32 * 0.003).exp()));
+}
+
+#[test]
 fn the_pill_shows_the_target_level_holds_700_ms_then_fades_over_400_ms() {
     let mut s = session();
     assert_eq!(s.zoom_pill(ms(0)), None);

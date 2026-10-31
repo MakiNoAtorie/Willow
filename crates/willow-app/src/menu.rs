@@ -30,6 +30,7 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
         .text_size(px(m.font_size))
         .line_height(relative(m.line_height))
         .font_weight(gpui::FontWeight(m.font_weight))
+        .when_some(m.font, |d, f| d.font_family(f))
         // Keep presses off the backdrop beneath.
         .occlude()
         .children(menu.entries.iter().enumerate().map(|(i, e)| {
@@ -103,7 +104,7 @@ fn row(
         )
 }
 
-/// The color row: a circle per picker color, the current one ringed.
+/// The color row: a swatch per picker color, the current one ringed.
 fn colors(
     session: &Session,
     m: &willow_core::MenuStyle,
@@ -111,38 +112,39 @@ fn colors(
     current: Option<Color>,
     cx: &mut Context<Willow>,
 ) -> AnyElement {
-    let ring = color(m.ink);
+    let picker = session.theme().picker;
     div()
         .flex()
         .gap(px(m.swatch_gap))
         .px(px(m.item_pad_x))
         .py(px(m.item_pad_y))
         .children(Color::ALL.into_iter().map(|c| {
-            // The ring is a shadow outside the circle, so every circle takes the same room.
+            let swatch = color(picker[c as usize]);
+            // Around the swatch, not a shadow on it: a shadow's spread keeps the swatch's corner
+            // radius, so a circle's ring would come out a rounded square.
+            let out = m.swatch_ring_gap + m.swatch_ring;
+            let ring = div()
+                .absolute()
+                .top(px(-out))
+                .left(px(-out))
+                .size(px(m.swatch + 2.0 * out))
+                .rounded(px(m.swatch_radius + out))
+                .border(px(m.swatch_ring))
+                .border_color(m.swatch_ring_color.map_or(swatch, color));
             div()
                 .id(("menu-color", row * Color::ALL.len() + c as usize))
+                .relative()
                 .size(px(m.swatch))
                 .flex_none()
-                .rounded_full()
-                .bg(color(session.theme().picker[c as usize]))
-                .when(current == Some(c), |d| {
-                    d.shadow(vec![
-                        gpui::BoxShadow {
-                            color: ring,
-                            offset: gpui::point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            inset: false,
-                            spread_radius: px(m.swatch_ring_gap + m.swatch_ring),
-                        },
-                        gpui::BoxShadow {
-                            color: color(m.bg),
-                            offset: gpui::point(px(0.0), px(0.0)),
-                            blur_radius: px(0.0),
-                            inset: false,
-                            spread_radius: px(m.swatch_ring_gap),
-                        },
-                    ])
-                })
+                .when(current == Some(c), |d| d.child(ring))
+                .child(
+                    div()
+                        .size_full()
+                        .rounded(px(m.swatch_radius))
+                        .bg(swatch)
+                        .border(px(m.swatch_edge))
+                        .border_color(color(m.ink)),
+                )
                 .cursor_pointer()
                 .on_click(cx.listener(move |w, _, _, cx| {
                     w.input(Input::MenuChoose(MenuAction::Recolor(c)), cx)
@@ -168,6 +170,19 @@ fn shortcut(s: Shortcut) -> String {
     }
 }
 
+/// The panel's width.
+fn width(m: &willow_core::MenuStyle, entries: &[MenuEntry]) -> f32 {
+    let n = Color::ALL.len() as f32;
+    let row = n * m.swatch + (n - 1.0) * m.swatch_gap + 2.0 * (m.item_pad_x + m.padding);
+    match entries
+        .iter()
+        .any(|e| matches!(e, MenuEntry::Colors { .. }))
+    {
+        true => row.max(m.min_width),
+        false => m.min_width,
+    }
+}
+
 /// Width and height the panel will take, for keeping it inside the canvas.
 fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
     let row = m.font_size * m.line_height + 2.0 * m.item_pad_y;
@@ -181,5 +196,21 @@ fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
             MenuEntry::Colors { .. } => m.swatch + 2.0 * m.item_pad_y,
         })
         .sum::<f32>();
-    (m.min_width, h + 2.0 * m.padding)
+    (width(m, &menu.entries), h + 2.0 * m.padding)
+}
+
+#[cfg(test)]
+mod tests {
+    use willow_core::{PAPER, POSTER};
+
+    use super::*;
+
+    #[test]
+    fn a_color_row_wider_than_the_minimum_widens_the_menu() {
+        let colors = [MenuEntry::Colors { current: None }];
+        // Seven 22 swatches, six 7 gaps, 10 and 6 padding either side.
+        assert_eq!(width(&POSTER.menu, &colors), 228.0);
+        assert_eq!(width(&POSTER.menu, &[MenuEntry::Separator]), 200.0);
+        assert_eq!(width(&PAPER.menu, &colors), 200.0);
+    }
 }
