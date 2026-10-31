@@ -209,7 +209,7 @@ fn undo_redo_and_delete_rerun_the_pass_and_placed_positions_stay() {
 
 #[test]
 fn text_growing_and_shrinking_redoes_the_pass_keystroke_by_keystroke() {
-    // n is on a, so no saved push moves it: only the pass does.
+    // n sits on a: the pass moves it, and nothing is saved.
     let mut s = session(&[("a", 0, 0), ("n", 0, 30)], &[]);
     let key = |s: &mut Session, text: &str| {
         let (text, replace) = (text.to_string(), None);
@@ -259,6 +259,59 @@ fn text_applied_from_the_code_panel_runs_the_pass_and_the_text_keeps_placed_posi
     assert!(s.panel().text().contains("b 0,30 w210"));
 }
 
+#[test]
+fn linked_shapes_closer_than_the_creation_gap_are_drawn_at_it_along_their_link() {
+    // 48.5 tall + 48 gap is 96.5: the next whole unit is 97.
+    let s = session(&[("a", 0, 0), ("b", 0, 60)], &[("a", "b")]);
+    assert_eq!(drawn(&s, "b"), (0.0, 97.0));
+    // Sideways, the far shape goes along the link too; 210 wide + 48 gap is 258.
+    let s = session(&[("a", 0, 0), ("b", 230, 10)], &[("a", "b")]);
+    assert_eq!(drawn(&s, "b"), (258.0, 10.0));
+    // Exactly the gap is not crowding.
+    let s = session(&[("a", 0, 0), ("b", 0, 97)], &[("a", "b")]);
+    assert_eq!(drawn(&s, "b"), (0.0, 97.0));
+}
+
+/// `s`'s shape `name` made `extra` units taller.
+fn taller(d: &mut Document, name: &str, extra: u32) {
+    let sh = d.shapes.iter_mut().find(|s| s.id.0 == name);
+    sh.expect(name).extra_height = extra;
+}
+
+#[test]
+fn of_two_crowding_shapes_in_a_chain_the_later_in_the_walk_moves_with_its_subtree() {
+    // a's links: b below, walked first; x on the right, then y below x. x reaches down beside
+    // b, 12 away where b is wide: the trunk stays, and x goes right, the shortest way out.
+    let mut d = doc(
+        &[("a", 0, 0), ("b", 0, 97), ("x", 258, 30), ("y", 258, 500)],
+        &[("a", "b"), ("a", "x"), ("x", "y")],
+    );
+    taller(&mut d, "x", 200);
+    d.shapes[1].width = 246;
+    let s = common::session_of(d);
+    assert_eq!(drawn(&s, "a"), (0.0, 0.0));
+    assert_eq!(drawn(&s, "b"), (0.0, 97.0));
+    assert_eq!(drawn(&s, "x"), (270.0, 30.0));
+    assert_eq!(drawn(&s, "y"), (270.0, 500.0));
+    assert_eq!(placed(&s, "x"), (258, 30));
+}
+
+#[test]
+fn the_shortest_way_out_inside_a_chain_keeps_the_creation_gap_to_the_linked_shape() {
+    // a's links: x below, walked first; b on the right, then c below b. c lands on x, which
+    // is wide. Up 53 clears x but goes inside the creation gap to b, so down 93 wins.
+    let mut d = doc(
+        &[("a", 0, 0), ("x", 0, 250), ("b", 258, 0), ("c", 258, 230)],
+        &[("a", "x"), ("a", "b"), ("b", "c")],
+    );
+    taller(&mut d, "b", 100);
+    d.shapes[1].width = 600;
+    let s = common::session_of(d);
+    assert_eq!(drawn(&s, "x"), (0.0, 250.0));
+    assert_eq!(drawn(&s, "b"), (258.0, 0.0));
+    assert_eq!(drawn(&s, "c"), (258.0, 323.0));
+}
+
 /// What the app does after every input: runs a due regeneration and hands the text back.
 fn settle(s: &mut Session) {
     if let Some(job) = s.take_regeneration() {
@@ -292,6 +345,18 @@ fn a_crowded_file_opens_saved_drawn_clear_and_saves_the_same_bytes() {
     .unwrap();
     let mut s = open(&bytes);
     assert_eq!(drawn(&s, "b"), (0.0, 73.0));
+    assert!(s.is_saved());
+    assert_eq!(s.recovery_wake(T), None);
+    assert_eq!(saved_bytes(&mut s), bytes);
+}
+
+#[test]
+fn a_file_with_linked_shapes_closer_than_the_gap_opens_saved_with_them_drawn_at_it() {
+    let bytes =
+        b"willow 1\n\na: \"\"\nb: \"\" below a\n\n@layout a 0,0 w210\n@layout b 0,60 w210\n";
+    let mut s = open(bytes);
+    assert_eq!(drawn(&s, "b"), (0.0, 97.0));
+    assert_eq!(placed(&s, "b"), (0, 60));
     assert!(s.is_saved());
     assert_eq!(s.recovery_wake(T), None);
     assert_eq!(saved_bytes(&mut s), bytes);
@@ -351,24 +416,32 @@ fn picture(s: &Session) -> HashMap<String, (f32, f32, f32, f32)> {
 
 const NOBODY: Vec<(String, String)> = Vec::new();
 
-/// The pairs of shapes in different chains closer than the minimum gap.
+/// The pairs of shapes closer than their gap: the creation gap if linked, else the minimum.
 fn crowding(s: &Session) -> Vec<(String, String)> {
     let d = s.document();
-    let mut chain: HashMap<&ShapeId, usize> = HashMap::new();
-    for (i, sh) in d.shapes.iter().enumerate() {
-        if !chain.contains_key(&sh.id) {
-            chain.extend(d.chain(&sh.id).into_iter().map(|id| (id, i)));
-        }
-    }
+    let t = s.theme();
+    let linked = |a: &ShapeId, b: &ShapeId| {
+        (d.links.iter()).any(|Link(p, q)| (p == a && q == b) || (p == b && q == a))
+    };
+    let rects: Vec<_> = (d.shapes.iter())
+        .map(|a| (a, s.drawn_rect(&a.id).expect("a shape")))
+        .collect();
+    let mut sorted = rects.clone();
+    sorted.sort_by(|(_, p), (_, q)| p.x.total_cmp(&q.x));
     // Rectangles come back as floats: a hair under the gap is rounding.
-    let gap = s.theme().min_gap - 0.01;
+    let wide = t.creation_gap.max(t.min_gap);
     let mut pairs = Vec::new();
-    for (i, a) in d.shapes.iter().enumerate() {
-        let p = s.drawn_rect(&a.id).expect("a shape");
-        for b in &d.shapes[i + 1..] {
-            let q = s.drawn_rect(&b.id).expect("a shape");
-            if chain[&a.id] != chain[&b.id]
-                && p.x - gap < q.right()
+    for (i, (a, p)) in sorted.iter().enumerate() {
+        for (b, q) in &sorted[i + 1..] {
+            if q.x >= p.right() + wide {
+                break;
+            }
+            let gap = if linked(&a.id, &b.id) {
+                t.creation_gap
+            } else {
+                t.min_gap
+            } - 0.01;
+            if p.x - gap < q.right()
                 && q.x < p.right() + gap
                 && p.y - gap < q.bottom()
                 && q.y < p.bottom() + gap
@@ -402,6 +475,32 @@ fn generated_documents_end_uncrowded_with_placed_positions_kept() {
             (r.x, r.y) != (sh.x as f32, sh.y as f32)
         };
         assert!(doc.shapes.iter().any(|sh| drawn_off(&sh)), "seed {seed}");
+    }
+}
+
+#[test]
+fn growth_in_a_generated_document_leaves_nothing_crowded_saves_no_moves_and_undoes_cleanly() {
+    for seed in 1..=4 {
+        let doc = generate(300, seed);
+        let mut s = common::session_of(doc.clone());
+        assert_eq!(crowding(&s), NOBODY, "seed {seed}");
+        let start = picture(&s);
+        let names = [0, 40, 100, 299].map(|i| doc.shapes[i].id.clone());
+        for name in &names {
+            s.select([name.clone()]);
+            let (text, replace) = ("word ".repeat(40), None);
+            s.handle(Input::Text { text, replace }, T);
+            s.handle(Input::Escape, T);
+            assert_eq!(crowding(&s), NOBODY, "seed {seed}, {name:?}");
+        }
+        assert_ne!(picture(&s), start, "seed {seed}");
+        let same_place = |(a, b): (&Shape, &Shape)| (a.x, a.y) == (b.x, b.y);
+        assert!(s.document().shapes.iter().zip(&doc.shapes).all(same_place));
+        for _ in names {
+            s.handle(Input::Undo, T);
+        }
+        assert_eq!(s.document(), &doc, "seed {seed}");
+        assert_eq!(picture(&s), start, "seed {seed}");
     }
 }
 

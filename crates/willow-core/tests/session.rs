@@ -266,23 +266,6 @@ fn clicking_empty_canvas_deselects_but_panning_does_not() {
     assert!(s.selection().is_empty());
 }
 
-#[test]
-fn a_click_where_shapes_overlap_hits_the_later_one() {
-    let mut doc = Document::new();
-    let b = doc.next_id();
-    doc.shapes.push(willow_core::Shape::new(b.clone(), 100, 20));
-    // Linked: the spacing pass keeps separate chains apart.
-    doc.links.push(willow_core::Link(id("a"), b));
-    let mut s = Session::new(doc, &PAPER, Box::new(common::Fake));
-    s.resize(1000.0, 800.0);
-
-    // Canvas (150, 30) is inside both a (0..210) and b (100..310).
-    let overlap = s.viewport().to_screen(pt(150.0, 30.0));
-    click(&mut s, overlap, T);
-
-    assert_eq!(s.selection(), [id("b")]);
-}
-
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }

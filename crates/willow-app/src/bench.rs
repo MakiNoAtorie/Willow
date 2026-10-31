@@ -8,21 +8,20 @@
 //!
 //! `file_10k` times, in milliseconds, saves of the generated document (serialize and write
 //! beside): `save_unwarmed` from a new session that has measured nothing (a save the moment a
-//! file opens), `save` the window's first (after its `measure_ahead` has been through every
-//! shape; the bench finishes it first), `save_again` the next; then `load` of that file (read,
-//! parse, repair, auto-place, a new session). The loaded session replaces the window's, its
-//! `measure_ahead` cancelled, so `open_first_frame` is the first frame with nothing laid out.
+//! file opens), `save` the window's first, `save_again` the next; then `load` of that file
+//! (read, parse, repair, auto-place, measure every shape, the spacing pass, a new session). The
+//! loaded session replaces the window's, so `open_first_frame` is its first frame.
 //!
 //! `spacing_pass_10k` times, in milliseconds, full spacing passes on the laid-out document
 //! (`SPACING_RUNS` of them, median and worst): `pass` as generated, where little crowds, and
 //! `pass_crowded` with every position divided by 3, so that most chains have to move.
 //!
-//! No `measure_ahead` runs during any later scenario. Each `pan_zoom*_cold` starts on a new
-//! session of the same document (empty layout and word caches; GPUI's glyph atlas stays), so
-//! its first frame lays out every shape for the spacing pass, which `open` does before a real
-//! first frame; `pan_zoom*_warm` then pans back over the same ground on that session. Before the zoom
-//! sweeps the bench lays out every shape, as the app's idle `measure_ahead` would, so the zoom
-//! sweeps, typing and `recovery_take` run on a fully laid-out document.
+//! Each `pan_zoom*_cold` starts on a new session of the same document (empty layout and word
+//! caches; GPUI's glyph atlas stays), so its first frame lays out every shape for the spacing
+//! pass, which `open` does before a real first frame; `pan_zoom*_warm` then pans back over the
+//! same ground on that session. Before the zoom sweeps the bench lays out every shape, as
+//! opening a file does, so the zoom sweeps, typing and `recovery_take` run on a fully laid-out
+//! document.
 //!
 //! `zone_drag` drags the largest zone by its title band, out and back over 240 pointer moves,
 //! zoomed to fit it on screen; the drop returns it to where it started.
@@ -116,12 +115,6 @@ fn unmeasured(w: &Willow, window: &Window) -> willow_core::Session {
     let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
     let doc = w.session.document().clone();
     willow_core::Session::new(doc, w.session.theme(), measure)
-}
-
-/// Stops the window's idle `measure_ahead` and lays out every shape it had left.
-fn measure_all(w: &mut Willow) {
-    w.ahead = None;
-    while !w.session.measure_ahead(1000) {}
 }
 
 /// One CSV line; a field holding a comma, quote or newline is quoted, its quotes doubled.
@@ -308,7 +301,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let t = Instant::now();
         (fresh.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
         let unwarmed = t.elapsed().as_secs_f64() * 1e3;
-        measure_all(w);
+        w.session.heights();
         let (first, again) = (save(w), save(w));
         let t = Instant::now();
         let bytes = std::fs::read(&path).expect("bench read");
@@ -317,7 +310,6 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let vp = w.session.viewport();
         w.show(content, window, cx);
         let load = t.elapsed().as_secs_f64() * 1e3;
-        w.ahead = None;
         w.session.set_viewport(vp);
         let b = w.bench.as_mut().unwrap();
         b.row("file_10k", "save_unwarmed", unwarmed, "ms");
@@ -516,7 +508,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         scripted(&this, cx, &format!("pan_zoom{name}_warm"), None, warm).await;
     }
     idle(&this, cx, "idle_after_pan").await;
-    this.update(cx, |w, _| measure_all(w)).unwrap();
+    this.update(cx, |w, _| drop(w.session.heights())).unwrap();
 
     // 100% to 10% and back around the canvas center, twice: cold rasterizes glyphs at each
     // size, warm reuses the atlas.

@@ -1,10 +1,13 @@
 //! Insert-and-push: creating a linked shape on a side that already has one relinks the nearest
-//! neighbor there to the new shape and pushes that neighbor's subtree clear.
+//! neighbor there to the new shape and pushes that neighbor's subtree clear, the one push saved
+//! as a move (ADR 0006).
 mod common;
 
 use std::time::Duration;
 
-use willow_core::{Color, Document, Input, Link, Point, Session, Shape, ShapeId, Side, Zone};
+use willow_core::{
+    Color, Document, Input, Link, Point, ResizeTo, Session, Shape, ShapeId, Side, Zone,
+};
 
 const T: Duration = Duration::ZERO;
 
@@ -28,6 +31,11 @@ fn session(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {
 }
 
 fn at(s: &Session, name: &str) -> (i32, i32) {
+    let r = s.drawn_rect(&id(name)).expect(name);
+    (r.x as i32, r.y as i32)
+}
+
+fn placed(s: &Session, name: &str) -> (i32, i32) {
     let sh = s.document().shapes.iter().find(|x| x.id.0 == name);
     sh.map(|x| (x.x, x.y)).expect(name)
 }
@@ -59,6 +67,9 @@ fn inserting_mid_trunk_relinks_through_the_new_shape_and_pushes_the_subtree_one_
         assert_eq!(at(&s, "b"), (b.0 + pushed.0, b.1 + pushed.1), "{side:?}");
         assert_eq!(at(&s, "c"), (c.0 + pushed.0, c.1 + pushed.1), "{side:?}");
         assert_eq!(at(&s, "a"), (0, 0), "{side:?}");
+        // Saved: only the command knows which of the two goes below the other.
+        assert_eq!(placed(&s, "b"), at(&s, "b"), "{side:?}");
+        assert_eq!(placed(&s, "c"), at(&s, "c"), "{side:?}");
     }
 }
 
@@ -124,11 +135,29 @@ fn one_undo_restores_links_and_positions_and_zones_stay() {
     );
     // The push moved c out of the zone's rectangle; membership is unchanged.
     assert_eq!(at(&s, "c"), (0, 291));
+    assert_eq!(placed(&s, "c"), (0, 291));
     assert_eq!(s.document().zones[0].members, [id("b"), id("c")]);
     s.handle(Input::Escape, T);
     s.handle(Input::Undo, T);
     assert_eq!(*s.document(), doc);
     assert!(!s.can_undo());
+}
+
+#[test]
+fn an_insertion_from_a_grown_shape_lands_a_gap_below_it_and_keeps_its_order() {
+    let mut s = session(&[("a", 0, 0), ("b", 0, 97)], &[("a", "b")]);
+    let r = ResizeTo {
+        x: 0,
+        width: 210,
+        extra_height: 300,
+    };
+    s.resize_shape(&id("a"), r);
+    // a's bottom at 348.5; b is drawn at 397 but placed at 97.
+    assert_eq!((at(&s, "b"), placed(&s, "b")), ((0, 397), (0, 97)));
+    s.create_linked(&id("a"), Side::Bottom);
+    assert_eq!(at(&s, "c"), (0, 397));
+    assert_eq!(at(&s, "b"), (0, 494));
+    assert_eq!(placed(&s, "b"), (0, 494));
 }
 
 #[test]

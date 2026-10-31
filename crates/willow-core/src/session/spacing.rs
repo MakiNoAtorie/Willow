@@ -7,8 +7,41 @@ use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::RangeInclusive;
 
-use super::push::Rect;
-use crate::{Shape, Side};
+use crate::{Point, Shape, Side, side};
+
+/// A shape's rectangle, what the pass works on: its edges in canvas units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Rect {
+    pub(super) l: f32,
+    pub(super) t: f32,
+    pub(super) r: f32,
+    pub(super) b: f32,
+}
+
+impl Rect {
+    fn moved(self, (dx, dy): (i32, i32)) -> Rect {
+        let (dx, dy) = (dx as f32, dy as f32);
+        Rect {
+            l: self.l + dx,
+            t: self.t + dy,
+            r: self.r + dx,
+            b: self.b + dy,
+        }
+    }
+
+    fn grown(self, d: f32) -> Rect {
+        Rect {
+            l: self.l - d,
+            t: self.t - d,
+            r: self.r + d,
+            b: self.b + d,
+        }
+    }
+
+    fn overlaps(self, o: Rect) -> bool {
+        self.l < o.r && o.l < self.r && self.t < o.b && o.t < self.b
+    }
+}
 
 /// The ways out of a crowd, ties going to the earlier.
 const WAYS: [Side; 4] = [Side::Bottom, Side::Right, Side::Left, Side::Top];
@@ -21,17 +54,24 @@ const CELL: f32 = 512.0;
 /// More cells than this and a rectangle isn't listed by cell.
 const MOST_CELLS: i64 = 4096;
 
-/// A cheap hash of cell coordinates, which are the program's own: SipHash was a third of a pass.
+/// A cheap hash for cell coordinates and shape IDs, read thousands of times a frame: SipHash
+/// was a third of a pass.
 #[derive(Default)]
-struct CellHasher(u64);
+pub(super) struct CheapHasher(u64);
 
-impl Hasher for CellHasher {
-    fn write(&mut self, _: &[u8]) {
-        unreachable!("cells hash as i32s");
+impl CheapHasher {
+    fn add(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl Hasher for CheapHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        bytes.iter().for_each(|&b| self.add(b as u64));
     }
 
     fn write_i32(&mut self, v: i32) {
-        self.0 = (self.0.rotate_left(5) ^ v as u32 as u64).wrapping_mul(0x517c_c1b7_2722_0a95);
+        self.add(v as u32 as u64);
     }
 
     fn finish(&self) -> u64 {
@@ -39,11 +79,14 @@ impl Hasher for CellHasher {
     }
 }
 
+/// `HashMap`'s third parameter for a map hashed by `CheapHasher`.
+pub(super) type Cheap = BuildHasherDefault<CheapHasher>;
+
 /// What is fixed so far. A rectangle is listed in every cell it touches, so a lookup costs
 /// what is near it, not what is in the document.
 #[derive(Default)]
 struct Grid {
-    cells: HashMap<(i32, i32), Vec<Rect>, BuildHasherDefault<CellHasher>>,
+    cells: HashMap<(i32, i32), Vec<Rect>, Cheap>,
     /// Too big to list: a file may ask for a shape half a billion units across.
     huge: Vec<Rect>,
 }
@@ -90,48 +133,144 @@ impl Grid {
     }
 }
 
-/// Each chain, as shape indices, in the order the pass fixes them. `ends` are the links as
-/// index pairs (ends out of range are skipped). Reads placed positions only, so growth leaves
-/// it as it is. Larger chains come first; then the chain with the highest top shape, the
-/// leftmost, the lower ID.
-pub(super) fn order(shapes: &[Shape], ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
-    let mut chains = chains(shapes.len(), ends);
-    chains.sort_by_cached_key(|c| {
-        let top = (c.iter().map(|&i| &shapes[i]))
-            .min_by_key(|s| (s.y, s.x, s.id.generation_order()))
-            .expect("a chain has a shape");
-        (Reverse(c.len()), top.y, top.x, top.id.generation_order())
-    });
-    chains
+/// The theme's two gaps.
+#[derive(Clone, Copy)]
+pub(super) struct Gaps {
+    pub(super) creation: f32,
+    pub(super) min: f32,
 }
 
-/// Each shape's offset, by index, from the chains in `order`, the shapes' placed rectangles
-/// and the minimum gap.
-pub(super) fn pass(order: &[Vec<usize>], rects: &[Rect], gap: f32) -> Vec<(i32, i32)> {
+/// A shape as the walk through its chain reaches it.
+#[derive(Clone, Copy)]
+pub(super) struct Step {
+    pub(super) shape: usize,
+    /// The shape it was reached from, and the side of that shape it sits on.
+    from: Option<(usize, Side)>,
+}
+
+/// Each chain, walked, in the order the pass fixes them. `ends` are the links as index pairs
+/// (ends out of range are skipped). Reads placed positions only, so growth leaves it as it is.
+/// Larger chains come first; then the chain with the highest top shape, the leftmost, the
+/// lower ID.
+pub(super) fn order(shapes: &[Shape], ends: &[(usize, usize)]) -> Vec<Vec<Step>> {
+    let next = neighbors(shapes.len(), ends);
+    let key = |i: usize| {
+        let s = &shapes[i];
+        (s.y, s.x, s.id.generation_order())
+    };
+    let top = |c: &Vec<usize>| {
+        let top = c.iter().copied().min_by_key(|&i| key(i));
+        (top.expect("a chain has a shape"), c.len())
+    };
+    let mut tops: Vec<_> = chains(&next).iter().map(top).collect();
+    tops.sort_by_cached_key(|&(top, size)| (Reverse(size), key(top)));
+    let mut seen = vec![false; shapes.len()];
+    let walked = |&(top, _): &(usize, usize)| walk(top, shapes, &next, &mut seen);
+    tops.iter().map(walked).collect()
+}
+
+/// The point link sides are judged from inside a chain: top edge and horizontal center, which
+/// growth never changes.
+fn anchor(s: &Shape) -> Point {
+    Point {
+        x: s.x as f32 + s.width as f32 / 2.0,
+        y: s.y as f32,
+    }
+}
+
+/// `top`'s chain depth-first, neighbors below, right, left, then above.
+fn walk(top: usize, shapes: &[Shape], next: &[Vec<usize>], seen: &mut [bool]) -> Vec<Step> {
+    let (mut walk, mut stack) = (Vec::new(), vec![(top, None)]);
+    while let Some((shape, from)) = stack.pop() {
+        if std::mem::replace(&mut seen[shape], true) {
+            continue;
+        }
+        walk.push(Step { shape, from });
+        let at = anchor(&shapes[shape]);
+        let mut ahead: Vec<_> = (next[shape].iter().filter(|&&n| !seen[n]))
+            .map(|&n| (side(at, anchor(&shapes[n])), n))
+            .collect();
+        ahead.sort_by_cached_key(|&(side, n)| {
+            let way = WAYS.iter().position(|&w| w == side);
+            let s = &shapes[n];
+            (way, s.y, s.x, s.id.generation_order())
+        });
+        stack.extend(
+            ahead
+                .iter()
+                .rev()
+                .map(|&(side, n)| (n, Some((shape, side)))),
+        );
+    }
+    walk
+}
+
+/// Spaces `chain` inside itself: `settled` gets each of its shapes' offsets from `rects`. The
+/// walk fixes shapes one by one, so of two that crowd, the later moves. A shape starts where
+/// the shape it was reached from went, which carries a subtree along with its root.
+pub(super) fn settle(chain: &[Step], rects: &[Rect], gaps: Gaps, settled: &mut [(i32, i32)]) {
+    let mut fixed = Grid::default();
+    for step in chain {
+        let mut at = (0, 0);
+        let mut link = None;
+        if let Some((from, side)) = step.from {
+            at = settled[from];
+            // In `gaps.min` terms: what the linked shape takes up, creation gap included.
+            let near = rects[from].moved(at).grown(gaps.creation - gaps.min);
+            let d = clear_of(rects[step.shape].moved(at), near, side, gaps.min);
+            at = add(at, side.unit(), d);
+            link = Some(near);
+        }
+        let r = rects[step.shape].moved(at);
+        at = add(at, clearing(&[r], &fixed, link, gaps.min), 1);
+        settled[step.shape] = at;
+        fixed.add(rects[step.shape].moved(at));
+    }
+}
+
+/// `at` moved by `by` times `d`, which rounding at huge coordinates may have overflown.
+fn add(at: (i32, i32), by: (i32, i32), d: i32) -> (i32, i32) {
+    let along = |a: i32, b: i32| a.saturating_add(b.saturating_mul(d));
+    (along(at.0, by.0), along(at.1, by.1))
+}
+
+/// Each shape's offset, by index, from the chains in `order`, the shapes' placed rectangles,
+/// how each chain settled and the minimum gap.
+pub(super) fn pass(
+    order: &[Vec<Step>],
+    rects: &[Rect],
+    settled: &[(i32, i32)],
+    gap: f32,
+) -> Vec<(i32, i32)> {
     let mut offsets = vec![(0, 0); rects.len()];
     let mut fixed = Grid::default();
     let mut block = Vec::new();
-    // Slot for rules inside a chain (#96): a chain settles here, and `block` starts from that.
     // Each chain is fixed once, so pushes cascade down the order and the pass always ends.
     for chain in order {
         block.clear();
-        block.extend(chain.iter().map(|&i| rects[i]));
-        let (dx, dy) = clearing(&block, &fixed, gap);
-        for &i in chain {
-            offsets[i] = (dx, dy);
-            fixed.add(rects[i].moved(dx, dy));
+        block.extend(chain.iter().map(|s| rects[s.shape].moved(settled[s.shape])));
+        let by = clearing(&block, &fixed, None, gap);
+        for (step, r) in chain.iter().zip(&block) {
+            offsets[step.shape] = add(settled[step.shape], by, 1);
+            fixed.add(r.moved(by));
         }
     }
     offsets
 }
 
-/// The shapes of each chain, by index.
-fn chains(n: usize, ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
+/// Each shape's neighbors, by index.
+fn neighbors(n: usize, ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
     let mut next = vec![Vec::new(); n];
     for &(a, b) in ends.iter().filter(|&&(a, b)| a < n && b < n) {
         next[a].push(b);
         next[b].push(a);
     }
+    next
+}
+
+/// The shapes of each chain, by index.
+fn chains(next: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let n = next.len();
     let mut seen = vec![false; n];
     let mut chains = Vec::new();
     for start in 0..n {
@@ -154,13 +293,34 @@ fn chains(n: usize, ends: &[(usize, usize)]) -> Vec<Vec<usize>> {
     chains
 }
 
-/// The shortest move along one axis that clears `block` of every `fixed` rectangle.
-fn clearing(block: &[Rect], fixed: &Grid, gap: f32) -> (i32, i32) {
+/// How far `r` must go toward `side` to sit `gap` beyond `o`, or 0 if they don't crowd.
+fn clear_of(r: Rect, o: Rect, side: Side, gap: f32) -> i32 {
+    if r.grown(gap - SLACK).overlaps(o) {
+        need(r, o, side, gap)
+    } else {
+        0
+    }
+}
+
+/// How far `r` must go toward `side` to sit `gap` beyond `o`, in whole units.
+fn need(r: Rect, o: Rect, side: Side, gap: f32) -> i32 {
+    let far = match side {
+        Side::Bottom => o.b + gap - r.t,
+        Side::Top => r.b + gap - o.t,
+        Side::Right => o.r + gap - r.l,
+        Side::Left => r.r + gap - o.l,
+    };
+    (far - SLACK).ceil() as i32
+}
+
+/// The shortest move along one axis that clears `block` of every `fixed` rectangle and of
+/// `also`.
+fn clearing(block: &[Rect], fixed: &Grid, also: Option<Rect>, gap: f32) -> (i32, i32) {
     let mut best = (i32::MAX, (0, 0));
     for side in WAYS {
         let mut d = 0;
         while d < best.0
-            && let Some(need) = crowded(block, fixed, side, d, gap)
+            && let Some(need) = crowded(block, fixed, also, side, d, gap)
         {
             // Rounding at huge coordinates must not stall the walk.
             d = need.max(d.saturating_add(1));
@@ -175,19 +335,21 @@ fn clearing(block: &[Rect], fixed: &Grid, gap: f32) -> (i32, i32) {
 
 /// With `block` moved `d` toward `side`: how far from its place it must go that way to clear
 /// what it crowds there, or `None` when it crowds nothing.
-fn crowded(block: &[Rect], fixed: &Grid, side: Side, d: i32, gap: f32) -> Option<i32> {
+fn crowded(
+    block: &[Rect],
+    fixed: &Grid,
+    also: Option<Rect>,
+    side: Side,
+    d: i32,
+    gap: f32,
+) -> Option<i32> {
     let (x, y) = side.unit();
-    let mut need = None;
+    let mut most = None;
     for r in block {
-        fixed.overlapping(r.moved(x * d, y * d).grown(gap - SLACK), |o| {
-            let far = match side {
-                Side::Bottom => o.b + gap - r.t,
-                Side::Top => r.b + gap - o.t,
-                Side::Right => o.r + gap - r.l,
-                Side::Left => r.r + gap - o.l,
-            };
-            need = need.max(Some((far - SLACK).ceil() as i32));
-        });
+        let reach = r.moved((x * d, y * d)).grown(gap - SLACK);
+        let mut hit = |o: Rect| most = most.max(Some(need(*r, o, side, gap)));
+        fixed.overlapping(reach, &mut hit);
+        also.filter(|o| reach.overlaps(*o)).map(hit);
     }
-    need
+    most
 }

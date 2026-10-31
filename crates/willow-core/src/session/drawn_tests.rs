@@ -522,3 +522,13 @@ fn a_direction_word_is_compared_with_the_side_the_document_shows() {
     let b = &new.shapes[1];
     assert_eq!((b.x, b.y), (0, 300), "b already shows right of a");
 }
+
+#[test]
+fn a_click_where_shapes_overlap_hits_the_later_one() {
+    // Nothing overlaps at rest any more; a slide or a hand-set offset can.
+    let mut s = session(&[(0, 0), (900, 500)], &[]);
+    shift(&mut s, "b", -800, -480);
+    press(&mut s, pt(150.0, 30.0));
+    release(&mut s, pt(150.0, 30.0));
+    assert_eq!(s.selection(), [id("b")]);
+}

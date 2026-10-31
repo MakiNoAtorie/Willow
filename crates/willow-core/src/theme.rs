@@ -441,7 +441,7 @@ pub struct Theme {
     pub midpoint: MidpointStyle,
     pub tab_picker: TabPickerStyle,
     pub create: CreateStyle,
-    /// Shapes pushed out of the way (insert-and-push) sliding to their new place.
+    /// Pushed shapes sliding to where the spacing pass, or insert-and-push, sends them.
     pub push: Transition,
     /// The view panning to show a shape the keyboard moved to, and the screen pixels it then
     /// keeps between the shape and the screen's edge.

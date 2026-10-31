@@ -4,10 +4,11 @@
 
 use std::cell::Ref;
 use std::collections::HashMap;
+use std::time::Duration;
 
-use super::push::Rect;
-use super::{Session, spacing};
-use crate::{Point, Shape, ShapeId};
+use super::Session;
+use super::spacing::{self, Rect};
+use crate::{Point, Shape, ShapeId, Theme};
 
 /// Where a shape is drawn at rest, in canvas units: slides and gesture previews are on top.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,6 +37,24 @@ impl DrawnRect {
     }
 }
 
+/// A pushed shape's slide: drawn `from` canvas units off its rest position at `since`, easing
+/// to 0.
+struct Slide {
+    from: Point,
+    since: Duration,
+}
+
+impl Slide {
+    /// How far off its rest position the shape is drawn at `now`.
+    fn left(&self, theme: &Theme, now: Duration) -> Point {
+        let k = 1.0 - theme.push.progress(now.saturating_sub(self.since));
+        Point {
+            x: self.from.x * k,
+            y: self.from.y * k,
+        }
+    }
+}
+
 /// What the last spacing pass worked out.
 #[derive(Default)]
 pub(super) struct Spaced {
@@ -46,9 +65,40 @@ pub(super) struct Spaced {
     ends: Vec<(usize, usize)>,
     ids: Vec<ShapeId>,
     /// Every chain in pass order, which text never changes.
-    order: Vec<Vec<usize>>,
-    /// The shapes drawn off their placed position.
-    offsets: HashMap<ShapeId, (i32, i32)>,
+    order: Vec<Vec<spacing::Step>>,
+    /// How each chain settled inside itself, by shape index; a keystroke redoes only its chain.
+    settled: Vec<(i32, i32)>,
+    /// Where each shape of `ids` is in them, for reads by ID.
+    index: HashMap<ShapeId, usize, spacing::Cheap>,
+    /// How far each shape is drawn off its placed position, by shape index.
+    offsets: Vec<(i32, i32)>,
+    /// Slides by shape: a pass starts them, `tick` drops finished ones.
+    slides: HashMap<ShapeId, Slide>,
+}
+
+impl Spaced {
+    /// Slides `id` from `by` units off where it was going, picking up from where it is at `now`.
+    pub(super) fn slide(&mut self, id: &ShapeId, by: (i32, i32), theme: &Theme, now: Duration) {
+        let left = self.slides.get(id).map(|s| s.left(theme, now));
+        let left = left.unwrap_or_default();
+        let from = Point {
+            x: left.x + by.0 as f32,
+            y: left.y + by.1 as f32,
+        };
+        self.slides.insert(id.clone(), Slide { from, since: now });
+    }
+
+    /// Slides every shape the last pass moved off its offset in `old`.
+    fn slide_from(&mut self, old: &[(i32, i32)], theme: &Theme, now: Duration) {
+        for (i, &(x, y)) in old.iter().enumerate() {
+            let (nx, ny) = self.offsets[i];
+            if (x, y) != (nx, ny) {
+                let id = self.ids[i].clone();
+                let by = (x.saturating_sub(nx), y.saturating_sub(ny));
+                self.slide(&id, by, theme, now);
+            }
+        }
+    }
 }
 
 impl Session {
@@ -65,11 +115,13 @@ impl Session {
                 None => self.retake_all(spaced),
             };
             if stale {
-                let moved = spacing::pass(&spaced.order, &spaced.rects, self.theme.min_gap);
-                spaced.offsets = (self.doc.shapes.iter().zip(moved))
-                    .filter(|&(_, offset)| offset != (0, 0))
-                    .map(|(s, offset)| (s.id.clone(), offset))
-                    .collect();
+                let gap = self.theme.min_gap;
+                let moved = spacing::pass(&spaced.order, &spaced.rects, &spaced.settled, gap);
+                let old = std::mem::replace(&mut spaced.offsets, moved);
+                // A first pass has nothing to slide from.
+                if last.is_some() {
+                    spaced.slide_from(&old, self.theme, self.now);
+                }
             }
             spaced.revision = Some(revision);
         }
@@ -81,8 +133,13 @@ impl Session {
         let mut stale = false;
         for &i in typed {
             let rect = self.rect(&self.doc.shapes[i]);
-            stale |= spaced.rects[i] != rect;
-            spaced.rects[i] = rect;
+            if spaced.rects[i] != rect {
+                spaced.rects[i] = rect;
+                stale = true;
+                let chain = spaced.order.iter().find(|c| c.iter().any(|s| s.shape == i));
+                let chain = chain.expect("every shape is in a chain");
+                spacing::settle(chain, &spaced.rects, self.gaps(), &mut spaced.settled);
+            }
         }
         stale
     }
@@ -99,16 +156,66 @@ impl Session {
             spaced.order = spacing::order(shapes, &ends);
             spaced.rects = rects;
             spaced.ends.clone_from(&ends);
-            spaced.ids = shapes.iter().map(|s| s.id.clone()).collect();
+            if !spaced.ids.iter().eq(shapes.iter().map(|s| &s.id)) {
+                // The last offsets by the new indices: slides compare the two passes.
+                let offset = |s: &Shape| spaced.index.get(&s.id).map(|&i| spaced.offsets[i]);
+                let offsets = shapes.iter().map(|s| offset(s).unwrap_or_default());
+                spaced.offsets = offsets.collect();
+                spaced.ids = shapes.iter().map(|s| s.id.clone()).collect();
+                let at = spaced.ids.iter().cloned().enumerate();
+                spaced.index = at.map(|(i, id)| (id, i)).collect();
+            }
+            spaced.settled = vec![(0, 0); shapes.len()];
+            for chain in &spaced.order {
+                spacing::settle(chain, &spaced.rects, self.gaps(), &mut spaced.settled);
+            }
         }
         !same
     }
 
-    /// Runs the spacing pass afresh, whatever the cache holds: what the bench times, and what
-    /// a change to the gaps or to measuring needs.
+    fn gaps(&self) -> spacing::Gaps {
+        spacing::Gaps {
+            creation: self.theme.creation_gap,
+            min: self.theme.min_gap,
+        }
+    }
+
+    /// Runs the spacing pass afresh, whatever the cache holds, with nothing sliding: what the
+    /// bench times, and what a reload or a change to the gaps or to measuring needs.
     pub fn respace(&self) {
         *self.spaced.borrow_mut() = Spaced::default();
         self.spaced();
+    }
+
+    /// A shape's placed rectangle.
+    pub(super) fn rect(&self, s: &Shape) -> Rect {
+        let (x, y) = (s.x as f32, s.y as f32);
+        Rect {
+            l: x,
+            t: y,
+            r: x + s.width as f32,
+            b: y + self.shape_height(s),
+        }
+    }
+
+    /// How far `id` is drawn off its rest position at `now` while it slides; (0, 0) otherwise.
+    pub(crate) fn sliding(&self, id: &ShapeId, now: Duration) -> Point {
+        let spaced = self.spaced();
+        let slide = spaced.slides.get(id);
+        slide.map_or(Point::default(), |s| s.left(self.theme, now))
+    }
+
+    /// Whether any slide still runs at `now`.
+    pub(super) fn slides_running(&self, now: Duration) -> bool {
+        let d = self.theme.push.duration;
+        (self.spaced().slides.values()).any(|s| now < s.since + d)
+    }
+
+    /// Forgets slides finished by `now`, so that drawing looks up none of them.
+    pub(super) fn drop_finished_slides(&mut self, now: Duration) {
+        let d = self.theme.push.duration;
+        let slides = &mut self.spaced.get_mut().slides;
+        slides.retain(|_, s| now < s.since + d);
     }
 
     /// How far shape `id` is drawn off its placed position. The one place that decides it:
@@ -118,7 +225,18 @@ impl Session {
         if let Some(&offset) = self.drawn_offsets.get(id) {
             return offset;
         }
-        (self.spaced().offsets.get(id).copied()).unwrap_or_default()
+        let spaced = self.spaced();
+        let i = spaced.index.get(id);
+        i.map_or((0, 0), |&i| spaced.offsets[i])
+    }
+
+    /// `drawn_offset` of the shape at index `i`, for the loops over every shape: no ID lookup.
+    pub(crate) fn drawn_offset_at(&self, i: usize) -> (i32, i32) {
+        #[cfg(test)]
+        if let Some(&offset) = self.drawn_offsets.get(&self.doc.shapes[i].id) {
+            return offset;
+        }
+        self.spaced().offsets.get(i).copied().unwrap_or_default()
     }
 
     /// Top-left of `s` as drawn. `s` may be a preview or copy of a document shape: its own

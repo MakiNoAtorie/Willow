@@ -6,7 +6,7 @@ use crate::{Point, Shape, ShapeId};
 impl Session {
     /// An unlinked neutral shape in editing, one creation gap right of the chain of the first
     /// selected shape in story order, top-aligned with that shape; with nothing selected,
-    /// centered in the view. Joins a zone and pushes like midpoint creation; the view follows.
+    /// centered in the view. Joins a zone like midpoint creation; the view follows.
     pub(super) fn new_beside(&mut self) {
         let heights = self.heights();
         let probe = Shape::new(ShapeId(String::new()), 0, 0);
@@ -26,7 +26,7 @@ impl Session {
             }
             None => self.viewport.center(),
         };
-        self.new_shape_at(center, true);
+        self.new_shape_at(center);
         if let Some(id) = self.selected.first().cloned() {
             self.reveal(&id);
         }

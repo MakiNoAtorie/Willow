@@ -133,6 +133,7 @@ impl Session {
                     s.keep_typing();
                     s.history.replace(&mut s.doc, doc);
                     s.drop_missing_selection();
+                    s.respace();
                 }
             }),
             _ => self.saved = None,

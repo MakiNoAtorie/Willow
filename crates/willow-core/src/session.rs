@@ -34,7 +34,7 @@ mod tab_picker;
 mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -210,8 +210,6 @@ pub struct Session {
     align: Align,
     pub(crate) measure: Box<dyn Measure>,
     layouts: RefCell<HashMap<ShapeId, Cached>>,
-    /// Where `measure_ahead` goes on: a shape index.
-    ahead: Cell<usize>,
     /// Each link's shape indices, for drawing; see `link_ends`.
     link_ends: RefCell<Vec<(usize, usize)>>,
     viewport: Viewport,
@@ -235,8 +233,6 @@ pub struct Session {
     /// Shapes whose color is still fading in after a menu recolor.
     ripples: HashMap<ShapeId, Ripple>,
     mid: midpoints::Midpoints,
-    /// Shapes sliding to where a push moved them.
-    slides: push::Slides,
     /// The selection when the marquee started.
     marquee_base: Vec<ShapeId>,
     /// A link drag in progress and the hovered connector.
@@ -286,7 +282,6 @@ impl Session {
             align: Align::default(),
             measure,
             layouts: RefCell::default(),
-            ahead: Cell::default(),
             link_ends: RefCell::default(),
             viewport: Viewport {
                 origin: Point::default(),
@@ -306,7 +301,6 @@ impl Session {
             rings: HashMap::new(),
             ripples: HashMap::new(),
             mid: Default::default(),
-            slides: HashMap::new(),
             marquee_base: Vec::new(),
             links: Default::default(),
             pointer: None,
@@ -414,19 +408,6 @@ impl Session {
             .iter()
             .map(|s| self.shape_height(s))
             .collect()
-    }
-
-    /// Lays out the next `n` shapes in document order, drawn or not, so that `heights` (every
-    /// save and recovery write) finds them cached. True once it has been through them all.
-    /// The app calls it in small steps while idle after opening a document.
-    pub fn measure_ahead(&self, n: usize) -> bool {
-        let (shapes, from) = (&self.doc.shapes, self.ahead.get());
-        let to = (from + n).min(shapes.len());
-        for s in &shapes[from.min(to)..to] {
-            self.layout(s);
-        }
-        self.ahead.set(to);
-        to == shapes.len()
     }
 
     /// Selection rings to draw at `now`: shape and ring opacity, 0 to 1. Includes rings
@@ -539,21 +520,11 @@ impl Session {
         }
     }
 
-    /// Sets a shape's x, width and extra height, pushing what it grows into: one undo step.
+    /// Sets a shape's x, width and extra height: one undo step.
     pub fn resize_shape(&mut self, id: &ShapeId, r: ResizeTo) {
-        // One step written out by hand, not `history.step`: `make_room` needs `&mut self`,
-        // which the step's closure can't have. Inside an open group it just joins it.
-        let (opened, old) = (!self.history.is_open(), self.rect_of(id));
-        self.history.begin();
         self.history.change(&mut self.doc, id, |s| {
             (s.x, s.width, s.extra_height) = (r.x, r.width, r.extra_height)
         });
-        if let Some(old) = old {
-            self.make_room(id, old);
-        }
-        if opened {
-            self.history.end(&self.doc);
-        }
     }
 
     /// Drops a shape's extra height so it fits its text; the width stays.
@@ -1080,8 +1051,6 @@ impl Session {
                 self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
-                // Undone pushes jump back; a slide still running would draw them off.
-                self.slides.clear();
                 self.respond(true)
             }
             Input::Nudge(side) => {
@@ -1191,6 +1160,7 @@ impl Session {
     /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
     pub fn tick(&mut self, now: Duration) -> Response {
         self.now = now;
+        self.drop_finished_slides(now);
         let followed = self.advance_follow(now);
         let redraw = self.zoom.tick(&mut self.viewport, self.theme, now) || self.animating(now);
         let panned = self.advance_key_pan(now);

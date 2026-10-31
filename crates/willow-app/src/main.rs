@@ -164,8 +164,6 @@ struct Willow {
     start: Instant,
     /// Redraws at the caret's next blink edge; replacing it cancels the old timer.
     wake: Option<gpui::Task<()>>,
-    /// Lays the document out ahead of the first save; see `measure_ahead`.
-    ahead: Option<gpui::Task<()>>,
     /// Sends `Input::FocusLost` when the window deactivates.
     _activation: gpui::Subscription,
     /// Sends keys to the Tab picker while it is open (`tab_picker_keys`).
@@ -271,24 +269,7 @@ impl Willow {
             self.regenerate(cx);
         }
         self.set_path(path, window);
-        self.measure_ahead(cx);
         cx.notify();
-    }
-
-    /// Lays a just-opened document out a few hundred shapes at a time while idle, without
-    /// redrawing, so the first save (which needs every shape's height) doesn't stall on it.
-    fn measure_ahead(&mut self, cx: &mut Context<Self>) {
-        self.ahead = Some(cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(4))
-                    .await;
-                let done = this.update(cx, |w, _| w.session.measure_ahead(200));
-                if done.unwrap_or(true) {
-                    break;
-                }
-            }
-        }));
     }
 
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
@@ -1339,14 +1320,13 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                 let _tab_picker_keys = tab_picker_keys(cx, window);
                 let recovery = content.recovery.clone();
                 let (session, path) = content.session(window);
-                let mut w = Willow {
+                Willow {
                     session,
                     focus,
                     cursor: Cursor::Arrow,
                     canvas_origin: Default::default(),
                     start: Instant::now(),
                     wake: None,
-                    ahead: None,
                     _activation,
                     _tab_picker_keys,
                     recovery: bench.is_none().then(|| recovery::Autosave::new(recovery)),
@@ -1358,9 +1338,7 @@ fn open_window(content: Content, bench: Option<String>, cx: &mut App) {
                     text_wake: None,
                     text_check: None,
                     panel_drag: None,
-                };
-                w.measure_ahead(cx);
-                w
+                }
             })
         },
     )

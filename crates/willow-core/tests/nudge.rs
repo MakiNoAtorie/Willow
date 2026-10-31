@@ -111,30 +111,35 @@ fn ctrl_shift_arrows_do_nothing_with_a_multi_selection_or_none() {
 
 #[test]
 fn widening_and_growing_push_as_the_mouse_resize_does() {
-    // l (and its child ll) one gap left of a, r one gap right, b one gap below.
+    // l (and its child ll) one gap left of a, r one gap right, b one gap below; a is topmost.
     let mut s = session(
         &[
             ("a", 0, 0),
-            ("l", -258, 0),
-            ("ll", -516, 0),
-            ("r", 258, 0),
+            ("l", -258, 1),
+            ("ll", -516, 1),
+            ("r", 258, 1),
             ("b", 0, 97),
         ],
         &[("a", "l"), ("l", "ll"), ("a", "r"), ("a", "b")],
     );
+    let drawn = |s: &Session, name: &str| {
+        let r = s.drawn_rect(&id(name)).expect(name);
+        (r.x as i32, r.y as i32)
+    };
     s.select([id("a")]);
     s.handle(Input::NudgeSize(Side::Right), T);
     // a's edges at -12 and 222: each side's subtree keeps the 48 creation gap.
-    let sides = (at(&s, "l"), at(&s, "ll"), at(&s, "r"));
-    assert_eq!(sides, ((-270, 0), (-528, 0), (270, 0)));
+    let sides = (drawn(&s, "l"), drawn(&s, "ll"), drawn(&s, "r"));
+    assert_eq!(sides, ((-270, 1), (-528, 1), (270, 1)));
     s.handle(Input::NudgeSize(Side::Bottom), T);
     // a's bottom at 72.5: b goes to 120.5, rounded up.
-    assert_eq!(at(&s, "b"), (0, 121));
-    // Narrowing and shrinking pull nothing back.
+    assert_eq!(drawn(&s, "b"), (0, 121));
+    assert_eq!(at(&s, "b"), (0, 97));
+    // Narrowing and shrinking settle them back.
     s.handle(Input::NudgeSize(Side::Left), T);
     s.handle(Input::NudgeSize(Side::Top), T);
-    let all = (at(&s, "l"), at(&s, "r"), at(&s, "b"));
-    assert_eq!(all, ((-270, 0), (270, 0), (0, 121)));
+    let all = (drawn(&s, "l"), drawn(&s, "r"), drawn(&s, "b"));
+    assert_eq!(all, ((-258, 1), (258, 1), (0, 97)));
 }
 
 #[test]

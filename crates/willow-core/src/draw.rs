@@ -152,12 +152,13 @@ impl Session {
         };
         let doc = self.document();
         // A shape as the gesture in progress previews it: its shape and drawn top-left.
-        let shown = |s: &'a Shape| {
+        let shown = |i: usize, s: &'a Shape| {
             let s = match &resized {
                 Some(r) if r.id == s.id => Cow::Owned(r.clone()),
                 _ => Cow::Borrowed(s),
             };
-            let (x, y) = self.drawn_at(&s);
+            let (dx, dy) = self.drawn_offset_at(i);
+            let (x, y) = (s.x.saturating_add(dx), s.y.saturating_add(dy));
             let (x, y) = match (group, preview) {
                 (Some((dx, dy)), _) if moved.contains(&s.id) => (x + dx, y + dy),
                 (_, Some(p)) if *p.id == s.id => (p.x, p.y),
@@ -169,11 +170,11 @@ impl Session {
         let link_drag = self.link_drag();
         let target = link_drag.and_then(|l| l.target);
         let mut connectors = Vec::new();
-        for &(p, q) in self.link_ends().iter() {
-            let (Some(p), Some(q)) = (doc.shapes.get(p), doc.shapes.get(q)) else {
+        for &(i, j) in self.link_ends().iter() {
+            let (Some(p), Some(q)) = (doc.shapes.get(i), doc.shapes.get(j)) else {
                 continue;
             };
-            let ((p, px, py), (q, qx, qy)) = (shown(p), shown(q));
+            let ((p, px, py), (q, qx, qy)) = (shown(i, p), shown(j, q));
             // Cull on what's known without layout first.
             let (left, right) = (px.min(qx), (px + p.width as i32).max(qx + q.width as i32));
             if left as f32 > b.x || (right as f32) < a.x || py.min(qy) as f32 > b.y {
@@ -256,9 +257,9 @@ impl Session {
                 }
             })
             .collect();
-        let shapes = (doc.shapes.iter())
-            .filter_map(|s| {
-                let (s, x, y) = shown(s);
+        let shapes = (doc.shapes.iter().enumerate())
+            .filter_map(|(i, s)| {
+                let (s, x, y) = shown(i, s);
                 let (fx, fy) = (x as f32, y as f32);
                 // Cull on what's known without layout first: layout is the costly part.
                 if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {

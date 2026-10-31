@@ -188,19 +188,3 @@ fn ascii_text_is_one_cluster_per_byte_except_cr_lf() {
         .collect();
     assert_eq!(clusters, [0..1, 1..3, 3..4, 4..5, 5..6]);
 }
-
-#[test]
-fn measuring_ahead_in_steps_leaves_nothing_for_a_save_to_measure() {
-    let calls = Rc::new(Cell::new(0));
-    let doc = willow_core::generate(5, 1);
-    let mut s = Session::new(doc, &PAPER, Box::new(Counting(calls.clone())));
-
-    assert!(!s.measure_ahead(2));
-    assert_eq!(calls.get(), 2);
-    assert!(!s.measure_ahead(2));
-    assert!(s.measure_ahead(2));
-    assert_eq!(calls.get(), 5);
-
-    s.save(|_| Ok(())).unwrap();
-    assert_eq!(calls.get(), 5);
-}
