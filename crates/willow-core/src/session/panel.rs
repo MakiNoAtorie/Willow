@@ -214,6 +214,7 @@ pub(super) fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
 pub struct Regeneration {
     document: Document,
     heights: Vec<f32>,
+    drawn: Vec<(i32, i32)>,
     revision: u64,
     version: u64,
     /// The panel had focus when it was taken.
@@ -222,7 +223,7 @@ pub struct Regeneration {
 
 impl Regeneration {
     pub fn run(self) -> Regenerated {
-        let text = format::save(&self.document, &self.heights);
+        let text = format::save(&self.document, &self.heights, &self.drawn);
         Regenerated {
             lines: canonical_lines(&text, &self.document),
             text,
@@ -399,6 +400,7 @@ impl Session {
         Some(Regeneration {
             document: self.doc.clone(),
             heights: self.heights(),
+            drawn: self.drawn_positions(),
             revision,
             version: self.panel.versions.now,
             focused: self.panel.focused,

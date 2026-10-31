@@ -16,9 +16,8 @@ impl Session {
             self.stop_editing();
         }
         let doomed: HashSet<&ShapeId> = ids.iter().collect();
-        let heights = self.heights();
         let shapes = &self.doc.shapes;
-        let order: Vec<ShapeId> = (crate::format::story_order(&self.doc, &heights).into_iter())
+        let order: Vec<ShapeId> = (self.story_order().into_iter())
             .map(|i| shapes[i].id.clone())
             .filter(|id| doomed.contains(id))
             .collect();

@@ -78,7 +78,7 @@ impl Session {
         let selected: HashSet<&ShapeId> = self.selected.iter().collect();
         // ponytail: story order every frame while no pressed-shape target; cache it per
         // gesture if dragging thousands of shapes misses the frame target.
-        (crate::format::story_order(&self.doc, &self.heights()).into_iter())
+        (self.story_order().into_iter())
             .map(|i| &self.doc.shapes[i])
             .filter(|s| selected.contains(&s.id))
             .find_map(|s| {

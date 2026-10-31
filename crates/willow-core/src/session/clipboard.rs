@@ -25,7 +25,7 @@ impl Session {
         }
         let doc = self.copied(&self.selected);
         let heights: Vec<f32> = doc.shapes.iter().map(|s| self.shape_height(s)).collect();
-        Some(format::save(&doc, &heights))
+        Some(format::save(&doc, &heights, &[]))
     }
 
     /// Copies of the shapes `ids` (document order) placed where the originals are drawn, and

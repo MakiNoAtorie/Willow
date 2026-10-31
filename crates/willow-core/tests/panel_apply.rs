@@ -250,7 +250,7 @@ fn zone_blocks_alone_make_members_and_nothing_pushes_or_grows() {
 
 /// Canonical text for the document as it is now.
 fn canonical(s: &Session) -> String {
-    willow_core::save(s.document(), &s.heights())
+    willow_core::save(s.document(), &s.heights(), &s.drawn_positions())
 }
 
 #[test]

@@ -8,10 +8,9 @@ impl Session {
     /// selected shape in story order, top-aligned with that shape; with nothing selected,
     /// centered in the view. Joins a zone like midpoint creation; the view follows.
     pub(super) fn new_beside(&mut self) {
-        let heights = self.heights();
         let probe = Shape::new(ShapeId(String::new()), 0, 0);
         let (w, h) = (probe.width as f32, self.shape_height(&probe));
-        let center = match self.first_in_story_order(&heights) {
+        let center = match self.first_in_story_order() {
             Some(i) => {
                 let from = &self.doc.shapes[i];
                 let right = (self.doc.chain(&from.id).into_iter())

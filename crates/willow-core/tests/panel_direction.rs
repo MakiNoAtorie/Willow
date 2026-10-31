@@ -151,3 +151,23 @@ fn an_invalid_files_words_are_the_ones_compared() {
     edit(&mut s, "@layout zz\n", "", ms(1000));
     assert_eq!(spot(&s, "b"), (258, 0));
 }
+
+/// `b` linked below a very tall `a`, placed inside it: its placed center is above `a`'s.
+const TALL: &str = "willow 1\n\na: \"\"\nb: \"\" below a\n\n\
+@layout a 0,0 w210 h1000\n@layout b 0,200 w210\n";
+
+#[test]
+fn a_word_change_starts_from_the_word_the_canvas_shows() {
+    let mut s = panel_of(TALL);
+    let height = s.shape_height(&s.document().shapes[1]).round() as i32;
+    edit(&mut s, "below a", "above a", ms(1000));
+    assert_eq!(spot(&s, "b").1, -height - 48);
+    assert!(s.panel().text().contains("above a"));
+}
+
+#[test]
+fn text_edited_elsewhere_leaves_a_shape_pushed_past_its_anchor_placed() {
+    let mut s = panel_of(TALL);
+    edit(&mut s, "a: \"\"", "a: \"A\"", ms(1000));
+    assert_eq!(spot(&s, "b"), (0, 200));
+}

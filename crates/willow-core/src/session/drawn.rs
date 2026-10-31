@@ -9,7 +9,7 @@ use std::time::Duration;
 use super::Session;
 use super::spacing::{self, Rect};
 use crate::history::History;
-use crate::{Document, Point, Shape, ShapeId, Theme};
+use crate::{Document, Point, Shape, ShapeId, Theme, format};
 
 /// Where a shape is drawn at rest, in canvas units: slides and gesture previews are on top.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -320,6 +320,20 @@ impl Session {
     pub(crate) fn drawn_at(&self, s: &Shape) -> (i32, i32) {
         let (dx, dy) = self.drawn_offset(&s.id);
         (s.x.saturating_add(dx), s.y.saturating_add(dy))
+    }
+
+    /// Every shape's drawn top-left, in document order: what `save` reads with `heights`.
+    pub fn drawn_positions(&self) -> Vec<(i32, i32)> {
+        let at = |(i, s): (usize, &Shape)| {
+            let (dx, dy) = self.drawn_offset_at(i);
+            (s.x.saturating_add(dx), s.y.saturating_add(dy))
+        };
+        self.doc.shapes.iter().enumerate().map(at).collect()
+    }
+
+    /// Every shape (indices into the document) in story order within its chain, as drawn.
+    pub(super) fn story_order(&self) -> Vec<usize> {
+        format::story_order(&self.doc, &self.heights(), &self.drawn_positions())
     }
 
     /// The drawn rectangle of `s`, as `drawn_at` takes it.

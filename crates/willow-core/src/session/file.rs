@@ -97,7 +97,7 @@ impl Session {
         }
         let bytes = match self.held_text() {
             Some(text) => text.as_bytes().to_vec(),
-            None => format::save(&self.doc, &self.heights()).into_bytes(),
+            None => format::save(&self.doc, &self.heights(), &self.drawn_positions()).into_bytes(),
         };
         write(&bytes)?;
         (self.unrecovered, self.recovery_written) = (None, false);
@@ -193,6 +193,11 @@ impl Session {
             .iter()
             .map(|s| self.shape_height(s))
             .collect();
-        Some(Recovery::Write { document, heights })
+        let drawn = self.drawn_positions();
+        Some(Recovery::Write {
+            document,
+            heights,
+            drawn,
+        })
     }
 }

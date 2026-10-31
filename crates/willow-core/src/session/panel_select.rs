@@ -28,8 +28,7 @@ impl Session {
         if !self.panel.open || self.panel.focused {
             return;
         }
-        let heights = self.heights();
-        let Some(i) = self.first_in_story_order(&heights) else {
+        let Some(i) = self.first_in_story_order() else {
             return;
         };
         let id = &self.doc.shapes[i].id;

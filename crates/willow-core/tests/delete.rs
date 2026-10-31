@@ -359,7 +359,7 @@ fn a_new_shape_reusing_a_deleted_members_id_outside_every_zone_is_in_none() {
     assert_eq!(ids(&s), ["a", "b"]);
     assert!(s.document().zones[0].members.is_empty());
 
-    let saved = willow_core::save(s.document(), &s.heights());
+    let saved = willow_core::save(s.document(), &s.heights(), &s.drawn_positions());
     let loaded = willow_core::load(saved.as_bytes()).expect("loads").document;
     assert_eq!(loaded.zones.len(), 1);
     assert!(loaded.zones[0].members.is_empty(), "{saved}");

@@ -139,14 +139,6 @@ impl Shape {
             color: Color::Neutral,
         }
     }
-
-    /// The center of the shape `height` tall at its placed position, in canvas units.
-    pub fn center(&self, height: f32) -> Point {
-        Point {
-            x: self.x as f32 + self.width as f32 / 2.0,
-            y: self.y as f32 + height / 2.0,
-        }
-    }
 }
 
 /// A titled, colored container. Membership is explicit: `members` lists shape and zone IDs,

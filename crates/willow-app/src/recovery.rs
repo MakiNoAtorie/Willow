@@ -90,7 +90,11 @@ impl Pending {
     /// Writes `<id>.path` then `<id>.willow`.
     fn write(self, dir: &Path, id: &str) {
         let text = match self.write {
-            Recovery::Write { document, heights } => willow_core::save(&document, &heights),
+            Recovery::Write {
+                document,
+                heights,
+                drawn,
+            } => willow_core::save(&document, &heights, &drawn),
             Recovery::Text(text) => text,
             Recovery::Delete => return,
         };

@@ -112,8 +112,7 @@ impl Session {
     /// selection changed or a pan started.
     pub(crate) fn navigate(&mut self, dir: Side) -> bool {
         let old = self.selected.clone();
-        let heights = self.heights();
-        let Some(from) = self.first_in_story_order(&heights) else {
+        let Some(from) = self.first_in_story_order() else {
             self.key_pan_down(dir);
             return true;
         };
@@ -132,9 +131,8 @@ impl Session {
     }
 
     /// The selected shape (index into `doc.shapes`) that comes first in story order.
-    pub(crate) fn first_in_story_order(&self, heights: &[f32]) -> Option<usize> {
+    pub(crate) fn first_in_story_order(&self) -> Option<usize> {
         let selected: HashSet<&ShapeId> = self.selected.iter().collect();
-        (crate::format::story_order(&self.doc, heights).into_iter())
-            .find(|&i| selected.contains(&self.doc.shapes[i].id))
+        (self.story_order().into_iter()).find(|&i| selected.contains(&self.doc.shapes[i].id))
     }
 }

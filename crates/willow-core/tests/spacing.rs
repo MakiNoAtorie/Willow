@@ -9,8 +9,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use willow_core::{
-    Button, Document, Input, Link, Measure, Modifiers, Motion, PAPER, Paragraph, Point, Session,
-    Shape, ShapeId, Theme, Viewport, generate, load,
+    Button, Document, Input, Link, Measure, Modifiers, Motion, PAPER, Paragraph, Point, Recovery,
+    Session, Shape, ShapeId, Side, Theme, Viewport, generate, load, save, side,
 };
 
 const T: Duration = Duration::ZERO;
@@ -524,6 +524,117 @@ fn a_save_and_load_gives_the_same_picture_and_bytes() {
         let bytes = saved_bytes(&mut s);
         let mut again = open(&bytes);
         assert_eq!(picture(&s), picture(&again), "seed {seed}");
+        assert_eq!(saved_bytes(&mut again), bytes, "seed {seed}");
+    }
+}
+
+fn text(s: &mut Session) -> String {
+    String::from_utf8(saved_bytes(s)).unwrap()
+}
+
+/// `a` very tall, with `b` linked at a placed position inside it: its center is above `a`'s.
+fn tall_with_linked() -> Document {
+    let mut d = doc(&[("a", 0, 0), ("b", 0, 200)], &[("a", "b")]);
+    taller(&mut d, "a", 1000);
+    d
+}
+
+#[test]
+fn a_shape_linked_below_a_very_tall_shape_stays_below_it_and_its_layout_stays_placed() {
+    let mut s = common::session_of(tall_with_linked());
+    let text = text(&mut s);
+    assert!(text.contains("b: \"\" below a\n"), "{text}");
+    assert!(text.contains("@layout b 0,200 w210\n"), "{text}");
+}
+
+/// `a` wide and on top of `c`, whose push takes it below `d`; placed, `c` is above `d`.
+fn pushed_past_another() -> Session {
+    let mut d = doc(&[("a", 0, 0), ("c", 1000, 200), ("d", 2500, 300)], &[]);
+    d.shapes[0].width = 2000;
+    taller(&mut d, "a", 300);
+    let s = common::session_of(d);
+    assert_eq!(drawn(&s, "c"), (1000.0, 373.0));
+    s
+}
+
+#[test]
+fn story_order_reads_drawn_positions_and_the_layout_lines_stay_placed() {
+    let text = text(&mut pushed_past_another());
+    let line = |l: &str| text.find(l).unwrap_or_else(|| panic!("{l} in {text}"));
+    assert!(line("d: \"\"") < line("c: \"\""), "{text}");
+    assert!(text.contains("@layout c 1000,200 w210\n"), "{text}");
+}
+
+#[test]
+fn the_first_selected_shape_in_story_order_is_the_first_as_drawn() {
+    let mut s = pushed_past_another();
+    s.select([id("c"), id("d")]);
+    // From `d` nothing is above: the selection collapses onto it.
+    s.handle(Input::Navigate(Side::Top), T);
+    assert_eq!(s.selection(), [id("d")]);
+}
+
+/// Direction words state the sides shapes are drawn on, and `@layout` the placed positions.
+fn assert_reads_as_drawn(text: &str, s: &Session) {
+    let loaded = load(text.as_bytes()).unwrap();
+    let doc = &loaded.document;
+    for (i, stated) in loaded.sides.iter().enumerate() {
+        let shape = &doc.shapes[i];
+        let at = |sh: &Shape| s.drawn_rect(&sh.id).expect("a shape").center();
+        if let Some((a, way)) = *stated {
+            let shown = side(at(&doc.shapes[a]), at(shape));
+            assert_eq!(shown, way, "{:?}", shape.id);
+        }
+        let there = (s.document().shapes.iter()).find(|o| o.id == shape.id);
+        let there = there.expect("a shape");
+        assert_eq!((shape.x, shape.y), (there.x, there.y), "{:?}", shape.id);
+    }
+}
+
+/// A squeezed generated document with some of its shapes grown tall by typing.
+fn grown(seed: u64) -> Session {
+    let doc = squeezed(seed);
+    let mut s = common::session_of(doc.clone());
+    for i in [0, 40, 100, 299] {
+        s.select([doc.shapes[i].id.clone()]);
+        let (text, replace) = ("word ".repeat(150), None);
+        s.handle(Input::Text { text, replace }, T);
+        s.handle(Input::Escape, T);
+    }
+    s
+}
+
+#[test]
+fn save_recovery_and_regeneration_write_the_same_text_read_from_drawn_positions() {
+    for seed in 1..=4 {
+        let mut s = grown(seed);
+        let due = Duration::from_secs(60);
+        let Some(Recovery::Write {
+            document,
+            heights,
+            drawn,
+        }) = s.take_recovery(due)
+        else {
+            panic!("a write is due");
+        };
+        let recovered = save(&document, &heights, &drawn);
+        let saved = text(&mut s);
+        assert_eq!(recovered, saved, "seed {seed}");
+        assert_reads_as_drawn(&saved, &s);
+        s.handle(Input::TogglePanel, due);
+        settle(&mut s);
+        assert_eq!(s.panel().text(), saved, "seed {seed}");
+    }
+}
+
+#[test]
+fn after_growth_a_load_and_save_gives_the_same_picture_and_bytes() {
+    for seed in 1..=4 {
+        let mut s = grown(seed);
+        let bytes = saved_bytes(&mut s);
+        let mut again = open(&bytes);
+        assert_eq!(picture(&s), picture(&again), "seed {seed}");
+        assert!(again.is_saved(), "seed {seed}");
         assert_eq!(saved_bytes(&mut again), bytes, "seed {seed}");
     }
 }

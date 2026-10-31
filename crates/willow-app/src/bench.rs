@@ -27,7 +27,8 @@
 //! zoomed to fit it on screen; the drop returns it to where it started.
 //!
 //! `recovery_take` times, in milliseconds, `Session::take_recovery` once the typing has made a
-//! recovery write due: autosave's UI-thread part (clone the document, every shape's height).
+//! recovery write due: autosave's UI-thread part (clone the document, every shape's height
+//! and drawn position).
 //!
 //! Last, the code panel opens on the document's canonical text. `panel_typing_10k` types into
 //! the first shape's text through the platform path: frame rows, and `keystroke_*`, the time
@@ -36,8 +37,8 @@
 //! the app) and `apply` (update the model and record the text in the history, on the UI
 //! thread), then `undo` (Undo in the panel: the typed text comes back and is checked, on the UI
 //! thread). `panel_regen_10k` nudges a shape
-//! with the panel open and times the regeneration's `take` (clone the document and heights, UI
-//! thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
+//! with the panel open and times the regeneration's `take` (clone the document, heights and
+//! drawn positions, UI thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
 //! `idle_panel_open` is idle with the panel focused, once its caret has stopped blinking.
 
 use std::fs::OpenOptions;
