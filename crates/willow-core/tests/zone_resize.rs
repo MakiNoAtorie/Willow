@@ -3,16 +3,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
-use willow_core::{
-    Button, Color, Cursor, Document, Input, Modifiers, Point, Session, Shape, ShapeId, Zone,
-};
+use common::{id, session_of};
+use willow_core::{Button, Color, Cursor, Document, Input, Modifiers, Point, Session, Shape, Zone};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn zone(name: &str, x: i32, y: i32, w: u32, h: u32, members: &[&str]) -> Zone {
     Zone {

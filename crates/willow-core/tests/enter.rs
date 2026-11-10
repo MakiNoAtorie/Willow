@@ -3,14 +3,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, id, session_of};
 use willow_core::{Document, Input, Session, Shape, ShapeId};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn pan_right(s: &mut Session) {
     let (pos, mods) = (Default::default(), Default::default());

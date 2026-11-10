@@ -3,7 +3,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, pt, session_of};
 use willow_core::{
     Button, Color, Document, Input, MenuAction, MenuEntry, MenuKind, Modifiers, Point, Session,
     ShapeId, Shortcut, Zone,
@@ -18,10 +18,6 @@ fn right_click(s: &mut Session, canvas: Point) -> Point {
     s.handle(Input::PointerDown { pos, button, mods }, T);
     s.handle(Input::PointerUp { pos, button, mods }, T);
     pos
-}
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
 }
 
 fn zone(id: &str, x: i32, y: i32, w: u32, h: u32, members: &[&str]) -> Zone {
@@ -196,10 +192,10 @@ fn recolor_ripples_out_from_the_clicked_shape() {
     assert_eq!(fill_of(&s, "b", T), old);
     assert_ne!(fill_of(&s, "b", ms(100)), old);
     assert_eq!(fill_of(&s, "b", ms(200)), new);
-    // The neighbours start 40 ms later per step.
+    // The neighbors start 40 ms later per step.
     assert_eq!(fill_of(&s, "a", ms(40)), old);
     assert_eq!(fill_of(&s, "c", ms(40)), old);
-    // Both neighbours are one link away, so they start together.
+    // Both neighbors are one link away, so they start together.
     assert_eq!(fill_of(&s, "a", ms(100)), fill_of(&s, "c", ms(100)));
     assert_ne!(fill_of(&s, "a", ms(100)), old);
     assert_eq!(fill_of(&s, "c", ms(240)), new);

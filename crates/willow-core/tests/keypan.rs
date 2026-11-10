@@ -2,14 +2,8 @@
 //! OS repeat rate.
 mod common;
 
-use std::time::Duration;
-
-use common::session_of;
+use common::{ms, session_of};
 use willow_core::{Document, Input, Key, Point, Session, Side};
-
-fn ms(t: u64) -> Duration {
-    Duration::from_millis(t)
-}
 
 /// An empty session at `zoom`, nothing selected.
 fn at_zoom(zoom: f32) -> Session {

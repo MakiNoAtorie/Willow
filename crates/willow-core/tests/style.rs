@@ -2,7 +2,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, session_of, typ};
 use willow_core::{Button, Input, Modifiers, Motion, Point, Run, Session};
 
 const T: Duration = Duration::ZERO;
@@ -16,16 +16,6 @@ fn started(text: &str) -> Session {
     s.handle(Input::PointerUp { pos, button, mods }, T);
     s.handle(Input::StartEditing, T);
     s
-}
-
-fn typ(s: &mut Session, text: &str) {
-    s.handle(
-        Input::Text {
-            text: text.into(),
-            replace: None,
-        },
-        T,
-    );
 }
 
 /// The first paragraph's runs as (text, bold, italic).

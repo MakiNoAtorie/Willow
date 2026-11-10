@@ -1,13 +1,9 @@
 mod common;
 
+use common::golden;
 use willow_core::{
     Color, Document, Link, LoadError, Paragraph, Run, Shape, ShapeId, Zone, load, save,
 };
-
-fn golden(name: &str) -> Vec<u8> {
-    let path = format!("{}/tests/golden/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
 
 fn shape(id: &str, x: i32, y: i32, text: &str) -> Shape {
     let mut s = Shape::new(ShapeId(id.into()), x, y);

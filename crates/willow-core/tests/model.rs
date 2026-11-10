@@ -2,14 +2,9 @@
 
 mod common;
 
+use common::id;
 use std::time::Duration;
-use willow_core::{
-    Color, Document, Input, PAPER, Point, Session, Shape, ShapeId, Side, Zone, side,
-};
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
+use willow_core::{Color, Document, Input, PAPER, Point, Session, Shape, Side, Zone, side};
 
 /// Unlinked neutral shapes with these IDs.
 fn doc_of(ids: &[&str]) -> Document {

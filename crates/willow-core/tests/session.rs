@@ -1,13 +1,10 @@
 mod common;
 
+use common::{id, ms, pt};
 use std::time::Duration;
 use willow_core::{Button, Cursor, Document, Input, Key, Modifiers, PAPER, Point, Session};
 
 const T: Duration = Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// A session over a 1000 x 800 canvas with the new document's shape centered.
 fn session() -> Session {
@@ -181,10 +178,6 @@ fn click(s: &mut Session, pos: Point, now: Duration) -> willow_core::Response {
     s.handle(Input::PointerUp { pos, button, mods }, now)
 }
 
-fn id(s: &str) -> willow_core::ShapeId {
-    willow_core::ShapeId(s.into())
-}
-
 #[test]
 fn press_release_on_an_unselected_shape_selects_it() {
     let mut s = session();
@@ -264,10 +257,6 @@ fn clicking_empty_canvas_deselects_but_panning_does_not() {
 
     click(&mut s, pt(50.0, 50.0), T);
     assert!(s.selection().is_empty());
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
 }
 
 #[test]

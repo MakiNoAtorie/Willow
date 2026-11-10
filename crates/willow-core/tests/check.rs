@@ -1,8 +1,9 @@
+mod common;
+
 use willow_core::{LineKind, ShapeId, check};
 
 fn golden(name: &str) -> String {
-    let path = format!("{}/tests/golden/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    String::from_utf8(common::golden(name)).unwrap()
 }
 
 /// The invalid and ignored lines of golden file `name`, numbered from 1.

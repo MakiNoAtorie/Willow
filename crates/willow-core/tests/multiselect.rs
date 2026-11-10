@@ -4,14 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, session_of};
 use willow_core::{Button, Document, Input, Modifiers, Point, Session, Shape, ShapeId};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Empty shapes a (0,0), b (400,0), c (0,400), d (400,400), unlinked.
 fn four() -> Session {

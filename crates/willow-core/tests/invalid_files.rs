@@ -2,12 +2,8 @@ mod common;
 
 use std::time::Duration;
 
+use common::{open, saved};
 use willow_core::{Input, PAPER, Recovery, Session, ShapeId, load};
-
-fn open(bytes: &[u8]) -> Session {
-    let loaded = load(bytes).unwrap();
-    Session::open(loaded, bytes.to_vec(), &PAPER, Box::new(common::Fake))
-}
 
 fn ids(s: &Session) -> Vec<&str> {
     (s.document().shapes.iter())
@@ -18,16 +14,6 @@ fn ids(s: &Session) -> Vec<&str> {
 /// `b` links to a missing ID; `c` has no layout.
 const BAD: &[u8] =
     b"willow 1\r\n\r\na: \"Gates\"\r\nb: \"Fences\" below zz\r\nc: \"Walls\" below a\r\n\r\n@layout a 0,0 w210\r\n@layout b 0,140 w210\r\n";
-
-fn saved(s: &mut Session) -> Vec<u8> {
-    let mut written = Vec::new();
-    s.save(|b| {
-        written = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
-    written
-}
 
 #[test]
 fn an_invalid_file_opens_in_the_panel_as_it_is_with_what_parses() {
