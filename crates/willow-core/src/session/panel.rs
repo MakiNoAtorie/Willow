@@ -47,7 +47,7 @@ pub struct Panel {
 }
 
 impl Panel {
-    fn new(width: f32) -> Self {
+    pub(super) fn new(width: f32) -> Self {
         Panel {
             open: false,
             focused: false,
@@ -244,10 +244,6 @@ pub struct Regenerated {
 }
 
 impl Session {
-    pub(super) fn new_panel(theme: &crate::Theme) -> Panel {
-        Panel::new(theme.code.width)
-    }
-
     /// Sets the panel's width to `width` kept within the theme's minimum and half of
     /// `window_width`; half wins in a window narrower than twice the minimum. A preference,
     /// not part of the document: no history, no undo.

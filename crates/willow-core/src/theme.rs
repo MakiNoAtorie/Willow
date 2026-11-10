@@ -567,6 +567,10 @@ impl Theme {
     pub fn pastel(&self, c: Color) -> Rgba {
         self.pastel[c as usize]
     }
+
+    pub fn picker(&self, c: Color) -> Rgba {
+        self.picker[c as usize]
+    }
 }
 
 pub const PAPER: Theme = Theme {

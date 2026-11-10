@@ -67,7 +67,7 @@ impl Session {
         let (r, vp) = (self.drawn(&self.doc.shapes[i]), self.viewport);
         let hit = |&side: &Side| {
             let m = vp.to_screen(edge_midpoint(r, side));
-            (m.x - p.x).hypot(m.y - p.y) <= MIDPOINT_HIT
+            (m - p).len() <= MIDPOINT_HIT
         };
         SIDES.into_iter().find(hit).map(|side| (i, side))
     }
@@ -126,7 +126,7 @@ impl Session {
         let new_id = new.id.clone();
         // Insert: the nearest shape already on that side links on from the new one instead,
         // its subtree pushed a creation gap clear of it.
-        let insert = self.linked_on(id, side).into_iter().next().map(|n| {
+        let insert = self.nearest_linked_on(id, side).map(|n| {
             let j = self.index_of(&n).expect("linked");
             let src = self.index_of(id).expect("source");
             (

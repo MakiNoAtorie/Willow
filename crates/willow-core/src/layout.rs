@@ -95,7 +95,7 @@ impl Line {
 
 impl Layout {
     /// Index of the line caret `c` shows on.
-    pub fn line_of(&self, c: Caret) -> usize {
+    fn line_of(&self, c: Caret) -> usize {
         let i = (self.lines)
             .partition_point(|l| l.range.start <= c.offset)
             .saturating_sub(1);

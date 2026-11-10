@@ -147,10 +147,7 @@ impl Session {
         }
         let size = self.viewport.size;
         let inside = |p: &Point| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y);
-        let screen = (self.pointer.filter(inside)).unwrap_or(Point {
-            x: size.x / 2.0,
-            y: size.y / 2.0,
-        });
+        let screen = (self.pointer.filter(inside)).unwrap_or_else(|| self.viewport.screen_center());
         self.viewport.to_canvas(screen)
     }
 }
@@ -182,4 +179,9 @@ pub(super) fn clean(text: &str) -> String {
     (text.replace("\r\n", "\n").replace('\r', "\n").chars())
         .filter(|&c| c == '\n' || !c.is_control())
         .collect()
+}
+
+/// Typed text as shape or panel text: every control character dropped.
+pub(super) fn strip_controls(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }

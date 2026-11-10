@@ -155,7 +155,7 @@ impl Session {
         let z = &t.zoom;
         let fade = ((vp.zoom - z.fade_end) / (z.fade_start - z.fade_end)).clamp(0.0, 1.0);
         let deepen = z.block_mix * (1.0 - fade);
-        let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker[c as usize], deepen));
+        let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker(c), deepen));
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let edited = self.editing().filter(|_| fade > 0.0);
@@ -259,17 +259,15 @@ impl Session {
                     zt.fill_mix
                 };
                 let source = match zt.fill_picker {
-                    true => t.picker[zone.color as usize],
+                    true => t.picker(zone.color),
                     false => pastel,
                 };
                 VisibleZone {
                     nested,
                     fill: mix(t.canvas, source, fill),
-                    edge: zt.edge_color.unwrap_or(mix(
-                        pastel,
-                        t.picker[zone.color as usize],
-                        zt.edge_mix,
-                    )),
+                    edge: zt
+                        .edge_color
+                        .unwrap_or(mix(pastel, t.picker(zone.color), zt.edge_mix)),
                     title_at: self.title_at(&zone),
                     title_size,
                     text: title_text(zt, &zone.title).into_owned(),
@@ -308,14 +306,14 @@ impl Session {
                     dy: t.create.rise * (1.0 - k),
                     scale: t.create.scale + (1.0 - t.create.scale) * k,
                 });
-                let picker = |c: Color| t.picker[c as usize];
+                let rippling = self.rippling(&s.id, now);
                 Some(Visible {
-                    tab: match self.rippling(&s.id, now) {
-                        Some((from, p)) => mix(picker(from), picker(s.color), p),
-                        None => picker(s.color),
+                    tab: match rippling {
+                        Some((from, p)) => mix(t.picker(from), t.picker(s.color), p),
+                        None => t.picker(s.color),
                     },
                     lift: self.lift(ring),
-                    fill: match self.rippling(&s.id, now) {
+                    fill: match rippling {
                         Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
                         None => fills[s.color as usize],
                     },
@@ -337,7 +335,7 @@ impl Session {
         let border = t.border_min_screen / vp.zoom;
         Frame {
             zones,
-            zone_ring: self.drop_zone().or(self.band_ring()),
+            zone_ring: self.drop_target().or(self.band_ring()),
             zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
@@ -407,12 +405,11 @@ impl Session {
     pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
         let t = self.theme();
         // One cluster per grapheme of the title as drawn, so capitals can change its length.
-        let (mut shown, mut clusters, mut letters) = (String::new(), Vec::new(), 0);
+        let (mut shown, mut clusters) = (String::new(), Vec::new());
         for g in title.graphemes(true) {
             let start = shown.len();
             shown.push_str(&title_text(&t.zone, g));
             clusters.push(start..shown.len());
-            letters += 1;
         }
         let para = Paragraph {
             runs: vec![Run {
@@ -422,7 +419,7 @@ impl Session {
             }],
         };
         let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
-        w * size / t.font_size + letters as f32 * t.zone.title_spacing * size
+        w * size / t.font_size + clusters.len() as f32 * t.zone.title_spacing * size
     }
 }
 

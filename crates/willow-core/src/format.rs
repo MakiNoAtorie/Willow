@@ -85,24 +85,15 @@ pub fn load(bytes: &[u8]) -> Result<Loaded, LoadError> {
     Ok(check(text))
 }
 
-/// Places what `unplaced` lists. `height` measures a shape.
+/// Places what `unplaced` lists. `height` measures a shape. A shape goes one creation gap from
+/// its anchor on its side, or below the lowest shape (the one whose bottom edge is lowest) when
+/// it has none; a zone wraps its members with padding. Every shape is measured only when
+/// something goes below the lowest.
 pub(crate) fn place(
     doc: &mut Document,
     unplaced: &Unplaced,
     theme: &Theme,
     height: impl Fn(&Shape) -> f32,
-) {
-    position(doc, unplaced, theme, &height);
-}
-
-/// A shape goes one creation gap from its anchor on its side, or below the lowest shape (the
-/// one whose bottom edge is lowest) when it has none; a zone wraps its members with padding.
-/// Every shape is measured only when something goes below the lowest.
-fn position(
-    doc: &mut Document,
-    unplaced: &Unplaced,
-    theme: &Theme,
-    height: &impl Fn(&Shape) -> f32,
 ) {
     let (gap, pad) = (theme.creation_gap, theme.zone.padding);
     let shapes = &mut doc.shapes;
@@ -207,7 +198,7 @@ pub(crate) fn wrap(
     Some((x as i32, y as i32, w as u32, h as u32))
 }
 
-pub(crate) fn is_id(id: &str) -> bool {
+fn is_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase())
 }
 
@@ -349,7 +340,7 @@ pub(crate) fn parse_shape(line: &str) -> Option<(&str, RichText, Option<&str>)> 
 
 /// Where a shape or block sorts in story order: topmost, then leftmost, then ID in
 /// generation order (a … z, aa).
-type Key<'a> = (i32, i32, usize, &'a str);
+type Key<'a> = (i32, i32, (usize, &'a str));
 
 /// Shapes as the writer sees them: what story order and direction words read (ADR 0006).
 #[derive(Clone, Copy)]
@@ -378,8 +369,7 @@ impl<'a> Drawn<'a> {
 
     fn key(&self, i: usize) -> Key<'a> {
         let (x, y) = self.at(i);
-        let id = &self.shapes[i].id.0;
-        (y, x, id.len(), id)
+        (y, x, self.shapes[i].id.generation_order())
     }
 }
 
@@ -395,10 +385,7 @@ enum Unit {
 /// `drawn` is drawn where it is placed.
 pub fn save(doc: &Document, heights: &[f32], drawn: &[(i32, i32)]) -> String {
     let (shapes, zones) = (&doc.shapes, &doc.zones);
-    let index: HashMap<&ShapeId, usize> =
-        shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
-    let zindex: HashMap<&ShapeId, usize> =
-        zones.iter().enumerate().map(|(i, z)| (&z.id, i)).collect();
+    let (index, zindex) = (doc.shape_index(), doc.zone_index());
     // Blocks: 0 is the top level, z + 1 is zone z.
     let (mut block, mut parent) = (vec![0; shapes.len()], vec![0; zones.len()]);
     for (z, zone) in zones.iter().enumerate() {
@@ -442,7 +429,7 @@ pub fn save(doc: &Document, heights: &[f32], drawn: &[(i32, i32)]) -> String {
     }
     for (z, zone) in zones.iter().enumerate() {
         // An empty zone sorts by its own corner.
-        let k = zkey[z].unwrap_or((zone.y, zone.x, zone.id.0.len(), &zone.id.0));
+        let k = zkey[z].unwrap_or((zone.y, zone.x, zone.id.generation_order()));
         units[parent[z]].push((k, Unit::Zone(z)));
     }
     for u in &mut units {
@@ -529,9 +516,7 @@ fn walks(doc: &Document, drawn: Drawn) -> Walks {
 
 /// Each shape's linked shapes (indices into `doc.shapes`).
 fn neighbors(doc: &Document) -> Vec<Vec<usize>> {
-    let index: HashMap<&ShapeId, usize> = (doc.shapes.iter().enumerate())
-        .map(|(i, s)| (&s.id, i))
-        .collect();
+    let index = doc.shape_index();
     let mut next = vec![Vec::new(); doc.shapes.len()];
     for Link(a, b) in &doc.links {
         if let (Some(&a), Some(&b)) = (index.get(a), index.get(b)) {

@@ -175,9 +175,7 @@ impl Session {
     pub(super) fn apply_text(&mut self, mut loaded: Loaded) {
         let words = words(&loaded);
         let new = &mut loaded.document;
-        let at: HashMap<_, _> = (self.doc.shapes.iter().enumerate())
-            .map(|(i, s)| (&s.id, i))
-            .collect();
+        let at = self.doc.shape_index();
         (loaded.unplaced.shapes).retain(|&(i, _)| match at.get(&new.shapes[i].id) {
             Some(&j) => {
                 let (s, old) = (&mut new.shapes[i], &self.doc.shapes[j]);
@@ -186,9 +184,7 @@ impl Session {
             }
             None => true,
         });
-        let zat: HashMap<_, _> = (self.doc.zones.iter().enumerate())
-            .map(|(i, z)| (&z.id, i))
-            .collect();
+        let zat = self.doc.zone_index();
         (loaded.unplaced.zones).retain(|&i| match zat.get(&new.zones[i].id) {
             Some(&j) => {
                 let (z, old) = (&mut new.zones[i], &self.doc.zones[j]);
