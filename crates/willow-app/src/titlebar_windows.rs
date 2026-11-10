@@ -1,13 +1,14 @@
 //! Windows: custom title bar; the OS hit-tests the control areas (drag, snap layouts on Max).
 //! The menu button opens the app menu in the theme's menu style, with Edit and View cascaded (Theme and Text Alignment a level below View).
 
+use crate::menu::{panel, row, separator};
 use crate::{
     CloseWindow, Copy, Cut, NewFile, OpenFile, Paste, Quit, Redo, ResetZoom, Save, SaveAs,
-    ToggleFullScreen, TogglePanel, Undo, ZoomIn, ZoomOut, color, shadows, view_menu,
+    SelectAll, ToggleFullScreen, TogglePanel, Undo, ZoomIn, ZoomOut, color, view_menu,
 };
 use gpui::{
     Action, AnyElement, App, Entity, MouseButton, Window, WindowControlArea, anchored, deferred,
-    div, point, prelude::*, px, relative,
+    div, point, prelude::*, px,
 };
 use willow_core::{MenuStyle, Session};
 
@@ -108,7 +109,7 @@ pub fn title_bar(
                 .flex()
                 .items_center()
                 .text_size(px(c.win_title_size))
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(gpui::FontWeight(c.title_weight))
                 .text_color(color(c.title))
                 .window_control_area(WindowControlArea::Drag)
                 .gap(px(c.win_unsaved_gap))
@@ -186,7 +187,7 @@ fn app_menu(
     let opens = |shows: Cascade, lit: bool| {
         let show = set(true, Some(shows));
         let name = shows.label();
-        row(m, name, name, "\u{203a}", true)
+        row(m, name, name, Some("\u{203a}"), true)
             .when(lit, |d| d.bg(color(m.hover)))
             .on_hover(move |&h, _, cx| {
                 if h {
@@ -200,12 +201,17 @@ fn app_menu(
         .child(opens(Cascade::View, cascade.is_some_and(Cascade::in_view)))
         .child(separator(m))
         .children(window_items.map(command));
-    let edit_items: [Item; 5] = [
-        ("Undo", "Ctrl+Z", Box::new(Undo)),
-        ("Redo", "Ctrl+Y", Box::new(Redo)),
-        ("Cut", "Ctrl+X", Box::new(Cut)),
-        ("Copy", "Ctrl+C", Box::new(Copy)),
-        ("Paste", "Ctrl+V", Box::new(Paste)),
+    // As on macOS, each item follows the core.
+    let edit_items: [(Item, bool); 6] = [
+        (("Undo", "Ctrl+Z", Box::new(Undo)), session.can_undo()),
+        (("Redo", "Ctrl+Y", Box::new(Redo)), session.can_redo()),
+        (("Cut", "Ctrl+X", Box::new(Cut)), session.can_cut()),
+        (("Copy", "Ctrl+C", Box::new(Copy)), session.can_copy()),
+        (("Paste", "Ctrl+V", Box::new(Paste)), session.can_paste()),
+        (
+            ("Select All", "Ctrl+A", Box::new(SelectAll)),
+            session.can_select_all(),
+        ),
     ];
     let choices = cascade.and_then(|shown| {
         let entries = match shown {
@@ -223,22 +229,14 @@ fn app_menu(
         )
     });
     let cascade = cascade.map(|shown| {
-        let mut p = panel(m);
         if shown.in_view() {
             return view_panel(m, shown, &set, &opens);
         }
-        for (i, it) in edit_items.into_iter().enumerate() {
+        let mut p = panel(m);
+        for (i, (it, enabled)) in edit_items.into_iter().enumerate() {
             if i == 2 {
                 p = p.child(separator(m));
             }
-            // As on macOS, each item follows the core.
-            let enabled = [
-                session.can_undo(),
-                session.can_redo(),
-                session.can_cut(),
-                session.can_copy(),
-                session.can_paste(),
-            ][i];
             p = p.child(item(m, it, enabled, set(false, None)));
         }
         p
@@ -305,50 +303,10 @@ fn choice_row(
     let (label, action) = (c.label, c.action);
     let mark = div().child("\u{2713}").when(!c.checked, |d| d.invisible());
     let text = div().flex().gap(px(m.item_pad_x)).child(mark).child(label);
-    row(m, label, text, "", true).on_click(move |_, window, cx| {
+    row(m, label, text, Some(""), true).on_click(move |_, window, cx| {
         close(cx);
         window.dispatch_action(action.boxed_clone(), cx);
     })
-}
-
-fn panel(m: &MenuStyle) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .min_w(px(m.min_width))
-        .p(px(m.padding))
-        .rounded(px(m.radius))
-        .bg(color(m.bg))
-        .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
-        .text_color(color(m.ink))
-        .text_size(px(m.font_size))
-        .line_height(relative(m.line_height))
-        .font_weight(gpui::FontWeight(m.font_weight))
-        .when_some(m.font, |d, f| d.font_family(f))
-        // Keep clicks off the canvas and title bar beneath.
-        .occlude()
-}
-
-fn row(
-    m: &MenuStyle,
-    id: &'static str,
-    label: impl IntoElement,
-    hint: &'static str,
-    enabled: bool,
-) -> gpui::Stateful<gpui::Div> {
-    let hover = color(m.hover);
-    div()
-        .id(id)
-        .flex()
-        .justify_between()
-        .gap(px(2.0 * m.item_pad_x))
-        .px(px(m.item_pad_x))
-        .py(px(m.item_pad_y))
-        .rounded(px(m.item_radius))
-        .when(enabled, |d| d.hover(move |s| s.bg(hover)))
-        .when(!enabled, |d| d.opacity(m.disabled_opacity))
-        .child(label)
-        .child(div().opacity(m.shortcut_opacity).child(hint))
 }
 
 /// A command row: runs its action on the focused view and closes the menu.
@@ -358,17 +316,10 @@ fn item(
     enabled: bool,
     close: impl Fn(&mut App) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
-    row(m, label, label, keys, enabled).when(enabled, |d| {
+    row(m, label, label, Some(keys), enabled).when(enabled, |d| {
         d.on_click(move |_, window, cx| {
             close(cx);
             window.dispatch_action(action.boxed_clone(), cx);
         })
     })
-}
-
-fn separator(m: &MenuStyle) -> gpui::Div {
-    div()
-        .py(px(m.separator_pad_y))
-        .px(px(m.padding))
-        .child(div().h(px(1.)).w_full().bg(color(m.separator)))
 }

@@ -185,6 +185,8 @@ pub struct ZoomPillStyle {
     pub bg: Rgba,
     pub ink: Rgba,
     pub font_size: f32,
+    /// CSS weight (600 is semibold).
+    pub font_weight: f32,
     pub pad_x: f32,
     pub pad_y: f32,
     /// Gap between the pill and the canvas's bottom edge.
@@ -280,8 +282,9 @@ pub struct ChromeStyle {
     /// A new window's size.
     pub window_width: f32,
     pub window_height: f32,
-    /// Window title text.
+    /// Window title text, and its CSS weight (500 is medium).
     pub title: Rgba,
+    pub title_weight: f32,
     /// Windows title-bar button hover fill.
     pub button_hover: Rgba,
     /// macOS: the transparent bar over the canvas, and its title size.
@@ -712,6 +715,7 @@ pub const PAPER: Theme = Theme {
         window_width: 1180.0,
         window_height: 740.0,
         title: rgba(59, 52, 44, 0.55),
+        title_weight: 500.0,
         button_hover: rgba(70, 50, 20, 0.07),
         mac_height: 38.0,
         mac_title_size: 13.0,
@@ -747,6 +751,7 @@ pub const PAPER: Theme = Theme {
         bg: rgba(59, 52, 44, 0.84),
         ink: hex(0xfffdf8),
         font_size: 12.0,
+        font_weight: 600.0,
         pad_x: 11.0,
         pad_y: 5.0,
         bottom: 22.0,

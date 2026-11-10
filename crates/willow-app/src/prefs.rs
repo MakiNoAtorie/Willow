@@ -11,9 +11,9 @@ use willow_core::{Align, PAPER, THEMES, Theme};
 
 /// `~/Library/Application Support/Willow` or `%APPDATA%\Willow`.
 pub(crate) fn app_dir() -> Option<PathBuf> {
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     let base = PathBuf::from(std::env::var_os("APPDATA")?);
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     let base = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
     Some(base.join("Willow"))
 }
