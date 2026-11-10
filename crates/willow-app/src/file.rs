@@ -146,33 +146,7 @@ impl Willow {
             }
         }
     }
-}
 
-/// The file Save As writes for the panel's `picked` path: `.willow` is added when it has no
-/// extension. None when that names an existing file, which the panel never asked to replace.
-fn save_as_path(picked: &Path) -> Option<PathBuf> {
-    if picked.extension().is_some() {
-        return Some(picked.into());
-    }
-    let path = picked.with_extension("willow");
-    (!path.exists()).then_some(path)
-}
-
-/// Writes a temporary file beside `path` and renames it over `path`, so a crash mid-save
-/// never leaves a half-written file.
-pub(crate) fn write_beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
-    let tmp = path.with_file_name(format!(".{}.tmp", name.to_string_lossy()));
-    let written = fs::File::create(&tmp)
-        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
-        .and_then(|()| fs::rename(&tmp, path));
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    written
-}
-
-impl Willow {
     /// On focus: if the file's modified time changed since the last check, passes its bytes
     /// (or its absence) to the session, which decides whether to reload.
     pub(crate) fn check_disk(&mut self, cx: &mut Context<Self>) {
@@ -197,6 +171,30 @@ impl Willow {
         self.regenerate(cx);
         cx.notify();
     }
+}
+
+/// The file Save As writes for the panel's `picked` path: `.willow` is added when it has no
+/// extension. None when that names an existing file, which the panel never asked to replace.
+fn save_as_path(picked: &Path) -> Option<PathBuf> {
+    if picked.extension().is_some() {
+        return Some(picked.into());
+    }
+    let path = picked.with_extension("willow");
+    (!path.exists()).then_some(path)
+}
+
+/// Writes a temporary file beside `path` and renames it over `path`, so a crash mid-save
+/// never leaves a half-written file.
+pub(crate) fn write_beside(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
+    let tmp = path.with_file_name(format!(".{}.tmp", name.to_string_lossy()));
+    let written = fs::File::create(&tmp)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| fs::rename(&tmp, path));
+    if written.is_err() {
+        _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// Asks Save / Don't save / Cancel when the window has unsaved changes. Resolves to true when

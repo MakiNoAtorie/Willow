@@ -1,8 +1,10 @@
 //! The context menu widget: draws the core's open `Menu` in the theme's menu style, on both
 //! platforms. Choosing an item or clicking outside goes back to the core as input.
 
-use gpui::{AnyElement, Context, MouseButton, div, prelude::*, px, relative};
-use willow_core::{Color, Menu, MenuAction, MenuEntry, MenuItem, Session, Shortcut};
+use gpui::{
+    AnyElement, Context, Div, ElementId, MouseButton, Stateful, div, prelude::*, px, relative,
+};
+use willow_core::{Color, Menu, MenuAction, MenuEntry, MenuItem, MenuStyle, Session, Shortcut};
 
 use crate::{Input, Willow, color, shadows};
 
@@ -15,52 +17,25 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
     // ponytail: size is estimated from the style, not measured; measure if rows ever wrap.
     let left = menu.at.x.min(size.x - w).max(0.0);
     let top = menu.at.y.min(size.y - h).max(0.0);
-    let panel = div()
-        .absolute()
-        .left(px(left))
-        .top(px(top))
-        .flex()
-        .flex_col()
-        .min_w(px(m.min_width))
-        .p(px(m.padding))
-        .rounded(px(m.radius))
-        .bg(color(m.bg))
-        .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
-        .text_color(color(m.ink))
-        .text_size(px(m.font_size))
-        .line_height(relative(m.line_height))
-        .font_weight(gpui::FontWeight(m.font_weight))
-        .when_some(m.font, |d, f| d.font_family(f))
-        // Keep presses off the backdrop beneath.
-        .occlude()
-        .children(menu.entries.iter().enumerate().map(|(i, e)| {
-            match e {
-                MenuEntry::Item(item) => row(&m, i, item, cx).into_any_element(),
-                MenuEntry::Colors { current } => colors(session, &m, i, *current, cx),
-                MenuEntry::Separator => div()
-                    .py(px(m.separator_pad_y))
-                    .px(px(m.padding))
-                    .child(
-                        div()
-                            .h(px(m.separator_width))
-                            .w_full()
-                            .bg(color(m.separator)),
-                    )
-                    .into_any_element(),
-                MenuEntry::Heading(label, key) => div()
-                    .flex()
-                    .justify_between()
-                    .gap(px(m.item_gap))
-                    .pt(px(m.heading_pad_top))
-                    .pb(px(m.heading_pad_bottom))
-                    .px(px(m.item_pad_x))
-                    .text_size(px(m.heading_size))
-                    .opacity(m.heading_opacity)
-                    .child(*label)
-                    .children(key.map(shortcut))
-                    .into_any_element(),
-            }
-        }));
+    let panel = panel(&m).absolute().left(px(left)).top(px(top)).children(
+        menu.entries.iter().enumerate().map(|(i, e)| match e {
+            MenuEntry::Item(item) => item_row(&m, i, item, cx).into_any_element(),
+            MenuEntry::Colors { current } => colors(session, &m, i, *current, cx),
+            MenuEntry::Separator => separator(&m).into_any_element(),
+            MenuEntry::Heading(label, key) => div()
+                .flex()
+                .justify_between()
+                .gap(px(m.item_gap))
+                .pt(px(m.heading_pad_top))
+                .pb(px(m.heading_pad_bottom))
+                .px(px(m.item_pad_x))
+                .text_size(px(m.heading_size))
+                .opacity(m.heading_opacity)
+                .child(*label)
+                .children(key.map(shortcut))
+                .into_any_element(),
+        }),
+    );
     // Pinned to the corner: an absolute box with no insets sits below the canvas, clipped.
     let backdrop = div()
         .absolute()
@@ -74,40 +49,74 @@ pub fn menu(session: &Session, cx: &mut Context<Willow>) -> Option<AnyElement> {
     Some(backdrop.into_any_element())
 }
 
-fn row(
-    m: &willow_core::MenuStyle,
-    i: usize,
-    item: &MenuItem,
-    cx: &mut Context<Willow>,
-) -> gpui::Stateful<gpui::Div> {
-    let hover = color(m.hover);
-    let action = item.action;
+/// A menu panel in the theme's menu style, on both platforms; rows go in as children.
+pub(crate) fn panel(m: &MenuStyle) -> Div {
     div()
-        .id(("menu-item", i))
+        .flex()
+        .flex_col()
+        .min_w(px(m.min_width))
+        .p(px(m.padding))
+        .rounded(px(m.radius))
+        .bg(color(m.bg))
+        .shadow(shadows(&m.shadow, &m.shadow, 0.0, 1.0))
+        .text_color(color(m.ink))
+        .text_size(px(m.font_size))
+        .line_height(relative(m.line_height))
+        .font_weight(gpui::FontWeight(m.font_weight))
+        .when_some(m.font, |d, f| d.font_family(f))
+        // Keep presses off whatever is beneath.
+        .occlude()
+}
+
+/// A menu row: `label`, then `hint` (its shortcut) dimmed on the right; lit on hover while
+/// `enabled`, faded otherwise. The caller adds what a click does.
+pub(crate) fn row(
+    m: &MenuStyle,
+    id: impl Into<ElementId>,
+    label: impl IntoElement,
+    hint: Option<impl IntoElement>,
+    enabled: bool,
+) -> Stateful<Div> {
+    let hover = color(m.hover);
+    div()
+        .id(id)
         .flex()
         .justify_between()
         .gap(px(m.item_gap))
         .px(px(m.item_pad_x))
         .py(px(m.item_pad_y))
         .rounded(px(m.item_radius))
+        .when(enabled, |d| d.hover(move |s| s.bg(hover)))
+        .when(!enabled, |d| d.opacity(m.disabled_opacity))
+        .child(label)
+        .child(div().opacity(m.shortcut_opacity).children(hint))
+}
+
+/// The rule between groups of rows.
+pub(crate) fn separator(m: &MenuStyle) -> Div {
+    div().py(px(m.separator_pad_y)).px(px(m.padding)).child(
+        div()
+            .h(px(m.separator_width))
+            .w_full()
+            .bg(color(m.separator)),
+    )
+}
+
+/// The core's menu item `i`.
+fn item_row(m: &MenuStyle, i: usize, item: &MenuItem, cx: &mut Context<Willow>) -> Stateful<Div> {
+    let action = item.action;
+    let hint = item.shortcut.map(shortcut);
+    row(m, ("menu-item", i), item.label, hint, item.enabled)
         .when(item.destructive, |d| d.text_color(color(m.destructive)))
         .when(item.enabled, |d| {
-            d.hover(move |s| s.bg(hover))
-                .on_click(cx.listener(move |w, _, _, cx| w.choose(action, cx)))
+            d.on_click(cx.listener(move |w, _, _, cx| w.choose(action, cx)))
         })
-        .when(!item.enabled, |d| d.opacity(m.disabled_opacity))
-        .child(item.label)
-        .child(
-            div()
-                .opacity(m.shortcut_opacity)
-                .children(item.shortcut.map(shortcut)),
-        )
 }
 
 /// The color row: a swatch per picker color, the current one ringed.
 fn colors(
     session: &Session,
-    m: &willow_core::MenuStyle,
+    m: &MenuStyle,
     row: usize,
     current: Option<Color>,
     cx: &mut Context<Willow>,
@@ -171,7 +180,7 @@ fn shortcut(s: Shortcut) -> String {
 }
 
 /// The panel's width.
-fn width(m: &willow_core::MenuStyle, entries: &[MenuEntry]) -> f32 {
+fn width(m: &MenuStyle, entries: &[MenuEntry]) -> f32 {
     let n = Color::ALL.len() as f32;
     let row = n * m.swatch + (n - 1.0) * m.swatch_gap + 2.0 * (m.item_pad_x + m.padding);
     match entries
@@ -184,7 +193,7 @@ fn width(m: &willow_core::MenuStyle, entries: &[MenuEntry]) -> f32 {
 }
 
 /// Width and height the panel will take, for keeping it inside the canvas.
-fn estimate(m: &willow_core::MenuStyle, menu: &Menu) -> (f32, f32) {
+fn estimate(m: &MenuStyle, menu: &Menu) -> (f32, f32) {
     let row = m.font_size * m.line_height + 2.0 * m.item_pad_y;
     let h = (menu.entries.iter())
         .map(|e| match e {

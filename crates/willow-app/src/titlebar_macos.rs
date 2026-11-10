@@ -25,7 +25,7 @@ pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> 
         .items_center()
         .justify_center()
         .text_size(px(c.mac_title_size))
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(gpui::FontWeight(c.title_weight))
         .text_color(color(c.title))
         .child(if session.is_saved() {
             name.to_string()

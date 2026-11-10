@@ -308,6 +308,11 @@ impl Session {
         self.can_cut()
     }
 
+    /// Whether Select All has text to select: the code panel's, or the edited shape's or title's.
+    pub fn can_select_all(&self) -> bool {
+        self.panel.focused || self.editing.is_some()
+    }
+
     /// Whether Paste has somewhere to go: the code panel, the edited shape or the canvas.
     pub fn can_paste(&self) -> bool {
         true

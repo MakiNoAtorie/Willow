@@ -42,10 +42,10 @@
 //! character and times, in milliseconds, its `check` (parse and check; off the UI thread in
 //! the app) and `apply` (update the model and record the text in the history, on the UI
 //! thread), then `undo` (Undo in the panel: the typed text comes back and is checked, on the UI
-//! thread). `panel_regen_10k` nudges a shape
-//! with the panel open and times the regeneration's `take` (clone the document, heights and
-//! drawn positions, UI thread), `run` (write the text, off the UI thread) and `land` (show it, UI thread).
-//! `idle_panel_open` is idle with the panel focused, once its caret has stopped blinking.
+//! thread). `panel_regen_10k` nudges a shape with the panel open and times the regeneration's
+//! `take` (clone the document, heights and drawn positions, UI thread), `run` (write the text,
+//! off the UI thread) and `land` (show it, UI thread). `idle_panel_open` is idle with the panel
+//! focused, once its caret has stopped blinking.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -53,7 +53,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use gpui::{AsyncWindowContext, FrameDurationSnapshot, Keystroke, WeakEntity, Window};
-use willow_core::{Button, Input, Modifiers, Point, THEMES, Theme, Viewport};
+use willow_core::{
+    Button, Document, Input, Modifiers, Motion, Point, Recovery, Session, Side, THEMES, Theme,
+    Viewport,
+};
 
 use crate::Willow;
 
@@ -66,6 +69,16 @@ const SWEEP_FRAMES: usize = 150;
 const KEYSTROKES: usize = 200;
 /// What the typing scenarios type, again and again. ASCII, so every byte is one key.
 const PHRASE: &str = "the quiet harbour remembers everything ";
+
+/// The `i`th key of `PHRASE`, repeated.
+fn keystroke(i: usize) -> Keystroke {
+    let j = i % PHRASE.len();
+    let key = match &PHRASE[j..j + 1] {
+        " " => "space",
+        k => k,
+    };
+    Keystroke::parse(key).unwrap()
+}
 /// Full spacing passes per `spacing_pass_10k` row.
 const SPACING_RUNS: usize = 20;
 /// Pointer moves in the zone drag: out for half, back for half.
@@ -139,11 +152,10 @@ fn scenario_name(base: &str, shapes: usize, theme: &str) -> String {
     name
 }
 
-/// A new session on `w`'s document that has laid nothing out.
-fn unmeasured(w: &Willow, window: &Window) -> willow_core::Session {
+/// A new session on `doc`, in `w`'s theme, that has laid nothing out.
+fn unmeasured(w: &Willow, doc: Document, window: &Window) -> Session {
     let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
-    let doc = w.session.document().clone();
-    willow_core::Session::new(doc, w.session.theme(), measure)
+    Session::new(doc, w.session.theme(), measure)
 }
 
 /// One CSV line; a field holding a comma, quote or newline is quoted, its quotes doubled.
@@ -326,7 +338,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
             (w.session.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
             t.elapsed().as_secs_f64() * 1e3
         };
-        let mut fresh = unmeasured(w, window);
+        let mut fresh = unmeasured(w, w.session.document().clone(), window);
         let t = Instant::now();
         (fresh.save(|b| crate::file::write_beside(&path, b))).expect("bench save");
         let unwarmed = t.elapsed().as_secs_f64() * 1e3;
@@ -352,7 +364,7 @@ async fn files(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
 }
 
 /// The median and worst of `SPACING_RUNS` full passes on `session`, in milliseconds.
-fn passes(session: &willow_core::Session) -> (f64, f64) {
+fn passes(session: &Session) -> (f64, f64) {
     let mut times: Vec<f64> = (0..SPACING_RUNS)
         .map(|_| timed(|| session.respace()).0)
         .collect();
@@ -368,8 +380,7 @@ async fn spacing(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         for s in &mut doc.shapes {
             (s.x, s.y) = (s.x / 3, s.y / 3);
         }
-        let measure = Box::new(crate::text::TextMeasure::new(window.text_system().clone()));
-        let crowded = willow_core::Session::new(doc, w.session.theme(), measure);
+        let crowded = unmeasured(w, doc, window);
         crowded.respace();
         let (crowded_median, crowded_worst) = passes(&crowded);
         let b = w.bench.as_mut().unwrap();
@@ -435,8 +446,7 @@ async fn code_panel(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
                 .expect("bench: no shape line in the panel")
                 + 3;
             for _ in 0..text[..at].chars().count() {
-                w.session
-                    .handle(Input::Move(willow_core::Motion::Right), now);
+                w.session.handle(Input::Move(Motion::Right), now);
             }
             cx.notify();
             (
@@ -448,12 +458,7 @@ async fn code_panel(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     wait(cx, Duration::from_millis(300)).await;
     let mut keys = Vec::new();
     for i in 0..KEYSTROKES {
-        let j = i % PHRASE.len();
-        let key = match &PHRASE[j..j + 1] {
-            " " => "space",
-            k => k,
-        };
-        let key = Keystroke::parse(key).unwrap();
+        let key = keystroke(i);
         let (ms, _) = timed(|| cx.update(|window, cx| window.dispatch_keystroke(key, cx)));
         keys.push(ms);
         wait(cx, Duration::from_millis(40)).await;
@@ -515,7 +520,7 @@ async fn code_panel(this: &WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         }
         let id = s.document().shapes[0].id.clone();
         s.select([id]);
-        s.handle(Input::Nudge(willow_core::Side::Right), now);
+        s.handle(Input::Nudge(Side::Right), now);
         let (take, job) = timed(|| s.take_regeneration());
         let job = job.expect("bench: no regeneration due after a nudge");
         let (run, done) = timed(|| job.run());
@@ -556,7 +561,10 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
     // in view), then back over the same ground (warm).
     let origin = Point { x: -40.0, y: -40.0 };
     for (name, zoom) in [("100", 1.0), ("40", 0.4), ("10", 0.1), ("2", 0.02)] {
-        (this.update_in(cx, |w, window, _| w.session = unmeasured(w, window))).unwrap();
+        (this.update_in(cx, |w, window, _| {
+            w.session = unmeasured(w, w.session.document().clone(), window)
+        }))
+        .unwrap();
         let cold = vec![pan(-PAN_PX); PAN_FRAMES];
         let s = format!("pan_zoom{name}_cold");
         scripted(&this, cx, &s, at(zoom, origin, size), cold).await;
@@ -669,14 +677,8 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         .unwrap();
     wait(cx, Duration::from_millis(300)).await;
     for i in 0..KEYSTROKES {
-        let j = i % PHRASE.len();
-        let key = match &PHRASE[j..j + 1] {
-            " " => "space",
-            k => k,
-        };
-        let key = Keystroke::parse(key).unwrap();
         // Outside any entity update, as the platform would.
-        cx.update(|window, cx| window.dispatch_keystroke(key, cx))
+        cx.update(|window, cx| window.dispatch_keystroke(keystroke(i), cx))
             .ok();
         wait(cx, Duration::from_millis(40)).await;
     }
@@ -696,7 +698,7 @@ pub(crate) async fn run(this: WeakEntity<Willow>, cx: &mut AsyncWindowContext) {
         let t = Instant::now();
         let r = w.session.take_recovery(due);
         let took = t.elapsed().as_secs_f64() * 1e3;
-        let write = matches!(r, Some(willow_core::Recovery::Write { .. }));
+        let write = matches!(r, Some(Recovery::Write { .. }));
         assert!(write, "bench: no recovery write due after typing");
         (w.bench.as_mut().unwrap()).row("recovery_take", "take_recovery", took, "ms");
     })
