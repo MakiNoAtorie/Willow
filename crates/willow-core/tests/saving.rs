@@ -3,12 +3,8 @@ mod common;
 use std::io;
 use std::time::Duration;
 
-use willow_core::{Document, Input, PAPER, Session, load};
-
-fn open(bytes: &[u8]) -> Session {
-    let loaded = load(bytes).unwrap();
-    Session::open(loaded, bytes.to_vec(), &PAPER, Box::new(common::Fake))
-}
+use common::{open, saved};
+use willow_core::{Document, Input};
 
 const FILE: &[u8] = b"willow 1\n\na: \"Gates\"\n\n@layout a 0,0 w210\n";
 
@@ -25,12 +21,7 @@ fn edits_make_a_session_unsaved_and_a_save_makes_it_saved() {
     s.handle(Input::Redo, Duration::ZERO);
     assert!(!s.is_saved());
 
-    let mut written = Vec::new();
-    s.save(|b| {
-        written = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
+    let written = saved(&mut s);
     assert_eq!(written, b"willow 1\n\na: \"\"\n\n@layout a 10,0 w210\n");
     assert!(s.is_saved());
     assert_eq!(s.bytes(), written);

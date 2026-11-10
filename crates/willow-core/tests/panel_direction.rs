@@ -4,19 +4,9 @@
 
 mod common;
 
+use common::{ms, settle};
 use std::time::Duration;
 use willow_core::{Input, Session};
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
-/// What the app does after every input: a due regeneration, run and handed back.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        s.regenerated(job.run());
-    }
-}
 
 /// A session over the document `text` loads into, the panel open, focused and regenerated.
 fn panel_of(text: &str) -> Session {

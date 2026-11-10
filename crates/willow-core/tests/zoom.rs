@@ -1,15 +1,8 @@
 mod common;
 
+use common::{ms, pt};
 use std::time::Duration;
 use willow_core::{CubicBezier, Document, Input, Modifiers, PAPER, Point, Session};
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 fn close(a: f32, b: f32) -> bool {
     (a - b).abs() < 1e-3

@@ -1,18 +1,10 @@
 mod common;
 
+use common::settle;
 use std::time::Duration;
 use willow_core::{Button, Document, Input, Modifiers, PAPER, Point, Rgba, Session, ShapeId, Side};
 
 const T: Duration = Duration::ZERO;
-
-/// What the app does after every input: runs a due regeneration (off the UI thread there)
-/// and hands the text back.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        let done = job.run();
-        s.regenerated(done);
-    }
-}
 
 fn input(s: &mut Session, i: Input) {
     s.handle(i, T);

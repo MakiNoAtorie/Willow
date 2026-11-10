@@ -4,17 +4,13 @@ mod common;
 
 use std::time::Duration;
 
-use common::{session_of, text};
+use common::{id, session_of, text};
 use willow_core::{
     Button, Color, Document, Input, Link, MenuAction, MenuEntry, MenuKind, Modifiers, Point,
     Session, Shape, ShapeId, Zone,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn shape(name: &str, x: i32, y: i32, color: Color) -> Shape {
     let mut s = Shape::new(id(name), x, y);

@@ -3,13 +3,10 @@ mod common;
 
 use std::time::Duration;
 
+use common::pt;
 use willow_core::{Button, Color, Cursor, Document, Input, Link, Modifiers, Point, Session};
 
 const T: Duration = Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 // The new document's shape is 210 x 48.5 at screen x 395..605, y 376..424.5 at zoom 1.
 const TOP: Point = Point { x: 500.0, y: 376.0 };

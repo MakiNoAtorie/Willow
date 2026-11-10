@@ -3,16 +3,12 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, session_of};
 use willow_core::{
-    Button, Document, Input, Link, MenuAction, MenuEntry, Modifiers, Point, Session, Shape, ShapeId,
+    Button, Document, Input, Link, MenuAction, MenuEntry, Modifiers, Point, Session, Shape,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Chains a-b, c-d and a lone e.
 fn session() -> Session {

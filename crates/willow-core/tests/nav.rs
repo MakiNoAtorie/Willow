@@ -4,14 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
-use willow_core::{Document, Input, Link, Session, Shape, ShapeId, Side};
+use common::{id, session_of};
+use willow_core::{Document, Input, Link, Session, Shape, Side};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Empty shapes at the given top-lefts with the given links, `a` selected.
 fn shapes(at: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {

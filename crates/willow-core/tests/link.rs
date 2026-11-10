@@ -4,21 +4,13 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, pt, session_of};
 use willow_core::{
     Button, Color, Document, Input, Link, MenuAction, MenuEntry, MenuKind, Modifiers, Point,
-    Session, Shape, ShapeId, Side,
+    Session, Shape, Side,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// Empty shapes (210 x 48.5) at their top-left corners with their colors, and links.
 fn doc(shapes: &[(&str, i32, i32, Color)], links: &[(&str, &str)]) -> Document {

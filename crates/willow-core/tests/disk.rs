@@ -2,12 +2,8 @@ mod common;
 
 use std::time::Duration;
 
-use willow_core::{Input, PAPER, Session, load};
-
-fn open(bytes: &[u8]) -> Session {
-    let loaded = load(bytes).unwrap();
-    Session::open(loaded, bytes.to_vec(), &PAPER, Box::new(common::Fake))
-}
+use common::{open, saved};
+use willow_core::{Input, Session};
 
 fn text(s: &Session) -> String {
     s.document().shapes[0].text.plain()
@@ -30,12 +26,7 @@ fn its_own_save_never_reloads() {
     let mut s = open(FILE);
     let a = s.document().shapes[0].id.clone();
     s.move_shape(&a, 10, 0);
-    let mut written = Vec::new();
-    s.save(|b| {
-        written = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
+    let written = saved(&mut s);
     s.disk_changed(Some(&written));
     assert!(s.is_saved());
     assert_eq!(s.document().shapes[0].x, 10);

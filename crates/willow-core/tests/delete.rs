@@ -4,28 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{doc, id, session_of};
 use willow_core::{Color, Document, Input, Link, Session, Shape, ShapeId};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
-
-/// Empty shapes at their top-left corners (all the same size), and links, all one color.
-fn doc(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Document {
-    Document {
-        shapes: (shapes.iter())
-            .map(|&(s, x, y)| Shape {
-                color: Color::Rose,
-                ..Shape::new(id(s), x, y)
-            })
-            .collect(),
-        links: links.iter().map(|&(a, b)| Link(id(a), id(b))).collect(),
-        ..Document::default()
-    }
-}
 
 /// The document's links as sorted pairs, each pair sorted.
 fn links(s: &Session) -> Vec<(String, String)> {

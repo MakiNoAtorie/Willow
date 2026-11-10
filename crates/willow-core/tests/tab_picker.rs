@@ -4,13 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use willow_core::{Color, Document, Input, Link, Session, Shape, ShapeId, Side};
+use common::id;
+use willow_core::{Color, Document, Input, Link, Session, Shape, Side};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Rose shapes a (selected), b below it linked to a, and c far right; Tab inserts between a
 /// and b on the bottom.

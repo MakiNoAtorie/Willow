@@ -4,10 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, ms, session_of};
 use willow_core::{
     Button, Color, Document, Input, MenuAction, Modifiers, PAPER, POSTER, Point, Rgba, Session,
-    Shape, ShapeId, Theme, Zone,
+    Shape, Theme, Zone,
 };
 
 const T: Duration = Duration::ZERO;
@@ -18,10 +18,6 @@ const SCREEN: (Point, Point) = (
         y: 800.0,
     },
 );
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn zone(name: &str, title: &str, x: i32, members: &[&str]) -> Zone {
     Zone {
@@ -47,10 +43,6 @@ fn session(theme: &'static Theme) -> Session {
     });
     s.set_theme(theme);
     s
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
 }
 
 fn at_zoom(s: &mut Session, zoom: f32) {

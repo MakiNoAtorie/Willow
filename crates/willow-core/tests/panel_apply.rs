@@ -3,20 +3,9 @@
 
 mod common;
 
+use common::{id, ms, saved, saved_text, settle};
 use std::time::Duration;
-use willow_core::{Document, Input, Link, Session, ShapeId};
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
-/// What the app does after every input: runs a due regeneration (off the UI thread there)
-/// and hands the text back.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        s.regenerated(job.run());
-    }
-}
+use willow_core::{Document, Input, Link, Session};
 
 /// A session over `doc` with the panel open, focused and regenerated.
 fn panel_on(doc: Document) -> Session {
@@ -57,10 +46,6 @@ fn ids(s: &Session) -> Vec<&str> {
     (s.document().shapes.iter())
         .map(|s| s.id.0.as_str())
         .collect()
-}
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
 }
 
 #[test]
@@ -292,16 +277,6 @@ fn a_click_on_the_canvas_applies_pending_text_before_it_acts() {
     assert_eq!(s.selection(), [id("b")]);
 }
 
-fn saved(s: &mut Session) -> String {
-    let mut written = Vec::new();
-    s.save(|b| {
-        written = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
-    String::from_utf8(written).unwrap()
-}
-
 const SIMPLE: &str = "willow 1\n\na: \"Gates\"\n\n@layout a 0,0 w210\n";
 
 #[test]
@@ -313,7 +288,7 @@ fn pending_and_applied_text_is_unsaved_and_save_applies_it_and_writes_it_as_type
     assert!(!s.is_saved());
     assert!(s.recovery_wake(ms(0)).is_some());
     let text = s.panel().text().to_owned();
-    assert_eq!(saved(&mut s), text);
+    assert_eq!(saved_text(&mut s), text);
     assert!(s.is_saved());
     assert_eq!(ids(&s), ["a", "b"]);
     // Applied after the pause.
@@ -326,7 +301,7 @@ fn pending_and_applied_text_is_unsaved_and_save_applies_it_and_writes_it_as_type
     replace(&mut s, "\"Bee\"", "\"Bee\" below zz", ms(300));
     pause(&mut s, ms(450));
     assert!(!s.is_saved());
-    assert!(saved(&mut s).contains("below zz"));
+    assert!(saved_text(&mut s).contains("below zz"));
     assert!(s.is_saved());
 }
 

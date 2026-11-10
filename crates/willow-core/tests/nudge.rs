@@ -4,30 +4,14 @@ mod common;
 
 use std::time::Duration;
 
-use willow_core::{Color, Document, Input, Link, Session, Shape, ShapeId, Side, Zone};
+use common::{doc, id};
+use willow_core::{Color, Input, Session, Shape, Side, Zone};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Empty rose shapes `(id, x, y)` (210 x 48.5 each), linked as `links`.
 fn session(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {
     common::session_of(doc(shapes, links))
-}
-
-fn doc(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Document {
-    Document {
-        shapes: (shapes.iter())
-            .map(|&(s, x, y)| Shape {
-                color: Color::Rose,
-                ..Shape::new(id(s), x, y)
-            })
-            .collect(),
-        links: links.iter().map(|&(a, b)| Link(id(a), id(b))).collect(),
-        ..Document::default()
-    }
 }
 
 fn shape<'a>(s: &'a Session, name: &str) -> &'a Shape {
