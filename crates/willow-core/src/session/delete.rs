@@ -61,7 +61,7 @@ fn reconnect(
     }
     let dist = |n: &ShapeId| {
         let c = center[n];
-        (c.x - at.x).hypot(c.y - at.y)
+        (c - at).len()
     };
     let mut out = Vec::new();
     for (first, second) in [(Side::Top, Side::Bottom), (Side::Left, Side::Right)] {

@@ -115,7 +115,8 @@ fn an_off_screen_target_pans_the_view_just_enough_eased_without_zooming() {
     );
     assert!(mid < vp.origin.y);
     assert_eq!((vp.origin.x, vp.zoom), (before.origin.x, before.zoom));
-    assert!(!s.tick(Duration::from_millis(500)).animating);
+    s.tick(Duration::from_millis(500));
+    assert!(!s.animating(Duration::from_millis(500)));
 }
 
 #[test]

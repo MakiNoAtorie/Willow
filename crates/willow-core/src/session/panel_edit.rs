@@ -7,7 +7,7 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::Session;
-use super::clipboard::clean;
+use super::clipboard::{clean, strip_controls};
 use super::editing::CaretView;
 use super::panel::{Panel, columns, line_end, wrap};
 use crate::edit::{next_cluster, prev_cluster, word_left, word_right};
@@ -143,7 +143,7 @@ impl Session {
     pub(super) fn panel_key(&mut self, input: &Input) -> Response {
         match input {
             Input::Text { text, replace } => {
-                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                let text = strip_controls(text);
                 self.panel_replace(self.panel_typing(replace), &text);
             }
             Input::Mark {
@@ -151,7 +151,7 @@ impl Session {
                 replace,
                 selected,
             } => {
-                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                let text = strip_controls(text);
                 let range = self.panel_typing(replace);
                 self.splice_panel_text(range.clone(), &text);
                 let at = |i: usize| range.start + text.floor_char_boundary(i);

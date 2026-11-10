@@ -110,7 +110,7 @@ fn two_held_arrows_pan_diagonally_and_focus_loss_stops_the_pan() {
 fn the_pan_reports_done_once_settled() {
     let mut s = session_of(Document::default());
     let r = s.handle(Input::Navigate(Side::Right), ms(0));
-    assert!(r.redraw && r.animating);
+    assert!(r.redraw && s.animating(ms(0)));
     run(&mut s, 0, 400);
     assert!(s.animating(ms(400)), "still held");
     up(&mut s, Side::Right, 400);

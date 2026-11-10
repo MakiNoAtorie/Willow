@@ -20,7 +20,7 @@ pub(crate) fn next_shape(
     let at = center(from);
     let distance = |i: usize| {
         let c = center(i);
-        (c.x - at.x).hypot(c.y - at.y)
+        (c - at).len()
     };
     let nearest = |them: &mut dyn Iterator<Item = usize>| {
         them.filter(|&i| i != from && side(at, center(i)) == dir)

@@ -13,10 +13,8 @@ mod drop;
 mod editing;
 mod file;
 mod keypan;
-mod menu;
-mod zone_resize;
-use menu::Ripple;
 mod link;
+mod menu;
 mod midpoints;
 mod nav;
 mod nudge;
@@ -27,10 +25,12 @@ mod panel_apply_tests;
 mod panel_direction;
 mod panel_edit;
 mod panel_select;
+mod pointer;
 mod push;
 mod select;
 mod spacing;
 mod tab_picker;
+mod zone_resize;
 mod zones;
 pub use menu::{Menu, MenuAction, MenuEntry, MenuItem, MenuKind, Shortcut};
 
@@ -45,6 +45,7 @@ use crate::input::{Button, Cursor, Input, Key, Point, Response};
 use crate::layout::{Align, Layout, Measure, layout};
 use crate::zoom::{ZOOM_NOTCH_PX, Zoom, ZoomPill};
 use crate::{Document, Link, RichText, Shape, ShapeId, Theme, Transition};
+use menu::Ripple;
 
 pub use drawn::DrawnRect;
 pub use editing::{CaretView, Editing};
@@ -99,6 +100,11 @@ impl Viewport {
 
 /// Screen pixels the pointer may wander before a press counts as a drag.
 const DRAG_START: f32 = 3.0;
+
+/// Whether a pointer `d` screen pixels from its press has become a drag.
+fn past_drag_start(d: Point) -> bool {
+    d.len() >= DRAG_START
+}
 
 /// Screen pixels around a shape's edge that grab it for resizing.
 const EDGE_GRAB: f32 = 5.0;
@@ -160,7 +166,7 @@ enum Gesture {
         index: usize,
         grab: zone_resize::Grab,
         from: Point,
-        to: Option<zone_resize::Rect>,
+        to: Option<zone_resize::ZoneBox>,
     },
 }
 
@@ -283,7 +289,7 @@ impl Session {
             follow: None,
             tab_picker: false,
             key_pan: Vec::new(),
-            panel: Session::new_panel(theme),
+            panel: Panel::new(theme.code.width),
             doc,
             history: History::default(),
             theme,
@@ -403,8 +409,7 @@ impl Session {
                 && (ends.iter().zip(links)).all(|(&(i, j), Link(a, b))| is(i, a) && is(j, b))
         };
         if !valid(&self.link_ends.borrow()) {
-            let at: HashMap<&ShapeId, usize> =
-                shapes.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
+            let at = self.doc.shape_index();
             let index = |id| at.get(id).copied().unwrap_or(usize::MAX);
             *self.link_ends.borrow_mut() = (links.iter())
                 .map(|Link(a, b)| (index(a), index(b)))
@@ -560,7 +565,7 @@ impl Session {
     }
 
     /// The most each side of `shape` may move in (negative) and keep `min_width`.
-    pub(super) fn least_growth(&self, shape: &Shape) -> i32 {
+    fn least_growth(&self, shape: &Shape) -> i32 {
         (self.min_width(shape) as i32 - shape.width as i32 + 1).div_euclid(2)
     }
 
@@ -711,275 +716,9 @@ impl Session {
             _ => false,
         };
         let mut r = match input {
-            Input::PointerDown { pos, button, mods } => {
-                // A press outside the menu closes it; a right press goes on to open another.
-                if self.menu.take().is_some() && button != Button::Right {
-                    return self.respond(true);
-                }
-                let hit = self.shape_at(pos);
-                if button == Button::Right && self.gesture.is_none() {
-                    match hit {
-                        None if let Some(l) = self.connector_at(pos) => {
-                            self.open_connector_menu(pos, l)
-                        }
-                        None if let Some(i) = self.band_at(pos) => self.open_zone_menu(pos, i),
-                        None => self.open_empty_menu(pos),
-                        Some(i) => self.open_shape_menu(pos, i),
-                    }
-                    return self.respond(true);
-                }
-                if self.gesture.is_none() && button == Button::Left && !self.space_held {
-                    if let Some((index, side)) = self.midpoint_at(pos) {
-                        let (from, dragged) = (pos, false);
-                        self.gesture = Some(Gesture::Midpoint {
-                            index,
-                            side,
-                            from,
-                            dragged,
-                        });
-                        return self.respond(true);
-                    }
-                    if let Some(i) = hit.filter(|_| mods.alt && self.editing.is_none()) {
-                        let id = self.doc.shapes[i].id.clone();
-                        self.autofit(&id);
-                        return self.respond(true);
-                    }
-                    if let Some((index, edge)) = self.edge_at(pos) {
-                        self.stop_editing();
-                        self.select([self.doc.shapes[index].id.clone()]);
-                        self.gesture = Some(Gesture::Resize {
-                            index,
-                            edge,
-                            from: pos,
-                            to: None,
-                        });
-                        return self.respond(true);
-                    }
-                    if let Some((index, grab)) = self.zone_edge_at(pos) {
-                        self.stop_editing();
-                        self.select([]);
-                        self.gesture = Some(Gesture::ZoneResize {
-                            index,
-                            grab,
-                            from: pos,
-                            to: None,
-                        });
-                        return self.respond(true);
-                    }
-                    if hit.is_none() && mods.shift {
-                        self.stop_editing();
-                        self.start_marquee(pos);
-                        return self.respond(true);
-                    }
-                }
-                if self.gesture.is_none()
-                    && let Some(e) = &self.editing
-                {
-                    // Panning is ignored while editing; a left press leaves editing unless it
-                    // lands in the edited text.
-                    if button != Button::Left {
-                        return self.respond(false);
-                    }
-                    if hit.is_some_and(|i| self.doc.shapes[i].id == e.id) {
-                        let caret = self.caret_at(pos);
-                        if mods.shift {
-                            self.extend_to(caret, None);
-                        } else {
-                            self.set_caret(caret);
-                        }
-                        self.gesture = Some(Gesture::Text);
-                        return self.respond(true);
-                    }
-                    self.stop_editing();
-                    if hit.is_none() && self.band_at(pos).is_none() {
-                        return self.respond(true);
-                    }
-                }
-                let band = (hit.is_none() && !self.space_held && button == Button::Left)
-                    .then(|| self.band_at(pos))
-                    .flatten();
-                let gesture = match (button, hit) {
-                    _ if self.gesture.is_some() => None,
-                    // Zones are never selected: a band press clears the selection.
-                    (Button::Left, None) if let Some(index) = band => {
-                        self.select([]);
-                        Some(Gesture::Band {
-                            index,
-                            from: pos,
-                            to: None,
-                        })
-                    }
-                    (Button::Left, Some(index)) if !self.space_held => Some(Gesture::Press {
-                        index,
-                        from: pos,
-                        to: None,
-                    }),
-                    (Button::Left | Button::Middle, hit) => Some(Gesture::Pan {
-                        button,
-                        last: pos,
-                        click: (button == Button::Left && hit.is_none()).then_some(pos),
-                    }),
-                    (Button::Right, _) => None,
-                };
-                let redraw = matches!(gesture, Some(Gesture::Pan { .. } | Gesture::Band { .. }));
-                if gesture.is_some() {
-                    self.gesture = gesture;
-                }
-                self.respond(redraw)
-            }
-            Input::PointerMove { pos, .. }
-                if matches!(self.gesture, Some(Gesture::Resize { .. })) =>
-            {
-                self.resize_to(pos);
-                self.respond(true)
-            }
-            Input::PointerMove { pos, .. }
-                if matches!(self.gesture, Some(Gesture::Press { .. })) =>
-            {
-                let dragged = self.drag_to(pos);
-                self.respond(dragged)
-            }
-            Input::PointerMove { pos, .. }
-                if matches!(self.gesture, Some(Gesture::ZoneResize { .. })) =>
-            {
-                self.zone_resize_to(pos);
-                self.respond(true)
-            }
-            Input::PointerMove { pos, .. }
-                if matches!(self.gesture, Some(Gesture::Marquee { .. })) =>
-            {
-                self.marquee_to(pos);
-                self.respond(true)
-            }
-            Input::PointerMove { pos, .. } => match &mut self.gesture {
-                Some(Gesture::Pan { last, click, .. }) => {
-                    if click.is_some_and(|c| (pos.x - c.x).hypot(pos.y - c.y) >= DRAG_START) {
-                        *click = None;
-                    }
-                    let d = pos - *last;
-                    *last = pos;
-                    self.viewport.pan(d);
-                    self.respond(true)
-                }
-                Some(Gesture::Band { index, from, to }) => {
-                    let d = pos - *from;
-                    if to.is_none() && d.x.hypot(d.y) < DRAG_START {
-                        return self.respond(false);
-                    }
-                    let (zone, z) = (&self.doc.zones[*index], self.viewport.zoom);
-                    *to = Some((
-                        (zone.x as f32 + d.x / z).round() as i32,
-                        (zone.y as f32 + d.y / z).round() as i32,
-                    ));
-                    self.respond(true)
-                }
-                Some(Gesture::Text) => {
-                    let caret = self.caret_at(pos);
-                    self.extend_to(caret, None);
-                    self.respond(true)
-                }
-                Some(
-                    Gesture::Press { .. } | Gesture::Resize { .. } | Gesture::ZoneResize { .. },
-                ) => self.respond(false),
-                Some(Gesture::Midpoint { from, dragged, .. }) => {
-                    let d = pos - *from;
-                    *dragged |= d.x.hypot(d.y) >= DRAG_START;
-                    if *dragged {
-                        let redraw = self.drag_link(pos);
-                        return self.respond(redraw);
-                    }
-                    self.respond(false)
-                }
-                Some(Gesture::Marquee { .. }) => self.respond(false),
-                None => {
-                    let edge_changed = self.track_edges(pos);
-                    let over = self.editing.as_ref().is_some_and(|e| {
-                        (self.shape_at(pos)).is_some_and(|i| self.doc.shapes[i].id == e.id)
-                    });
-                    let changed = over != self.over_text;
-                    let changed = self.track_hover(pos) || changed;
-                    let changed = self.track_connector(pos) || changed;
-                    self.over_text = over;
-                    self.respond(changed || edge_changed)
-                }
-            },
-            Input::PointerUp { button, mods, .. } => {
-                match self.gesture {
-                    Some(Gesture::Pan {
-                        button: b, click, ..
-                    }) if b == button => {
-                        self.gesture = None;
-                        if click.is_some() {
-                            self.select([]);
-                        }
-                    }
-                    Some(Gesture::Press { .. })
-                        if button == Button::Left
-                            && let Some((dx, dy)) = self.group_drag() =>
-                    {
-                        self.gesture = None;
-                        let ids = self.selected.clone();
-                        self.drop_shapes(&ids, dx, dy);
-                    }
-                    Some(Gesture::Press { index, to, from }) if button == Button::Left => {
-                        self.gesture = None;
-                        let id = self.doc.shapes[index].id.clone();
-                        match to {
-                            Some(to) => {
-                                let (dx, dy) = self.dragged(index, to);
-                                self.drop_shapes(&[id], dx, dy);
-                            }
-                            None if mods.shift => self.toggle_selected(id),
-                            // A click on the selected shape edits it, caret where clicked.
-                            None if self.selected == [id.clone()] => {
-                                self.start_editing(id);
-                                let caret = self.caret_at(from);
-                                self.set_caret(caret);
-                            }
-                            None => self.select([id]),
-                        }
-                    }
-                    Some(Gesture::Text) if button == Button::Left => self.gesture = None,
-                    Some(Gesture::Band { index, to, .. }) if button == Button::Left => {
-                        self.gesture = None;
-                        if let Some((x, y)) = to {
-                            let z = &self.doc.zones[index];
-                            let (dx, dy) = (x - z.x, y - z.y);
-                            self.drop_zone_by(index, dx, dy);
-                        }
-                    }
-                    Some(Gesture::Midpoint {
-                        index,
-                        side,
-                        dragged,
-                        ..
-                    }) if button == Button::Left => {
-                        self.gesture = None;
-                        if !dragged {
-                            let id = self.doc.shapes[index].id.clone();
-                            self.create_linked(&id, side);
-                        } else {
-                            self.drop_link(index);
-                        }
-                    }
-                    Some(Gesture::Marquee { .. }) if button == Button::Left => self.gesture = None,
-                    Some(Gesture::ZoneResize { index, to, .. }) if button == Button::Left => {
-                        self.gesture = None;
-                        if let Some(r) = to {
-                            self.resize_zone(index, r);
-                        }
-                    }
-                    Some(Gesture::Resize { index, to, .. }) if button == Button::Left => {
-                        self.gesture = None;
-                        if let Some(r) = to {
-                            let id = self.doc.shapes[index].id.clone();
-                            self.resize_shape(&id, r);
-                        }
-                    }
-                    _ => {}
-                }
-                self.respond(true)
-            }
+            Input::PointerDown { pos, button, mods } => self.pointer_down(pos, button, mods),
+            Input::PointerMove { pos, .. } => self.pointer_move(pos),
+            Input::PointerUp { button, mods, .. } => self.pointer_up(button, mods),
             // Esc closes an open menu first; the Tab picker has closed before this `match`.
             Input::Escape if self.menu.is_some() => {
                 self.menu = None;
@@ -1163,7 +902,7 @@ impl Session {
         r
     }
 
-    /// Advances animations to `now`. The app calls it every frame while `Response.animating`.
+    /// Advances animations to `now`. The app calls it every frame while `Session::animating`.
     pub fn tick(&mut self, now: Duration) -> Response {
         self.now = now;
         self.drop_finished_slides(now);
@@ -1186,7 +925,7 @@ impl Session {
             return false;
         };
         let (d, z) = (pos - from, self.viewport.zoom);
-        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+        if to.is_none() && !past_drag_start(d) {
             return false;
         }
         let (x, y) = self.drawn_at(&self.doc.shapes[index]);
@@ -1210,7 +949,7 @@ impl Session {
             return;
         };
         let (d, z) = (pos - *from, self.viewport.zoom);
-        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+        if to.is_none() && !past_drag_start(d) {
             return;
         }
         let (index, edge) = (*index, *edge);
@@ -1295,7 +1034,6 @@ impl Session {
                 _ if let Some(g) = self.over_zone_edge => g.cursor(),
                 _ => Cursor::Arrow,
             },
-            animating: self.animating(self.now),
         }
     }
 }

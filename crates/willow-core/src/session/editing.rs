@@ -132,13 +132,7 @@ impl Session {
                 self.respond(true)
             }
             Input::Paste(text) => {
-                if self.editing.is_none() {
-                    return self.respond(false);
-                }
-                let text = super::clipboard::as_text(text);
-                let mut text: String = (text.replace("\r\n", "\n").replace('\r', "\n").chars())
-                    .filter(|&c| c == '\n' || !c.is_control())
-                    .collect();
+                let mut text = super::clipboard::clean(&super::clipboard::as_text(text));
                 if self.edited().is_none() {
                     text = text.replace('\n', " ");
                 }
@@ -193,7 +187,7 @@ impl Session {
         text: &str,
         mut replace: Option<Range<usize>>,
     ) -> Option<(String, Range<usize>)> {
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        let text = super::clipboard::strip_controls(text);
         if self.editing.is_none() {
             match self.only_selected() {
                 Some(id) if !text.trim().is_empty() => self.start_editing(id),
@@ -318,7 +312,7 @@ impl Session {
         let c = self.viewport.center();
         let dist = |i: usize| {
             let p = self.drawn_index(i).center();
-            (p.x - c.x).hypot(p.y - c.y)
+            (p - c).len()
         };
         (self.doc.shapes.iter().enumerate())
             .min_by(|&(i, a), &(j, b)| {

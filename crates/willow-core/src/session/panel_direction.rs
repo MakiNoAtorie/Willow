@@ -55,9 +55,7 @@ impl Session {
             Some((anchor, side)) if *anchor == a.id => *side,
             _ => side(self.drawn(a).center(), self.drawn(s).center()),
         };
-        let index: HashMap<&ShapeId, usize> = (new.shapes.iter().enumerate())
-            .map(|(i, s)| (&s.id, i))
-            .collect();
+        let index = new.shape_index();
         let ends: Vec<(usize, usize)> = (new.links.iter())
             .filter_map(|l| Some((*index.get(&l.0)?, *index.get(&l.1)?)))
             .collect();

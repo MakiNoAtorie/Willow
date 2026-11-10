@@ -51,7 +51,7 @@ impl Session {
     /// While a shape or a multi-selection is dragged: the zone a drop now would make a shape
     /// join that isn't in it. The pressed shape's target first, else that of the first
     /// selected shape in story order.
-    pub(crate) fn drop_zone(&self) -> Option<&ShapeId> {
+    pub(crate) fn drop_target(&self) -> Option<&ShapeId> {
         let Some(Gesture::Press {
             index,
             to: Some((x, y)),

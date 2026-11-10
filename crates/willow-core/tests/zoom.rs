@@ -219,16 +219,22 @@ fn the_pill_shows_the_target_level_holds_700_ms_then_fades_over_400_ms() {
 #[test]
 fn animation_stops_once_the_pill_has_faded_after_the_last_zoom_input() {
     let mut s = session();
-    assert!(!s.tick(ms(0)).animating, "idle before any zoom");
+    s.tick(ms(0));
+    assert!(!s.animating(ms(0)), "idle before any zoom");
 
-    assert!(zoom_wheel(&mut s, CURSOR, 60.0, ms(1000)).animating);
-    assert!(zoom_wheel(&mut s, CURSOR, 60.0, ms(1050)).animating);
+    zoom_wheel(&mut s, CURSOR, 60.0, ms(1000));
+    assert!(s.animating(ms(1000)));
+    zoom_wheel(&mut s, CURSOR, 60.0, ms(1050));
+    assert!(s.animating(ms(1050)));
     for t in (1060..2150).step_by(16) {
         let r = s.tick(ms(t));
-        assert!(r.animating && r.redraw, "running at {t}");
+        assert!(s.animating(ms(t)) && r.redraw, "running at {t}");
     }
     let r = s.tick(ms(2150));
-    assert!(!r.animating, "the pill (shown at 1050) is gone at 2150");
+    assert!(
+        !s.animating(ms(2150)),
+        "the pill (shown at 1050) is gone at 2150"
+    );
     assert!(r.redraw, "one last frame clears the pill");
     assert_eq!(s.tick(ms(2166)), willow_core::Response::default());
 }

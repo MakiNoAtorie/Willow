@@ -323,7 +323,8 @@ fn the_caret_blinks_then_goes_solid_and_stops_animating() {
 
     assert!(s.caret(ms(1000 + idle)).unwrap().visible);
     assert!(!s.animating(ms(1000 + idle)));
-    assert!(!s.tick(ms(1000 + idle)).animating);
+    s.tick(ms(1000 + idle));
+    assert!(!s.animating(ms(1000 + idle)));
 }
 
 #[test]
