@@ -19,7 +19,7 @@ Windows (9600X + RTX 5060 Ti): draw p95 1.0–6.3 ms across pan and zoom sweep, 
 
 ## Consequences
 
-- **Text at small sizes**: text is not drawn below about 7 px on screen. With text down to 4 px, the zoom sweep misses the 8 ms p95 (8.7–9.1 ms); with the 7 px cutoff it passes (5.8–7.0 ms). Phase 1 picks what replaces text at that size.
+- **Text at small sizes**: text is not drawn below about 7 px on screen. With text down to 4 px, the zoom sweep misses the 8 ms p95 (8.7–9.1 ms); with the 7 px cutoff it passes (5.8–7.0 ms). Phase 1 picked what replaces text at that size.
 - **Keystroke-to-paint target**: GPUI draws on the display-link tick, so keystroke-to-paint is the wait for the next vsync plus a 4–5 ms draw (p95 14.1–19.2 ms over three recorded runs at 60 Hz, so "≤ 16 ms" passes or fails by run). We restate the target as "draw ≤ 8 ms per keystroke and the next vsync is never missed" instead of "≤ 16 ms".
 - **Shape height and the GPUI-free core (ADR 0001)**: shape height comes from text layout, and text layout needs GPUI's window text system. The core therefore takes a text-measuring function from the UI layer (or stores heights the UI refreshes) instead of measuring text itself.
 - **Things to build ourselves**: CJK line breaking (UAX #14, kinsoku), a context-menu widget and Phase 7's multi-line editor. GPUI's crate ships none of them.
