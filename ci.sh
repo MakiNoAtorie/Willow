@@ -3,23 +3,18 @@
 set -e
 cd "$(dirname "$0")"
 J=${1:-4}
-if [ -f Cargo.toml ]; then
-  cargo fmt --all --check
-  cargo build -j "$J" --workspace --all-targets
-  cargo test -j "$J" --workspace -- --test-threads=2
-  cargo clippy -j "$J" --workspace --all-targets -- -D warnings
-  # Windows is verified by hand later; keep its code compiling meanwhile.
-  if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$'; then
-    cargo clippy -j "$J" -p willow-app --target x86_64-pc-windows-gnu -- -D warnings
-  else
-    echo "warning: x86_64-pc-windows-gnu not installed: Windows type-check skipped (rustup target add x86_64-pc-windows-gnu)"
-  fi
+cargo fmt --all --check
+cargo build -j "$J" --workspace --all-targets
+cargo test -j "$J" --workspace -- --test-threads=2
+cargo clippy -j "$J" --workspace --all-targets -- -D warnings
+# Windows is checked by hand; keep its code compiling.
+if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$'; then
+  cargo clippy -j "$J" -p willow-app --target x86_64-pc-windows-gnu -- -D warnings
 else
-  echo "No Cargo workspace yet: Rust checks skipped."
+  echo "warning: x86_64-pc-windows-gnu not installed: Windows type-check skipped (rustup target add x86_64-pc-windows-gnu)"
 fi
 # ADR 0001: the core crate stays GPUI-free, directly or through any dependency.
 for m in crates/*core*/Cargo.toml; do
-  [ -f "$m" ] || continue
   if cargo tree --manifest-path "$m" --prefix none | grep -qi '^gpui'; then
     echo "error: GPUI dependency in the core crate ($m)"
     exit 1
