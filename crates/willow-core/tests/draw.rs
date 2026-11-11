@@ -289,7 +289,8 @@ fn a_generated_document_draws_its_connectors_and_zones() {
         w * 120.0 / 15.0 + 320.0 > v.zone.width as f32
     };
     assert!(f.zones.iter().any(wide), "some titles must not fit");
-    assert!(f.zones.iter().all(|v| v.show_title != wide(v)));
+    // (Titles that fit may still hide, under a member shape.)
+    assert!(f.zones.iter().all(|v| !(v.show_title && wide(v))));
 }
 
 #[test]

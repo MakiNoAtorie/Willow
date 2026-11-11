@@ -112,6 +112,9 @@ pub struct PanelRow {
     pub number: Option<usize>,
     /// Top of the row, screen pixels down from the panel's top.
     pub y: f32,
+    /// Left of the row's text, screen pixels from inside the hairline: the gutter, plus the
+    /// line's hanging indent on a continuation row.
+    pub x: f32,
     /// Byte range into the panel text, line break excluded.
     pub range: Range<usize>,
     /// Colored runs covering `range` in order.
@@ -172,41 +175,53 @@ pub(super) fn columns(g: &str) -> usize {
     1 + wide as usize
 }
 
-/// Byte ranges of the rows `line` wraps into at `cols` columns: after the last space that
-/// fits, else after the last grapheme that fits. An empty line is one empty row.
+/// Columns `line`'s continuation rows start in at `cols` columns: its leading spaces, at most
+/// half the row, so a deeply indented line still wraps.
+pub(super) fn hang(line: &str, cols: usize) -> usize {
+    (line.len() - line.trim_start_matches(' ').len()).min(cols / 2)
+}
+
+/// Byte ranges of the rows `line` wraps into at `cols` columns, continuation rows `hang`
+/// columns narrower: after the last space that fits, else after the last grapheme that fits.
+/// An empty line is one empty row.
 pub(super) fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
+    let narrow = cols - hang(line, cols);
+    let mut rows = Vec::new();
+    let mut start = 0;
+    loop {
+        let end = start + row_end(&line[start..], if start == 0 { cols } else { narrow });
+        rows.push(start..end);
+        if end == line.len() {
+            return rows;
+        }
+        start = end;
+    }
+}
+
+/// Where `s`'s first row at `cols` columns ends, as `wrap` breaks it.
+fn row_end(s: &str, cols: usize) -> usize {
     // No grapheme takes more columns than bytes.
-    if line.len() <= cols {
-        return std::iter::once(0..line.len()).collect();
+    if s.len() <= cols {
+        return s.len();
     }
     // An ASCII line is a column per byte: skip the grapheme segmenter.
-    let ascii = line.is_ascii();
-    let graphemes: Box<dyn Iterator<Item = (usize, &str)>> = if ascii {
-        Box::new((0..line.len()).map(|i| (i, &line[i..i + 1])))
+    let graphemes: Box<dyn Iterator<Item = (usize, &str)>> = if s.is_ascii() {
+        Box::new((0..s.len()).map(|i| (i, &s[i..i + 1])))
     } else {
-        Box::new(line.grapheme_indices(true))
+        Box::new(s.grapheme_indices(true))
     };
-    let mut rows = Vec::new();
-    let (mut start, mut col, mut space) = (0, 0, None);
+    let (mut col, mut space) = (0, None);
     for (i, g) in graphemes {
         let w = columns(g);
-        if col + w > cols && i > start {
-            let end = space.filter(|&s| s > start).unwrap_or(i);
-            rows.push(start..end);
-            col = if ascii {
-                i - end
-            } else {
-                line[end..i].graphemes(true).map(columns).sum()
-            };
-            (start, space) = (end, None);
+        if col + w > cols && i > 0 {
+            return space.unwrap_or(i);
         }
         col += w;
         if g == " " {
             space = Some(i + 1);
         }
     }
-    rows.push(start..line.len());
-    rows
+    s.len()
 }
 
 /// Canonical text to write from a document: built on the UI thread by
@@ -358,6 +373,7 @@ impl Session {
                 }],
                 _ => color_spans(&text[start..end], c, ink),
             };
+            let hung = hang(&text[start..end], rows.cols) as f32;
             for (k, r) in wrap(&text[start..end], rows.cols).into_iter().enumerate() {
                 let y = c.pad_top + (row + k) as f32 * rh - scroll;
                 if y + rh <= 0.0 || y >= height {
@@ -375,6 +391,7 @@ impl Session {
                 out.push(PanelRow {
                     number,
                     y,
+                    x: c.gutter_width + if k > 0 { hung * c.column() } else { 0.0 },
                     range,
                     spans,
                     invalid,

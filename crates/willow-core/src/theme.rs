@@ -292,6 +292,9 @@ pub struct ChromeStyle {
     pub mac_title_size: f32,
     /// macOS: the traffic lights' offset from the window's top-left corner.
     pub mac_traffic_light: f32,
+    /// macOS: the title keeps this far from both ends of the canvas area (clear of the traffic
+    /// lights and the panel toggle), centered between them, and truncates if it must.
+    pub mac_title_inset: f32,
     /// Windows: the custom bar, its title size, the min/max/close buttons and their icon
     /// glyph size, and the menu button.
     pub win_height: f32,
@@ -720,6 +723,8 @@ pub const PAPER: Theme = Theme {
         mac_height: 38.0,
         mac_title_size: 13.0,
         mac_traffic_light: 12.0,
+        // The three 12-point lights 8 apart end 64 in; then a 16 gap.
+        mac_title_inset: 80.0,
         win_height: 34.0,
         win_title_size: 12.5,
         win_button_width: 46.0,

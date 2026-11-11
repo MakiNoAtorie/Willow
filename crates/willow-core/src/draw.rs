@@ -2,7 +2,7 @@
 //! theme's low-zoom thresholds.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -103,8 +103,8 @@ pub struct VisibleZone<'a> {
     /// `ZoneStyle::pill`'s capsule behind a shown title with text or being edited: top-left and
     /// bottom-right in canvas units.
     pub pill: Option<(Point, Point)>,
-    /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
-    /// edited; else paint none.
+    /// The title fits inside the zone on screen, `title_x` in on both sides, and its box (pill
+    /// included) clears every member shape's drawn rect, or it is being edited; else paint none.
     pub show_title: bool,
     /// While its title is edited: the text selection highlight (top-left, bottom-right), the
     /// IME marked text's underline (from, to: `Theme.caret.marked_underline` screen px thick,
@@ -227,65 +227,7 @@ impl Session {
                 hovered: self.connector_hovered(&p.id, &q.id),
             });
         }
-        let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
-        let nested: HashSet<&ShapeId> = (doc.zones.iter())
-            .flat_map(|z| &z.members)
-            .filter(|m| zone_ids.contains(m))
-            .collect();
-        let zt = &t.zone;
-        let k = 1.0 / vp.zoom.min(1.0);
-        let title_size = self.title_size();
-        let zone_resized = self.zone_resize_preview();
-        let zones = (doc.zones.iter())
-            .map(|z| match (&zone_resized, group) {
-                (Some(r), _) if r.id == z.id => Cow::Owned(r.clone()),
-                (_, Some((dx, dy))) if moved.contains(&z.id) => Cow::Owned(Zone {
-                    x: z.x + dx,
-                    y: z.y + dy,
-                    ..z.clone()
-                }),
-                _ => Cow::Borrowed(z),
-            })
-            .filter(|z| {
-                let (x, y) = (z.x as f32, z.y as f32);
-                x <= b.x && x + z.width as f32 >= a.x && y <= b.y && y + z.height as f32 >= a.y
-            })
-            .map(|zone| {
-                let (pastel, nested) = (t.pastel(zone.color), nested.contains(&zone.id));
-                let e = self.editing().filter(|e| e.zone && e.id == zone.id);
-                let fill = if nested {
-                    zt.nested_fill_mix
-                } else {
-                    zt.fill_mix
-                };
-                let source = match zt.fill_picker {
-                    true => t.picker(zone.color),
-                    false => pastel,
-                };
-                VisibleZone {
-                    nested,
-                    fill: mix(t.canvas, source, fill),
-                    edge: zt
-                        .edge_color
-                        .unwrap_or(mix(pastel, t.picker(zone.color), zt.edge_mix)),
-                    title_at: self.title_at(&zone),
-                    title_size,
-                    text: title_text(zt, &zone.title).into_owned(),
-                    title_spacing: zt.title_spacing * title_size,
-                    pill: (e.is_some() || !zone.title.is_empty())
-                        .then(|| self.title_pill(&zone, title_size))
-                        .flatten(),
-                    show_title: e.is_some()
-                        || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
-                            <= zone.width as f32,
-                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
-                    marked: e.and_then(|e| self.title_underline(e.marked.clone()?)),
-                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
-                    zone,
-                }
-            })
-            .collect();
-        let shapes = (doc.shapes.iter().enumerate())
+        let shapes: Vec<Visible<'a>> = (doc.shapes.iter().enumerate())
             .filter_map(|(i, s)| {
                 let (s, x, y) = shown(i, s);
                 let (fx, fy) = (x as f32, y as f32);
@@ -329,6 +271,90 @@ impl Session {
                     appear,
                     slide,
                 })
+            })
+            .collect();
+        // Visible shapes' drawn rects, for titles running under a member (shapes paint later).
+        let rects: HashMap<&ShapeId, (Point, Point)> = match doc.zones.is_empty() {
+            true => HashMap::new(),
+            false => (shapes.iter())
+                .map(|v| {
+                    let (x, y) = (v.x as f32, v.y as f32);
+                    let to = Point {
+                        x: x + v.shape.width as f32,
+                        y: y + v.height,
+                    };
+                    (&v.shape.id, (Point { x, y }, to))
+                })
+                .collect(),
+        };
+        let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
+        let nested: HashSet<&ShapeId> = (doc.zones.iter())
+            .flat_map(|z| &z.members)
+            .filter(|m| zone_ids.contains(m))
+            .collect();
+        let zt = &t.zone;
+        let k = 1.0 / vp.zoom.min(1.0);
+        let title_size = self.title_size();
+        let zone_resized = self.zone_resize_preview();
+        let zones = (doc.zones.iter())
+            .map(|z| match (&zone_resized, group) {
+                (Some(r), _) if r.id == z.id => Cow::Owned(r.clone()),
+                (_, Some((dx, dy))) if moved.contains(&z.id) => Cow::Owned(Zone {
+                    x: z.x + dx,
+                    y: z.y + dy,
+                    ..z.clone()
+                }),
+                _ => Cow::Borrowed(z),
+            })
+            .filter(|z| {
+                let (x, y) = (z.x as f32, z.y as f32);
+                x <= b.x && x + z.width as f32 >= a.x && y <= b.y && y + z.height as f32 >= a.y
+            })
+            .map(|zone| {
+                let (pastel, nested) = (t.pastel(zone.color), nested.contains(&zone.id));
+                let e = self.editing().filter(|e| e.zone && e.id == zone.id);
+                let fill = if nested {
+                    zt.nested_fill_mix
+                } else {
+                    zt.fill_mix
+                };
+                let source = match zt.fill_picker {
+                    true => t.picker(zone.color),
+                    false => pastel,
+                };
+                let (title_at, width) = (
+                    self.title_at(&zone),
+                    self.title_width(&zone.title, title_size),
+                );
+                let pill = self.title_pill(title_at, width, title_size);
+                // The title's box, pill included: hidden where a member shape would cover it.
+                let (from, to) = pill.unwrap_or((
+                    title_at,
+                    Point {
+                        x: title_at.x + width,
+                        y: title_at.y + t.line_height * title_size,
+                    },
+                ));
+                let covered = (zone.members.iter().filter_map(|m| rects.get(m)))
+                    .any(|(p, q)| p.x < to.x && q.x > from.x && p.y < to.y && q.y > from.y);
+                VisibleZone {
+                    nested,
+                    fill: mix(t.canvas, source, fill),
+                    edge: zt
+                        .edge_color
+                        .unwrap_or(mix(pastel, t.picker(zone.color), zt.edge_mix)),
+                    title_at,
+                    title_size,
+                    text: title_text(zt, &zone.title).into_owned(),
+                    title_spacing: zt.title_spacing * title_size,
+                    pill: pill.filter(|_| e.is_some() || !zone.title.is_empty()),
+                    show_title: e.is_some()
+                        || (!covered && width + 2.0 * zt.title_x * k <= zone.width as f32),
+                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
+                    marked: e.and_then(|e| self.title_underline(e.marked.clone()?)),
+                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
+                    zone,
+                }
             })
             .collect();
         let full = vp.zoom >= z.fade_end;
@@ -381,13 +407,13 @@ impl Session {
         }
     }
 
-    /// The capsule around `zone`'s title at `size`: top-left and bottom-right in canvas units.
-    fn title_pill(&self, zone: &Zone, size: f32) -> Option<(Point, Point)> {
+    /// The capsule around a title at `at`, `width` wide at `size`: top-left and bottom-right in
+    /// canvas units.
+    fn title_pill(&self, at: Point, width: f32, size: f32) -> Option<(Point, Point)> {
         let t = self.theme();
         let pill = t.zone.pill?;
-        let (at, k) = (self.title_at(zone), 1.0 / self.viewport().zoom.min(1.0));
+        let k = 1.0 / self.viewport().zoom.min(1.0);
         let (x, y) = (pill.pad_x * k, pill.pad_y * k);
-        let width = self.title_width(&zone.title, size);
         let from = Point {
             x: at.x - x,
             y: at.y - y,

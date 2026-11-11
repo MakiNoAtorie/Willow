@@ -105,6 +105,41 @@ fn end_on_a_wrapped_row_stays_on_that_row() {
 }
 
 #[test]
+fn continuation_rows_hang_at_the_lines_indent() {
+    // Indented 4, the line wraps after its space into 48 columns, then 44 hung 4 in (30 px):
+    // rows 0..15, 15..59 and 59..65.
+    let mut s = panel(&format!("    {} {}", "a".repeat(10), "b".repeat(50)));
+    let rows: Vec<_> = (s.panel_rows().into_iter())
+        .map(|r| (r.range, (r.x * 8.0).round() / 8.0))
+        .collect();
+    assert_eq!(rows, [(0..15, 40.0), (15..59, 70.0), (59..65, 70.0)]);
+    // Down from column 6 stays in column 6: the hung row's third character.
+    for _ in 0..6 {
+        s.handle(Input::Move(Motion::Right), T);
+    }
+    s.handle(Input::Move(Motion::Down), T);
+    assert_eq!(s.panel().caret(), 17);
+    assert_eq!(s.panel_caret(T).unwrap().pos, p(85.0, 66.625));
+    // A press left of the hang goes to the row's start; one past it, to that column.
+    press(&mut s, at(1.0, 1.0), false);
+    assert_eq!(s.panel().caret(), 15);
+    press(&mut s, at(2.0, 6.0), false);
+    assert_eq!(s.panel().caret(), 61);
+    // A selection on a hung row starts at the hang.
+    assert_eq!(
+        round(s.panel_rects(15..17)),
+        [(p(70.0, 66.625), p(85.0, 87.25))]
+    );
+    // Indented deeper than half the row, the hang stops there (24 columns, 180 px): the
+    // text still wraps.
+    let s = panel(&format!("{}{}", " ".repeat(40), "c".repeat(30)));
+    let rows: Vec<_> = (s.panel_rows().into_iter())
+        .map(|r| (r.range, (r.x * 8.0).round() / 8.0))
+        .collect();
+    assert_eq!(rows, [(0..40, 40.0), (40..64, 220.0), (64..70, 220.0)]);
+}
+
+#[test]
 fn tab_inserts_two_spaces_and_enter_keeps_the_indent() {
     let mut s = panel("zone z {\n  a: \"x\"\n}");
     s.handle(Input::Move(Motion::Down), T);

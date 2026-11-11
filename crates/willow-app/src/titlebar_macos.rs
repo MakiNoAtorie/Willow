@@ -15,23 +15,35 @@ pub fn one_full_screen_item() {
 
 pub fn title_bar(name: &str, session: &Session, _: &mut Window, _: &mut App) -> impl IntoElement {
     let c = session.theme().chrome;
+    let p = session.panel();
+    // Centered over the canvas area, not the whole window: the open panel takes the right.
+    let canvas_right = if p.open { p.width } else { 0.0 };
     div()
         .absolute()
         .top_0()
         .left_0()
         .right_0()
         .h(px(c.mac_height))
-        .flex()
-        .items_center()
-        .justify_center()
         .text_size(px(c.mac_title_size))
         .font_weight(gpui::FontWeight(c.title_weight))
         .text_color(color(c.title))
-        .child(if session.is_saved() {
-            name.to_string()
-        } else {
-            format!("{name} — Edited")
-        })
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .right(px(canvas_right))
+                .px(px(c.mac_title_inset))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().min_w_0().truncate().child(if session.is_saved() {
+                    name.to_string()
+                } else {
+                    format!("{name} — Edited")
+                })),
+        )
         .child(panel::toggle(
             div()
                 .absolute()
