@@ -30,15 +30,13 @@ impl Session {
         beyond(self.doc.shapes.len(), &self.link_ends(), root, from)
     }
 
-    /// The shapes linked to `id` on the `side` the writer sees (the side rule on drawn centers),
-    /// nearest center first; ties go in generation order.
-    pub(super) fn linked_on(&self, id: &ShapeId, side: Side) -> Vec<ShapeId> {
+    /// The shape linked to `id` on the `side` the writer sees (the side rule on drawn centers)
+    /// with the nearest center; ties go in generation order.
+    pub(super) fn nearest_linked_on(&self, id: &ShapeId, side: Side) -> Option<ShapeId> {
         let find = |id: &ShapeId| self.doc.shapes.iter().find(|s| &s.id == id);
         let center = |s: &Shape| self.drawn(s).center();
-        let Some(c) = find(id).map(center) else {
-            return Vec::new();
-        };
-        let mut on: Vec<(f32, &ShapeId)> = (self.doc.links.iter())
+        let c = find(id).map(center)?;
+        (self.doc.links.iter())
             .filter_map(|Link(a, b)| match (a == id, b == id) {
                 (true, _) => find(b),
                 (_, true) => find(a),
@@ -46,13 +44,11 @@ impl Session {
             })
             .map(|s| (center(s), &s.id))
             .filter(|&(p, _)| crate::side(c, p) == side)
-            .map(|(p, n)| ((p.x - c.x).hypot(p.y - c.y), n))
-            .collect();
-        on.sort_by(|(d, a), (e, b)| {
-            d.total_cmp(e)
-                .then(a.0.len().cmp(&b.0.len()).then(a.0.cmp(&b.0)))
-        });
-        on.into_iter().map(|(_, n)| n.clone()).collect()
+            .map(|(p, n)| ((p - c).len(), n))
+            .min_by(|(d, a), (e, b)| {
+                (d.total_cmp(e)).then(a.generation_order().cmp(&b.generation_order()))
+            })
+            .map(|(_, n)| n.clone())
     }
 
     /// How far `far` must move toward `side` (as seen from `near`) to sit at least `gap` beyond

@@ -8,16 +8,13 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
+use common::{id, open, saved, saved_text, settle};
 use willow_core::{
     Button, Document, Input, Link, Measure, Modifiers, Motion, PAPER, Paragraph, Point, Recovery,
     Session, Shape, ShapeId, Side, Theme, Viewport, generate, load, save, side,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn doc(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Document {
     Document {
@@ -312,42 +309,14 @@ fn the_shortest_way_out_inside_a_chain_keeps_the_creation_gap_to_the_linked_shap
     assert_eq!(drawn(&s, "c"), (258.0, 323.0));
 }
 
-/// What the app does after every input: runs a due regeneration and hands the text back.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        s.regenerated(job.run());
-    }
-}
-
-fn open(bytes: &[u8]) -> Session {
-    let loaded = load(bytes).unwrap();
-    Session::open(loaded, bytes.to_vec(), &PAPER, Box::new(common::Fake))
-}
-
-fn saved_bytes(s: &mut Session) -> Vec<u8> {
-    let mut written = Vec::new();
-    s.save(|b| {
-        written = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
-    written
-}
-
 #[test]
 fn a_crowded_file_opens_saved_drawn_clear_and_saves_the_same_bytes() {
-    let mut bytes = Vec::new();
-    let mut made = session(&[("a", 0, 0), ("b", 0, 30)], &[]);
-    made.save(|b| {
-        bytes = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
+    let bytes = saved(&mut session(&[("a", 0, 0), ("b", 0, 30)], &[]));
     let mut s = open(&bytes);
     assert_eq!(drawn(&s, "b"), (0.0, 73.0));
     assert!(s.is_saved());
     assert_eq!(s.recovery_wake(T), None);
-    assert_eq!(saved_bytes(&mut s), bytes);
+    assert_eq!(saved(&mut s), bytes);
 }
 
 #[test]
@@ -359,7 +328,7 @@ fn a_file_with_linked_shapes_closer_than_the_gap_opens_saved_with_them_drawn_at_
     assert_eq!(placed(&s, "b"), (0, 60));
     assert!(s.is_saved());
     assert_eq!(s.recovery_wake(T), None);
-    assert_eq!(saved_bytes(&mut s), bytes);
+    assert_eq!(saved(&mut s), bytes);
 }
 
 #[test]
@@ -521,15 +490,11 @@ fn two_sessions_on_one_document_agree_whatever_its_order() {
 fn a_save_and_load_gives_the_same_picture_and_bytes() {
     for seed in 1..=4 {
         let mut s = common::session_of(squeezed(seed));
-        let bytes = saved_bytes(&mut s);
+        let bytes = saved(&mut s);
         let mut again = open(&bytes);
         assert_eq!(picture(&s), picture(&again), "seed {seed}");
-        assert_eq!(saved_bytes(&mut again), bytes, "seed {seed}");
+        assert_eq!(saved(&mut again), bytes, "seed {seed}");
     }
-}
-
-fn text(s: &mut Session) -> String {
-    String::from_utf8(saved_bytes(s)).unwrap()
 }
 
 /// `a` very tall, with `b` linked at a placed position inside it: its center is above `a`'s.
@@ -542,7 +507,7 @@ fn tall_with_linked() -> Document {
 #[test]
 fn a_shape_linked_below_a_very_tall_shape_stays_below_it_and_its_layout_stays_placed() {
     let mut s = common::session_of(tall_with_linked());
-    let text = text(&mut s);
+    let text = saved_text(&mut s);
     assert!(text.contains("b: \"\" below a\n"), "{text}");
     assert!(text.contains("@layout b 0,200 w210\n"), "{text}");
 }
@@ -559,7 +524,7 @@ fn pushed_past_another() -> Session {
 
 #[test]
 fn story_order_reads_drawn_positions_and_the_layout_lines_stay_placed() {
-    let text = text(&mut pushed_past_another());
+    let text = saved_text(&mut pushed_past_another());
     let line = |l: &str| text.find(l).unwrap_or_else(|| panic!("{l} in {text}"));
     assert!(line("d: \"\"") < line("c: \"\""), "{text}");
     assert!(text.contains("@layout c 1000,200 w210\n"), "{text}");
@@ -618,7 +583,7 @@ fn save_recovery_and_regeneration_write_the_same_text_read_from_drawn_positions(
             panic!("a write is due");
         };
         let recovered = save(&document, &heights, &drawn);
-        let saved = text(&mut s);
+        let saved = saved_text(&mut s);
         assert_eq!(recovered, saved, "seed {seed}");
         assert_reads_as_drawn(&saved, &s);
         s.handle(Input::TogglePanel, due);
@@ -631,10 +596,10 @@ fn save_recovery_and_regeneration_write_the_same_text_read_from_drawn_positions(
 fn after_growth_a_load_and_save_gives_the_same_picture_and_bytes() {
     for seed in 1..=4 {
         let mut s = grown(seed);
-        let bytes = saved_bytes(&mut s);
+        let bytes = saved(&mut s);
         let mut again = open(&bytes);
         assert_eq!(picture(&s), picture(&again), "seed {seed}");
         assert!(again.is_saved(), "seed {seed}");
-        assert_eq!(saved_bytes(&mut again), bytes, "seed {seed}");
+        assert_eq!(saved(&mut again), bytes, "seed {seed}");
     }
 }

@@ -2,18 +2,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, ms, plain, pt, session_of, typ};
 use willow_core::{Button, Input, Key, Modifiers, Motion, Point, Session};
 
 const T: Duration = Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
 
 /// The text's top-left on screen: the centered 210 x 48.5 shape at (395, 376), plus padding.
 const TEXT: Point = Point { x: 411.0, y: 389.0 };
@@ -43,20 +35,6 @@ fn drag(s: &mut Session, button: Button, from: Point, to: Point) {
     let mods = Modifiers::default();
     s.handle(Input::PointerMove { pos: to, mods }, T);
     release(s, button, to);
-}
-
-fn typ(s: &mut Session, text: &str) {
-    s.handle(
-        Input::Text {
-            text: text.into(),
-            replace: None,
-        },
-        T,
-    );
-}
-
-fn plain(s: &Session) -> String {
-    s.document().shapes[0].text.plain()
 }
 
 fn caret(s: &Session) -> Option<usize> {
@@ -323,7 +301,8 @@ fn the_caret_blinks_then_goes_solid_and_stops_animating() {
 
     assert!(s.caret(ms(1000 + idle)).unwrap().visible);
     assert!(!s.animating(ms(1000 + idle)));
-    assert!(!s.tick(ms(1000 + idle)).animating);
+    s.tick(ms(1000 + idle));
+    assert!(!s.animating(ms(1000 + idle)));
 }
 
 #[test]

@@ -4,14 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
-use willow_core::{Document, Input, Link, Session, Shape, ShapeId, Side};
+use common::{id, session_of};
+use willow_core::{Document, Input, Link, Session, Shape, Side};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Empty shapes at the given top-lefts with the given links, `a` selected.
 fn shapes(at: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {
@@ -115,7 +111,8 @@ fn an_off_screen_target_pans_the_view_just_enough_eased_without_zooming() {
     );
     assert!(mid < vp.origin.y);
     assert_eq!((vp.origin.x, vp.zoom), (before.origin.x, before.zoom));
-    assert!(!s.tick(Duration::from_millis(500)).animating);
+    s.tick(Duration::from_millis(500));
+    assert!(!s.animating(Duration::from_millis(500)));
 }
 
 #[test]

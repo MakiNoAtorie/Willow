@@ -4,10 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, session_of};
 use willow_core::{
     Button, Color, Document, Input, MenuAction, Modifiers, PAPER, Point, Rgba, Session, Shape,
-    ShapeId, THEMES, Theme, Zone,
+    THEMES, Theme, Zone,
 };
 
 const T: Duration = Duration::ZERO;
@@ -22,10 +22,6 @@ const SCREEN: (Point, Point) = (
 
 fn desk() -> &'static Theme {
     THEMES.iter().copied().find(|t| t.name == "Desk").unwrap()
-}
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
 }
 
 /// Rose shape "a" at (100, 100) inside rose zone "z" titled "Act I", in `theme`.

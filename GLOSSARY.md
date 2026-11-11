@@ -68,6 +68,9 @@ _Avoid_: Display position, visual position
 The process that works out drawn positions from placed positions, sizes, links and the theme's gaps, so no two shapes crowd each other.
 _Avoid_: Layout pass, reflow
 
+**Slide**:
+A shape easing to its new drawn position after the spacing pass.
+
 **Midpoint**:
 One of the four circles at a hovered shape's edge midpoints; click to create a linked shape, drag to link.
 _Avoid_: Handle, port, anchor
@@ -78,18 +81,24 @@ _Avoid_: Splice
 
 **Push**:
 A shape's drawn position moved away from its placed position by the spacing pass; it moves a linked subtree or a whole other chain as one block.
-_Avoid_: Nudge, shove, reflow
+_Avoid_: Shove, reflow
+
+**Nudge**:
+Ctrl/Cmd+Arrow moves the selection by the theme's nudge step (24 units); a saved move, never a Push.
 
 **Hub**:
 The neighbor of a deleted shape that its opposite-side neighbors relink to.
 
 **Directional picker**:
-The overlay Tab shows over a shape, from which an arrow key creates a linked shape on that side.
+The overlay Tab shows over a shape, from which an arrow key creates a linked shape on that side. The code calls it the tab picker (`session/tab_picker.rs`).
 _Avoid_: Directional indicator
 
 **Keyboard pan**:
 Panning the view with the arrow keys while nothing is selected.
 _Avoid_: Scroll
+
+**Marquee**:
+The rectangle Shift+drag draws to select the shapes it touches.
 
 ### Zones
 
@@ -121,6 +130,9 @@ _Avoid_: Error, broken line
 **Ignored line**:
 A line in the code panel that is skipped without blocking (an unknown line, or layout for a missing ID) and dropped at the next regeneration.
 _Avoid_: Comment
+
+**Direction word**:
+The `below a` or `right of b` word in the text format: the side of its link a shape is drawn on, read from drawn positions at save time.
 
 ### Look
 

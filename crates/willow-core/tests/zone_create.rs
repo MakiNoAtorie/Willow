@@ -3,17 +3,13 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, saved, session_of};
 use willow_core::{
     Button, Color, Document, Input, MenuAction, MenuEntry, Modifiers, PAPER, Point, Session, Shape,
-    ShapeId, Zone, load,
+    Zone, load,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn zone(name: &str, members: &[&str]) -> Zone {
     Zone {
@@ -142,12 +138,7 @@ fn a_nested_zone_joins_its_parent_and_draws_above_its_siblings_as_a_drop_would()
 fn creation_is_one_undo_step_and_the_saved_text_round_trips() {
     let mut s = session(vec![]);
     create(&mut s, &["a", "b"]);
-    let mut bytes = Vec::new();
-    s.save(|b| {
-        bytes = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
+    let bytes = saved(&mut s);
     let loaded = load(&bytes).unwrap();
     assert_eq!(loaded.document.zones, s.document().zones);
     s.handle(Input::Undo, T);

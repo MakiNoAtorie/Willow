@@ -12,10 +12,12 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 
 ## Layout
 - New shape-editing inputs go in `Session::handle_text`, listed in `handle`'s dispatch arm; panel keys go in `panel_key`.
+- Pointer press/move/release handlers live in `session/pointer.rs`, called from `dispatch`.
+- Use `Point::len()` for distances, `Document::shape_index()`/`zone_index()` for ID-to-index maps, `Theme::picker(c)`/`pastel(c)` for colours; do not hand-roll them.
 
 ## Model
 - `doc.zones` order is draw order, parents first.
-- Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor` and `add_zone`/`remove_zone`/`change_zone` (never members)/`join_zone`/`leave_zone`/`order_zones`; text edits through `apply_document`. `Document::link`/`unlink`/`recolor` are for loaders and generators.
+- Session code changes structure only through `History::add`/`remove`/`link`/`unlink`/`recolor` and `add_zone`/`remove_zone`/`change_zone` (never members)/`join_zone`/`leave_zone`/`order_zones`; text edits through `apply_document`. `Document::link`/`unlink`/`recolor` are unrecorded and for test fixtures.
 - A multi-change command wraps them in `History::step` (joins an open editing group); commands that open editing call `begin()` and leave closing to `stop_editing`. Never reorder surviving shapes; write a reorder as remove plus add.
 - Shapes are removed only through `Session::delete(ids)`, which reconnects chains. ID tie-breaks use `generation_order`.
 - Derived indexes cached in `Session` are validated on read.
@@ -48,13 +50,13 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 - Pointer move/up listen window-wide; down and scroll on the canvas or panel div.
 - A non-pointer document change, `Input::FocusLost` and reloads outside `handle` end the pointer gesture via `end_gesture()` (a pan survives); reloads also `stop_editing()`.
 - New popups join Esc's close-first chain in `Session::dispatch`, before the leave-editing arm.
-- Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
+- Cmd/Ctrl shortcuts are GPUI actions mapped to `Input` variants, bound in `bind_keys` (app `main.rs`) as `key!("z")` (Cmd on macOS, Ctrl elsewhere); platform differences go in the `if mac` blocks. Editing keys live in the `editing` key context; bind bare letters only in a non-editing context (macOS swallows them otherwise).
 - Menu items enable via `.when(session.can_x(), …)`; `window.is_action_available` panics during render.
 - Keyboard commands reuse gesture commits; selection moves call `reveal(id)` before `select`.
 - Viewport and selection never go through `History`; selection is set only via `Session::select(ids)`. Reloads go through `History::replace`, then `drop_missing_selection`.
 
 ## Chains
-- Menus are core data (`Session::menu()`); clipboard items go through `Willow::choose`.
+- Menus are core data (`Session::menu()`); clipboard items go through `Willow::choose`. In-window menus build with `menu.rs`'s `panel`/`row`/`separator`.
 - `new_shape_at(c)` is the one New shape path.
 - Touching placed or drawn positions, the spacing pass, moves or slides: read `docs/conventions/spacing.md`.
 
@@ -70,6 +72,6 @@ Binding rules, under 8 KB (`ci.sh`): only rules that bind future work and the co
 - Canvas paint reads only `Session::draw(from, to, now)`, previews and overlays included; large overlapping runs go in `paint_layer`. Paint order: zone fills, `Frame.zone_ring`, titles, connectors, shapes; draw-query geometry is canvas units, multiplied by `vp.zoom` in paint.
 
 ## Tests
-- Drive the core's public API; tests of `pub(crate)` types go in `src/<module>/<name>_tests.rs`. Core tests use `tests/common::Fake` (`session_of` / `doc_with`) and `s.viewport().to_screen(..)` for screen points.
+- Drive the core's public API; tests of `pub(crate)` types go in `src/<module>/<name>_tests.rs`. Core tests use `tests/common::Fake` (`session_of` / `doc_with`) and `s.viewport().to_screen(..)` for screen points. Shared helpers (`id`, `pt`, `ms`, `settle`, `open`, `saved`, `saved_text`, `plain`, `typ`, `doc`, `golden`) come from `tests/common`; do not redefine them. `History` tests live in `src/history/tests.rs` and `zone_tests.rs`.
 - Property tests use the built-in fixed-seed xorshift; large inputs come from `willow_core::generate`. Tests with panel text pending must type it: a paste applies at once.
 - Bench: `cargo run --release -p willow-app -- --bench --machine NAME [--theme NAME] [--shapes N]` appends to `bench/results.csv`. Bench rows go in their own commit after the code they measure. Scenarios press only where the core's hit-test (e.g. `band_at`) confirms the target. Time a background job's UI-thread and off-thread parts as separate metrics.

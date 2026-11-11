@@ -4,14 +4,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
-use willow_core::{Color, Document, Input, Link, Point, Session, Shape, ShapeId, Zone};
+use common::{id, session_of};
+use willow_core::{Color, Document, Input, Link, Point, Session, Shape, Zone};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn session(at: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {
     session_of(Document {

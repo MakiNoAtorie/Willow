@@ -300,6 +300,16 @@ impl Willow {
         }
     }
 
+    /// Sends the system clipboard's text, if any, as a paste; whether there was text.
+    fn paste(&mut self, cx: &mut Context<Self>) -> bool {
+        let text = cx.read_from_clipboard().and_then(|c| c.text());
+        let pasted = text.is_some();
+        if let Some(text) = text {
+            self.input(Input::Paste(text), cx);
+        }
+        pasted
+    }
+
     /// A click on an app menu item that skips the core (Copy, Save) closes the Tab picker, as
     /// every click does; the core closes it for the items it handles.
     fn close_tab_picker(&mut self, cx: &mut Context<Self>) {
@@ -313,11 +323,7 @@ impl Willow {
         use willow_core::MenuAction::{Copy, Cut, Paste};
         match action {
             Cut | Copy => self.copy(cx),
-            Paste => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    return self.input(Input::Paste(text), cx);
-                }
-            }
+            Paste if self.paste(cx) => return,
             _ => {}
         }
         self.input(Input::MenuChoose(action), cx)
@@ -522,12 +528,10 @@ impl Render for Willow {
                 }))
             })
             .when(self.session.can_paste(), |d| {
-                d.on_action(cx.listener(|w, _: &Paste, _, cx| {
-                    let text = cx.read_from_clipboard().and_then(|c| c.text());
-                    if let Some(text) = text {
-                        w.input(Input::Paste(text), cx);
-                    }
-                }))
+                d.on_action(cx.listener(|w, _: &Paste, _, cx| _ = w.paste(cx)))
+            })
+            .when(self.session.can_select_all(), |d| {
+                d.on_action(cx.listener(|w, _: &SelectAll, _, cx| w.input(Input::SelectAll, cx)))
             });
         let root = input_actions!(root, cx,
             StartEditing => Input::StartEditing,
@@ -556,7 +560,6 @@ impl Render for Willow {
             SelectDown => Input::Select(Motion::Down),
             SelectLineStart => Input::Select(Motion::LineStart),
             SelectLineEnd => Input::Select(Motion::LineEnd),
-            SelectAll => Input::SelectAll,
             NewBeside => Input::NewBeside,
             NavLeft => Input::Navigate(Side::Left),
             NavRight => Input::Navigate(Side::Right),
@@ -633,7 +636,7 @@ fn zoom_pill(t: &Theme, pill: ZoomPill) -> impl IntoElement {
                 .bg(color(p.bg))
                 .text_color(color(p.ink))
                 .text_size(px(p.font_size))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .font_weight(gpui::FontWeight(p.font_weight))
                 .child(format!("{}%", pill.percent)),
         )
 }
@@ -1161,6 +1164,125 @@ fn set_menus(cx: &mut App) {
     ]);
 }
 
+/// `$k` after the platform key: `$mac` (`cmd` unless given) on macOS, `ctrl` elsewhere.
+macro_rules! key {
+    ($k:literal) => {
+        key!("cmd", $k)
+    };
+    ($mac:literal, $k:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!($mac, "-", $k)
+        } else {
+            concat!("ctrl-", $k)
+        }
+    };
+}
+
+/// Every key binding. Shared shortcuts use the platform key; only real platform differences
+/// branch.
+fn bind_keys(cx: &mut App) {
+    let mac = cfg!(target_os = "macos");
+    let full_screen = if mac { "ctrl-cmd-f" } else { "f11" };
+    // The native menu shows the first binding: Zoom In reads as Cmd +.
+    cx.bind_keys([
+        KeyBinding::new(key!("0"), ResetZoom, None),
+        KeyBinding::new(key!("+"), ZoomIn, None),
+        KeyBinding::new(key!("="), ZoomIn, None),
+        KeyBinding::new(key!("-"), ZoomOut, None),
+        KeyBinding::new(full_screen, ToggleFullScreen, None),
+        KeyBinding::new(key!("e"), TogglePanel, None),
+        KeyBinding::new(key!("w"), CloseWindow, None),
+        KeyBinding::new(key!("n"), NewFile, None),
+        KeyBinding::new(key!("o"), OpenFile, None),
+        KeyBinding::new(key!("s"), Save, None),
+        KeyBinding::new(key!("shift-s"), SaveAs, None),
+        KeyBinding::new(key!("z"), Undo, None),
+    ]);
+    // Windows has no Quit key: Alt+F4 reaches the OS, which closes the window through
+    // `on_window_should_close`.
+    if mac {
+        cx.bind_keys([
+            KeyBinding::new("cmd-m", Minimize, None),
+            KeyBinding::new("cmd-q", Quit, None),
+        ]);
+    } else {
+        cx.bind_keys([KeyBinding::new("ctrl-y", Redo, None)]);
+    }
+    // Canvas commands: outside editing, where these keys edit text or move the caret.
+    let canvas = Some("!editing");
+    let ed = Some("editing");
+    // Bare arrows navigate unless the text or the color picker takes them.
+    let nav = Some("!editing && !picker");
+    let picker = Some("picker");
+    cx.bind_keys([
+        KeyBinding::new(key!("shift-z"), Redo, None),
+        KeyBinding::new(key!("x"), Cut, None),
+        KeyBinding::new(key!("c"), Copy, None),
+        KeyBinding::new(key!("v"), Paste, None),
+        KeyBinding::new(key!("left"), NudgeLeft, canvas),
+        KeyBinding::new(key!("right"), NudgeRight, canvas),
+        KeyBinding::new(key!("up"), NudgeUp, canvas),
+        KeyBinding::new(key!("down"), NudgeDown, canvas),
+        KeyBinding::new(key!("shift-left"), Narrower, canvas),
+        KeyBinding::new(key!("shift-right"), Wider, canvas),
+        KeyBinding::new(key!("shift-up"), Shorter, canvas),
+        KeyBinding::new(key!("shift-down"), Taller, canvas),
+        KeyBinding::new(key!("shift-n"), NewBeside, canvas),
+        // Enter and Esc everywhere, so they never reach a selected shape as typed text.
+        KeyBinding::new("f2", StartEditing, None),
+        KeyBinding::new("tab", ShowTabPicker, None),
+        KeyBinding::new("enter", Enter, None),
+        KeyBinding::new("shift-enter", NewLine, ed),
+        KeyBinding::new("escape", Escape, None),
+        KeyBinding::new("left", Left, ed),
+        KeyBinding::new("right", Right, ed),
+        KeyBinding::new("up", Up, ed),
+        KeyBinding::new("down", Down, ed),
+        KeyBinding::new("home", LineStart, ed),
+        KeyBinding::new("end", LineEnd, ed),
+        KeyBinding::new("backspace", Backspace, ed),
+        KeyBinding::new("delete", Delete, ed),
+        KeyBinding::new("backspace", DeleteShapes, canvas),
+        KeyBinding::new("delete", DeleteShapes, canvas),
+        KeyBinding::new(key!("d"), Duplicate, canvas),
+        KeyBinding::new(key!("l"), SelectChain, canvas),
+        KeyBinding::new(key!("shift-c"), OpenColorPicker, canvas),
+        KeyBinding::new("left", PickerLeft, picker),
+        KeyBinding::new("right", PickerRight, picker),
+        KeyBinding::new("enter", PickerApply, picker),
+        KeyBinding::new("escape", PickerCancel, picker),
+        KeyBinding::new("left", NavLeft, nav),
+        KeyBinding::new("right", NavRight, nav),
+        KeyBinding::new("up", NavUp, nav),
+        KeyBinding::new("down", NavDown, nav),
+        KeyBinding::new("shift-left", SelectLeft, ed),
+        KeyBinding::new("shift-right", SelectRight, ed),
+        KeyBinding::new("shift-up", SelectUp, ed),
+        KeyBinding::new("shift-down", SelectDown, ed),
+        KeyBinding::new("shift-home", SelectLineStart, ed),
+        KeyBinding::new("shift-end", SelectLineEnd, ed),
+        // Word motions on Alt (macOS) or Ctrl.
+        KeyBinding::new(key!("alt", "left"), WordLeft, ed),
+        KeyBinding::new(key!("alt", "right"), WordRight, ed),
+        KeyBinding::new(key!("alt", "backspace"), WordBackspace, ed),
+        KeyBinding::new(key!("alt", "delete"), WordDelete, ed),
+        KeyBinding::new(key!("b"), ToggleBold, ed),
+        KeyBinding::new(key!("i"), ToggleItalic, ed),
+        KeyBinding::new(key!("alt", "shift-left"), SelectWordLeft, ed),
+        KeyBinding::new(key!("alt", "shift-right"), SelectWordRight, ed),
+        KeyBinding::new(key!("a"), SelectAll, ed),
+    ]);
+    // Line motions on Cmd+arrows: macOS only (Ctrl+arrows move by word on Windows).
+    if mac {
+        cx.bind_keys([
+            KeyBinding::new("cmd-left", LineStart, ed),
+            KeyBinding::new("cmd-right", LineEnd, ed),
+            KeyBinding::new("cmd-shift-left", SelectLineStart, ed),
+            KeyBinding::new("cmd-shift-right", SelectLineEnd, ed),
+        ]);
+    }
+}
+
 /// Seed for `--generate N`: the same document on every run and machine.
 const GENERATE_SEED: u64 = 1;
 
@@ -1183,189 +1305,18 @@ fn main() {
         });
         bench::Bench::new(machine, shapes, theme.unwrap_or(&PAPER))
     });
-    let recover = bench.is_none() && arg("--generate").is_none();
-    let doc = match arg("--generate") {
-        _ if bench.is_some() => {
-            let shapes = bench.as_ref().map_or(0, |b| b.shapes);
-            willow_core::generate(shapes, GENERATE_SEED)
-        }
-        Some(n) => {
-            let n = n.and_then(|n| n.parse().ok());
-            willow_core::generate(n.expect("--generate takes a shape count"), GENERATE_SEED)
-        }
-        None => Document::new(),
-    };
+    // `--bench` ignores `--generate`: it runs on its own shape count.
+    let generate = arg("--generate").filter(|_| bench.is_none()).map(|n| {
+        let n = n.and_then(|n| n.parse().ok());
+        n.expect("--generate takes a shape count")
+    });
+    let recover = bench.is_none() && generate.is_none();
+    let shapes = bench.as_ref().map(|b| b.shapes).or(generate);
+    let doc = shapes.map_or_else(Document::new, |n| willow_core::generate(n, GENERATE_SEED));
     #[cfg(target_os = "macos")]
     titlebar_macos::one_full_screen_item();
     gpui_platform::application().run(move |cx: &mut App| {
-        let reset_zoom = if cfg!(target_os = "macos") {
-            "cmd-0"
-        } else {
-            "ctrl-0"
-        };
-        cx.bind_keys([KeyBinding::new(reset_zoom, ResetZoom, None)]);
-        let (zoom_in, zoom_in_plus, zoom_out) = if cfg!(target_os = "macos") {
-            ("cmd-=", "cmd-+", "cmd--")
-        } else {
-            ("ctrl-=", "ctrl-+", "ctrl--")
-        };
-        // The native menu shows the first binding: Zoom In reads as Cmd +.
-        cx.bind_keys([
-            KeyBinding::new(zoom_in_plus, ZoomIn, None),
-            KeyBinding::new(zoom_in, ZoomIn, None),
-            KeyBinding::new(zoom_out, ZoomOut, None),
-        ]);
-        let full_screen = if cfg!(target_os = "macos") {
-            "ctrl-cmd-f"
-        } else {
-            "f11"
-        };
-        cx.bind_keys([KeyBinding::new(full_screen, ToggleFullScreen, None)]);
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([KeyBinding::new("cmd-m", Minimize, None)]);
-        }
-        let toggle_panel = if cfg!(target_os = "macos") {
-            "cmd-e"
-        } else {
-            "ctrl-e"
-        };
-        cx.bind_keys([KeyBinding::new(toggle_panel, TogglePanel, None)]);
-        // Windows has no Quit key: Alt+F4 reaches the OS, which closes the window through
-        // `on_window_should_close`.
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([
-                KeyBinding::new("cmd-q", Quit, None),
-                KeyBinding::new("cmd-w", CloseWindow, None),
-                KeyBinding::new("cmd-n", NewFile, None),
-                KeyBinding::new("cmd-o", OpenFile, None),
-                KeyBinding::new("cmd-s", Save, None),
-                KeyBinding::new("cmd-shift-s", SaveAs, None),
-            ]);
-        } else {
-            cx.bind_keys([
-                KeyBinding::new("ctrl-w", CloseWindow, None),
-                KeyBinding::new("ctrl-n", NewFile, None),
-                KeyBinding::new("ctrl-o", OpenFile, None),
-                KeyBinding::new("ctrl-s", Save, None),
-                KeyBinding::new("ctrl-shift-s", SaveAs, None),
-            ]);
-        }
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([
-                KeyBinding::new("cmd-z", Undo, None),
-                KeyBinding::new("cmd-shift-z", Redo, None),
-                KeyBinding::new("cmd-x", Cut, None),
-                KeyBinding::new("cmd-c", Copy, None),
-                KeyBinding::new("cmd-v", Paste, None),
-            ]);
-        } else {
-            cx.bind_keys([
-                KeyBinding::new("ctrl-z", Undo, None),
-                KeyBinding::new("ctrl-y", Redo, None),
-                KeyBinding::new("ctrl-shift-z", Redo, None),
-                KeyBinding::new("ctrl-x", Cut, None),
-                KeyBinding::new("ctrl-c", Copy, None),
-                KeyBinding::new("ctrl-v", Paste, None),
-            ]);
-        }
-        // Canvas commands: outside editing, where these keys edit text or move the caret.
-        let canvas = Some("!editing");
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([
-                KeyBinding::new("cmd-left", NudgeLeft, canvas),
-                KeyBinding::new("cmd-right", NudgeRight, canvas),
-                KeyBinding::new("cmd-up", NudgeUp, canvas),
-                KeyBinding::new("cmd-down", NudgeDown, canvas),
-                KeyBinding::new("cmd-shift-left", Narrower, canvas),
-                KeyBinding::new("cmd-shift-right", Wider, canvas),
-                KeyBinding::new("cmd-shift-up", Shorter, canvas),
-                KeyBinding::new("cmd-shift-down", Taller, canvas),
-                KeyBinding::new("cmd-shift-n", NewBeside, canvas),
-            ]);
-        } else {
-            cx.bind_keys([
-                KeyBinding::new("ctrl-left", NudgeLeft, canvas),
-                KeyBinding::new("ctrl-right", NudgeRight, canvas),
-                KeyBinding::new("ctrl-up", NudgeUp, canvas),
-                KeyBinding::new("ctrl-down", NudgeDown, canvas),
-                KeyBinding::new("ctrl-shift-left", Narrower, canvas),
-                KeyBinding::new("ctrl-shift-right", Wider, canvas),
-                KeyBinding::new("ctrl-shift-up", Shorter, canvas),
-                KeyBinding::new("ctrl-shift-down", Taller, canvas),
-                KeyBinding::new("ctrl-shift-n", NewBeside, canvas),
-            ]);
-        }
-        let ed = Some("editing");
-        // Bare arrows navigate unless the text or the color picker takes them.
-        let nav = Some("!editing && !picker");
-        let picker = Some("picker");
-        // Enter and Esc everywhere, so they never reach a selected shape as typed text.
-        cx.bind_keys([
-            KeyBinding::new("f2", StartEditing, None),
-            KeyBinding::new("tab", ShowTabPicker, None),
-            KeyBinding::new("enter", Enter, None),
-            KeyBinding::new("shift-enter", NewLine, ed),
-            KeyBinding::new("escape", Escape, None),
-            KeyBinding::new("left", Left, ed),
-            KeyBinding::new("right", Right, ed),
-            KeyBinding::new("up", Up, ed),
-            KeyBinding::new("down", Down, ed),
-            KeyBinding::new("home", LineStart, ed),
-            KeyBinding::new("end", LineEnd, ed),
-            KeyBinding::new("backspace", Backspace, ed),
-            KeyBinding::new("delete", Delete, ed),
-            KeyBinding::new("backspace", DeleteShapes, canvas),
-            KeyBinding::new("delete", DeleteShapes, canvas),
-            KeyBinding::new("cmd-d", Duplicate, canvas),
-            KeyBinding::new("ctrl-d", Duplicate, canvas),
-            KeyBinding::new("cmd-l", SelectChain, canvas),
-            KeyBinding::new("ctrl-l", SelectChain, canvas),
-            KeyBinding::new("cmd-shift-c", OpenColorPicker, canvas),
-            KeyBinding::new("ctrl-shift-c", OpenColorPicker, canvas),
-            KeyBinding::new("left", PickerLeft, picker),
-            KeyBinding::new("right", PickerRight, picker),
-            KeyBinding::new("enter", PickerApply, picker),
-            KeyBinding::new("escape", PickerCancel, picker),
-            KeyBinding::new("left", NavLeft, nav),
-            KeyBinding::new("right", NavRight, nav),
-            KeyBinding::new("up", NavUp, nav),
-            KeyBinding::new("down", NavDown, nav),
-            KeyBinding::new("shift-left", SelectLeft, ed),
-            KeyBinding::new("shift-right", SelectRight, ed),
-            KeyBinding::new("shift-up", SelectUp, ed),
-            KeyBinding::new("shift-down", SelectDown, ed),
-            KeyBinding::new("shift-home", SelectLineStart, ed),
-            KeyBinding::new("shift-end", SelectLineEnd, ed),
-        ]);
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([
-                KeyBinding::new("alt-left", WordLeft, ed),
-                KeyBinding::new("alt-right", WordRight, ed),
-                KeyBinding::new("cmd-left", LineStart, ed),
-                KeyBinding::new("cmd-right", LineEnd, ed),
-                KeyBinding::new("alt-backspace", WordBackspace, ed),
-                KeyBinding::new("alt-delete", WordDelete, ed),
-                KeyBinding::new("cmd-b", ToggleBold, ed),
-                KeyBinding::new("cmd-i", ToggleItalic, ed),
-                KeyBinding::new("alt-shift-left", SelectWordLeft, ed),
-                KeyBinding::new("alt-shift-right", SelectWordRight, ed),
-                KeyBinding::new("cmd-shift-left", SelectLineStart, ed),
-                KeyBinding::new("cmd-shift-right", SelectLineEnd, ed),
-                KeyBinding::new("cmd-a", SelectAll, ed),
-            ]);
-        } else {
-            cx.bind_keys([
-                KeyBinding::new("ctrl-left", WordLeft, ed),
-                KeyBinding::new("ctrl-right", WordRight, ed),
-                KeyBinding::new("ctrl-backspace", WordBackspace, ed),
-                KeyBinding::new("ctrl-delete", WordDelete, ed),
-                KeyBinding::new("ctrl-b", ToggleBold, ed),
-                KeyBinding::new("ctrl-i", ToggleItalic, ed),
-                KeyBinding::new("ctrl-shift-left", SelectWordLeft, ed),
-                KeyBinding::new("ctrl-shift-right", SelectWordRight, ed),
-                KeyBinding::new("ctrl-a", SelectAll, ed),
-            ]);
-        }
+        bind_keys(cx);
         cx.text_system()
             .add_fonts(bundled_fonts())
             .expect("bundled fonts");

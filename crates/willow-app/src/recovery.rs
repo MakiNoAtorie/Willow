@@ -96,7 +96,7 @@ impl Pending {
                 drawn,
             } => willow_core::save(&document, &heights, &drawn),
             Recovery::Text(text) => text,
-            Recovery::Delete => return,
+            Recovery::Delete => unreachable!("autosave removes the files instead of writing"),
         };
         let path = self
             .path

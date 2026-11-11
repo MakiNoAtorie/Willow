@@ -112,7 +112,7 @@ pub fn generate(n: usize, seed: u64) -> Document {
     while doc.shapes.len() < n {
         let gx = (group % GROUPS_PER_ROW) as i32 * GROUP_W;
         let gy = (group / GROUPS_PER_ROW) as i32 * GROUP_H;
-        let trunk_color = Color::ALL[group % 7];
+        let trunk_color = Color::ALL[group % Color::ALL.len()];
         let mut prev: Option<ShapeId> = None;
         for act in 0..2 {
             let rows = act * ACT_ROWS..(act + 1) * ACT_ROWS;
@@ -121,7 +121,7 @@ pub fn generate(n: usize, seed: u64) -> Document {
             let mut zone = Zone {
                 id: fresh(),
                 title: format!("Part {} · Act {}", group + 1, act + 1),
-                color: Color::ALL[rng.below(7)],
+                color: Color::ALL[rng.below(Color::ALL.len())],
                 x: gx + SIDES[0] * COL - ACT_PAD,
                 y: top - ACT_PAD,
                 width: (4 * COL + DEFAULT_WIDTH as i32 + 2 * ACT_PAD) as u32,
@@ -145,7 +145,10 @@ pub fn generate(n: usize, seed: u64) -> Document {
                     continue;
                 }
                 let side = rng.below(4);
-                let (len, mut color) = (rng.between(2, 5) as i32, Color::ALL[rng.below(7)]);
+                let (len, mut color) = (
+                    rng.between(2, 5) as i32,
+                    Color::ALL[rng.below(Color::ALL.len())],
+                );
                 let linked = SIDES[side].abs() == 1 && rng.below(2) == 0;
                 let start = y.max(free[side]);
                 if start + len * SIDE_ROW > bottom {
@@ -162,7 +165,7 @@ pub fn generate(n: usize, seed: u64) -> Document {
                     nested = Some(Zone {
                         id,
                         title: prose(&mut rng, 2, 3).plain(),
-                        color: Color::ALL[rng.below(7)],
+                        color: Color::ALL[rng.below(Color::ALL.len())],
                         x: x - NESTED_PAD,
                         y: start - NESTED_TOP,
                         width: (DEFAULT_WIDTH as i32 + 2 * NESTED_PAD) as u32,

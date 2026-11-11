@@ -8,8 +8,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Context, EntityInputHandler, Font, FontStyle, FontWeight, LineLayout, Pixels, TextRun,
-    UTF16Selection, Window, WindowTextSystem, point, px, size,
+    Bounds, Context, EntityInputHandler, Font, FontId, FontStyle, FontWeight, Hsla, LineLayout,
+    Pixels, ShapedGlyph, TextRun, UTF16Selection, Window, WindowTextSystem, point, px, size,
 };
 use willow_core::{Input, Layout, Measure, Paragraph, RichText, Run, Theme};
 
@@ -122,8 +122,8 @@ impl Measure for TextMeasure {
 }
 
 /// Paints `text` laid out as `layout`, with the text's top-left at `origin` (screen), scaled
-/// by zoom `z`, in ink at `opacity`. Each glyph keeps its offset inside its cluster; the cluster goes where the
-/// core placed it.
+/// by zoom `z`, in ink at `opacity`. Each glyph keeps its offset inside its cluster; the
+/// cluster goes where the core placed it.
 pub(crate) fn paint_text(
     window: &mut Window,
     origin: gpui::Point<Pixels>,
@@ -134,7 +134,7 @@ pub(crate) fn paint_text(
     opacity: f32,
 ) {
     let ts = window.text_system().clone();
-    // Quantised to half pixels to bound glyph atlas entries across zoom levels.
+    // Quantized to half pixels to bound glyph atlas entries across zoom levels.
     let font_size = px((t.font_size * z * 2.0).round() / 2.0);
     let ink = color(t.ink).opacity(opacity);
     let mut shaped: Option<(usize, Arc<LineLayout>, Vec<f32>)> = None;
@@ -165,20 +165,16 @@ pub(crate) fn paint_text(
                 let gx: f32 = g.position.x.into();
                 let x = c.x + gx - x_by[c.range.start - line.para_start];
                 let o = origin + point(px(x * z), px(baseline * z));
-                // A missing glyph only loses that glyph; nothing to recover.
-                let _ = if g.is_emoji {
-                    window.paint_emoji(o, run.font_id, g.id, font_size)
-                } else {
-                    window.paint_glyph(o, run.font_id, g.id, font_size, ink)
-                };
+                paint_glyph(window, o, run.font_id, g, font_size, ink);
             }
         }
     }
 }
 
-/// Paints one line of plain `text` in the theme font, `bold` or regular, at `size` (screen px),
-/// in the title ink: its glyphs centered in a `Theme.line_height` times `size` line box whose top-left is
-/// `origin`, as shape text's are, with `spacing` screen px after each glyph.
+/// Paints one line of plain `text` in the theme font, `bold` or regular, at `size` (screen
+/// px), in the title ink, with `spacing` screen px after each glyph. Glyphs are centered in a
+/// line box `Theme.line_height` times `size` tall whose top-left is `origin`, as `paint_text`
+/// does.
 pub(crate) fn paint_line(
     window: &mut Window,
     origin: gpui::Point<Pixels>,
@@ -191,13 +187,8 @@ pub(crate) fn paint_line(
     if text.is_empty() {
         return;
     }
-    let mut font = gpui::font(t.font);
     // Asking for 600 itself benched about 1 ms slower per frame than Bold.
-    font.weight = if bold {
-        FontWeight::BOLD
-    } else {
-        FontWeight::NORMAL
-    };
+    let font = font(t, bold, false);
     let run = TextRun {
         len: text.len(),
         font,
@@ -206,7 +197,7 @@ pub(crate) fn paint_line(
         underline: None,
         strikethrough: None,
     };
-    // Quantised to half pixels, as shape text is.
+    // Quantized to half pixels, as shape text is.
     let size = px((size * 2.0).round() / 2.0);
     let l = window.text_system().layout_line(text, size, &[run], None);
     let ink = color(t.title_ink());
@@ -219,14 +210,26 @@ pub(crate) fn paint_line(
         for g in &run.glyphs {
             let o = origin + point(g.position.x + px(n * spacing), baseline);
             n += 1.0;
-            // A missing glyph only loses that glyph; nothing to recover.
-            let _ = if g.is_emoji {
-                window.paint_emoji(o, run.font_id, g.id, size)
-            } else {
-                window.paint_glyph(o, run.font_id, g.id, size, ink)
-            };
+            paint_glyph(window, o, run.font_id, g, size, ink);
         }
     }
+}
+
+/// Paints one glyph at `o`, as an emoji or in `ink`.
+fn paint_glyph(
+    window: &mut Window,
+    o: gpui::Point<Pixels>,
+    font_id: FontId,
+    g: &ShapedGlyph,
+    size: Pixels,
+    ink: Hsla,
+) {
+    // A missing glyph only loses that glyph; nothing to recover.
+    _ = if g.is_emoji {
+        window.paint_emoji(o, font_id, g.id, size)
+    } else {
+        window.paint_glyph(o, font_id, g.id, size, ink)
+    };
 }
 
 /// Underlines byte range `marked` (IME composition) of text laid out as `layout`, with the

@@ -1,4 +1,5 @@
-//! Willow's GPUI-free core: the document model and the themes as plain data (ADR 0001).
+//! Willow's GPUI-free core (ADR 0001): the document model, the text format, text layout, the
+//! `Session` (every command, undo, the code panel, files and the draw query) and the themes.
 
 mod chain;
 mod check;
@@ -14,6 +15,8 @@ mod session;
 mod syntax;
 mod theme;
 mod zoom;
+
+use std::collections::{HashMap, HashSet};
 
 pub use chain::{Link, Side, side};
 pub use check::{LineKind, check};
@@ -53,7 +56,6 @@ pub struct Document {
 
 impl Document {
     /// A new document: one empty shape at the canvas origin.
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut doc = Document::default();
         let id = doc.next_id();
@@ -68,7 +70,7 @@ impl Document {
 
     /// The first `n` IDs no shape or zone uses, in generation order.
     pub(crate) fn next_ids(&self, n: usize) -> Vec<ShapeId> {
-        let ids: std::collections::HashSet<&str> = (self.shapes.iter().map(|s| s.id.0.as_str()))
+        let ids: HashSet<&str> = (self.shapes.iter().map(|s| s.id.0.as_str()))
             .chain(self.zones.iter().map(|z| z.id.0.as_str()))
             .collect();
         (0..)
@@ -76,6 +78,20 @@ impl Document {
             .filter(|id| !ids.contains(id.as_str()))
             .take(n)
             .map(ShapeId)
+            .collect()
+    }
+
+    /// Each shape's index in `shapes`, by ID.
+    pub(crate) fn shape_index(&self) -> HashMap<&ShapeId, usize> {
+        (self.shapes.iter().enumerate())
+            .map(|(i, s)| (&s.id, i))
+            .collect()
+    }
+
+    /// Each zone's index in `zones`, by ID.
+    pub(crate) fn zone_index(&self) -> HashMap<&ShapeId, usize> {
+        (self.zones.iter().enumerate())
+            .map(|(i, z)| (&z.id, i))
             .collect()
     }
 

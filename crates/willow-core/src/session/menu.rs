@@ -3,7 +3,8 @@
 
 use super::Session;
 use crate::input::Point;
-use crate::{Color, Link, Shape, ShapeId, Zone};
+use crate::{Color, Link, Shape, ShapeId};
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// A shape's color fading in from `from`, begun at `start`.
@@ -264,7 +265,7 @@ impl Session {
         self.ripples.retain(|_, x| now < x.start + fade);
         let chain: Vec<ShapeId> = self.doc.chain(id).into_iter().cloned().collect();
         // Steps from the clicked shape; `chain` is in BFS order, so neighbours come first.
-        let mut depth: std::collections::HashMap<&ShapeId, u32> = Default::default();
+        let mut depth: HashMap<&ShapeId, u32> = HashMap::new();
         for id in &chain {
             let d = (self.doc.links.iter())
                 .filter_map(|l| match (&l.0, &l.1) {
@@ -313,22 +314,6 @@ impl Session {
         self.select([id.clone()]);
         // Its begin is a no-op; `stop_editing`'s end closes the step.
         self.start_editing(id);
-    }
-
-    /// The innermost zone containing canvas point `c`: the one drawn on top there. Every
-    /// rule that puts a shape in a zone uses it.
-    pub(super) fn innermost_zone(&self, c: Point) -> Option<ShapeId> {
-        self.zone_at(c, |_| true).map(|z| z.id.clone())
-    }
-
-    /// The last zone in draw order containing canvas point `c` among those `keep` accepts.
-    pub(super) fn zone_at(&self, c: Point, keep: impl Fn(&Zone) -> bool) -> Option<&Zone> {
-        (self.doc.zones.iter()).rfind(|z| {
-            let (x, y) = (z.x as f32, z.y as f32);
-            (x..=x + z.width as f32).contains(&c.x)
-                && (y..=y + z.height as f32).contains(&c.y)
-                && keep(z)
-        })
     }
 }
 

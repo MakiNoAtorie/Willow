@@ -230,6 +230,8 @@ Goal: build and reshape chains with the mouse.
 
 ### Pushing
 
+Replaced by the Phase 8 spacing pass (ADR 0006); only insert-and-push still saves a move.
+
 Until Phase 8's spacing pass, a few changes push shapes out of the way. Pushes are real moves (ADR 0004).
 
 - **What pushes**: a shape growing (typing, dragging its bottom edge, or a width change that reflows its text taller), a shape getting wider (dragging a side edge), midpoint creation and insert-and-push, and blocks that were themselves pushed, so pushes cascade. The writer's own drags, moves and pastes never push: a shape dropped onto another overlaps it.

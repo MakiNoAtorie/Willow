@@ -4,7 +4,7 @@ mod common;
 use std::ops::Range;
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, plain, saved_text, session_of};
 use willow_core::{Button, Input, Link, Modifiers, Point, Recovery, Session, Shape, ShapeId};
 
 const T: Duration = Duration::ZERO;
@@ -44,10 +44,6 @@ fn mark_at(s: &mut Session, text: &str, selected: Option<Range<usize>>, now: Dur
 fn commit(s: &mut Session, text: &str) {
     let (text, replace) = (text.into(), None);
     s.handle(Input::Text { text, replace }, T);
-}
-
-fn plain(s: &Session) -> String {
-    s.document().shapes[0].text.plain()
 }
 
 /// Marked range, caret and anchor.
@@ -177,12 +173,7 @@ fn composed_text_takes_the_pending_style() {
 fn save_commits_the_marked_text_first() {
     let mut s = editing("ab");
     mark(&mut s, "k", None);
-    let mut written = String::new();
-    s.save(|b| {
-        written = String::from_utf8(b.to_vec()).unwrap();
-        Ok(())
-    })
-    .unwrap();
+    let written = saved_text(&mut s);
     assert!(written.contains("a: \"abk\""), "{written}");
     assert_eq!(state(&s), (None, 3, 3));
     assert!(s.is_saved());

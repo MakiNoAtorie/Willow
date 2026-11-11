@@ -1,13 +1,10 @@
 mod common;
 
+use common::{id, ms, pt};
 use std::time::Duration;
 use willow_core::{Button, Cursor, Document, Input, Key, Modifiers, PAPER, Point, Session};
 
 const T: Duration = Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// A session over a 1000 x 800 canvas with the new document's shape centered.
 fn session() -> Session {
@@ -181,10 +178,6 @@ fn click(s: &mut Session, pos: Point, now: Duration) -> willow_core::Response {
     s.handle(Input::PointerUp { pos, button, mods }, now)
 }
 
-fn id(s: &str) -> willow_core::ShapeId {
-    willow_core::ShapeId(s.into())
-}
-
 #[test]
 fn press_release_on_an_unselected_shape_selects_it() {
     let mut s = session();
@@ -266,16 +259,13 @@ fn clicking_empty_canvas_deselects_but_panning_does_not() {
     assert!(s.selection().is_empty());
 }
 
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
 #[test]
 fn the_selection_ring_fades_in_and_out_over_120_ms_and_then_stops() {
     let mut s = session();
     let a = id("a");
 
-    assert!(click(&mut s, ON_SHAPE, ms(1000)).animating);
+    click(&mut s, ON_SHAPE, ms(1000));
+    assert!(s.animating(ms(1000)));
     assert_eq!(s.selection_rings(ms(1000)), vec![(&a, 0.0)]);
     // Paper's `120ms ease-out`: CSS ease-out is 0.685 halfway.
     let mid = s.selection_rings(ms(1060))[0].1;
@@ -284,7 +274,8 @@ fn the_selection_ring_fades_in_and_out_over_120_ms_and_then_stops() {
     assert_eq!(s.selection_rings(ms(1120)), vec![(&a, 1.0)]);
     assert!(!s.animating(ms(1120)));
 
-    assert!(click(&mut s, pt(50.0, 50.0), ms(2000)).animating);
+    click(&mut s, pt(50.0, 50.0), ms(2000));
+    assert!(s.animating(ms(2000)));
     assert_eq!(s.selection_rings(ms(2000)), vec![(&a, 1.0)]);
     assert!(s.animating(ms(2060)));
     assert_eq!(s.selection_rings(ms(2120)), vec![]);

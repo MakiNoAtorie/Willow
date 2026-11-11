@@ -3,17 +3,13 @@ mod common;
 
 use std::time::Duration;
 
-use common::session_of;
+use common::{id, session_of};
 use willow_core::{
     Button, CaretView, Color, Document, Input, MenuAction, MenuEntry, Modifiers, Motion, Point,
-    Recovery, Session, Shape, ShapeId, Side, Zone,
+    Recovery, Session, Shape, Side, Viewport, Zone,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Zone "z" at (0, 0), 800 x 600, titled `title`, holding shape "a" (and loose shape "b").
 fn session(title: &str) -> Session {
@@ -39,6 +35,50 @@ fn session(title: &str) -> Session {
 /// Screen point of canvas point (x, y).
 fn screen(s: &Session, x: f32, y: f32) -> Point {
     s.viewport().to_screen(Point { x, y })
+}
+
+#[test]
+fn a_title_hides_once_zooming_out_would_run_it_under_a_member() {
+    // Paper's title box is 12 down, 1.5 x its size tall: 12..31.5 at 100%, clear of shape a
+    // at 40; at 50% it is 24 down and 24 units tall, 24..60, running under a.
+    let mut s = session_of(Document {
+        shapes: vec![Shape::new(id("a"), 16, 40)],
+        links: vec![],
+        zones: vec![Zone {
+            id: id("z"),
+            title: "Act".into(),
+            color: Color::Neutral,
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+            members: vec![id("a")],
+        }],
+    });
+    let zoom = |s: &mut Session, zoom: f32| {
+        let v = s.viewport();
+        s.set_viewport(Viewport { zoom, ..v });
+    };
+    let shown = |s: &Session| {
+        let far = Point { x: 1e5, y: 1e5 };
+        let f = s.draw(
+            Point {
+                x: -far.x,
+                y: -far.y,
+            },
+            far,
+            T,
+        );
+        f.zones[0].show_title
+    };
+    assert!(shown(&s));
+    zoom(&mut s, 0.5);
+    assert!(!shown(&s));
+    // Being edited, it stays.
+    zoom(&mut s, 1.0);
+    rename(&mut s);
+    zoom(&mut s, 0.5);
+    assert!(shown(&s));
 }
 
 /// Right-clicks zone "z"'s band and chooses Rename.

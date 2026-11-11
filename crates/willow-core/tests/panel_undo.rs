@@ -3,19 +3,9 @@
 
 mod common;
 
+use common::{ms, settle};
 use std::time::Duration;
 use willow_core::{Input, Motion, Session};
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
-/// What the app does after every input: runs a due regeneration and hands the text back.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        s.regenerated(job.run());
-    }
-}
 
 /// What the app does when the text check's wake comes.
 fn pause(s: &mut Session, now: Duration) {

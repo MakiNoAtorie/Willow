@@ -4,10 +4,10 @@ mod common;
 use std::ops::Range;
 use std::time::Duration;
 
-use common::text;
+use common::{id, saved_text, settle, text};
 use willow_core::{
-    Document, Input, Link, Measure, PAPER, Paragraph, Point, Session, Shape, ShapeId, THEMES,
-    Theme, Viewport,
+    Document, Input, Link, Measure, PAPER, Paragraph, Point, Session, Shape, THEMES, Theme,
+    Viewport,
 };
 
 const T: Duration = Duration::ZERO;
@@ -27,10 +27,6 @@ impl Measure for WideInDesk {
         let width = if t.name == "Desk" { 30.0 } else { 1.0 };
         vec![width; clusters.len()]
     }
-}
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
 }
 
 /// `a` holds `LONG`; `b` sits `y` below its top, `x` to the right, linked to it if `linked`.
@@ -80,24 +76,6 @@ fn a_switch_clears_neighbors_at_once_and_keeps_the_document_and_its_history() {
     assert_eq!(s.drawn_rect(&id("b")).unwrap().y, 100.0);
 }
 
-/// What the app does after a switch or an input.
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        let done = job.run();
-        s.regenerated(done);
-    }
-}
-
-fn saved_text(s: &mut Session) -> String {
-    let mut written = String::new();
-    s.save(|b| {
-        written = String::from_utf8_lossy(b).into();
-        Ok(())
-    })
-    .unwrap();
-    written
-}
-
 /// `b` is 297 below `a`'s center and 260 right of it in Paper; Desk's tall `a` brings its
 /// center level enough for `b` to read as right of it.
 fn switching_words() -> Session {
@@ -134,7 +112,7 @@ fn a_switch_leaves_text_the_writer_typed_alone() {
     s.handle(
         Input::Text {
             text: typed.into(),
-            replace: Some(0..s.panel().text().encode_utf16().count()),
+            replace: Some(0..s.panel().text().len()),
         },
         T,
     );

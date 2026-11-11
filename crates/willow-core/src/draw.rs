@@ -2,7 +2,7 @@
 //! theme's low-zoom thresholds.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -103,8 +103,8 @@ pub struct VisibleZone<'a> {
     /// `ZoneStyle::pill`'s capsule behind a shown title with text or being edited: top-left and
     /// bottom-right in canvas units.
     pub pill: Option<(Point, Point)>,
-    /// The title fits inside the zone on screen, `title_x` in on both sides, or is being
-    /// edited; else paint none.
+    /// The title fits inside the zone on screen, `title_x` in on both sides, and its box (pill
+    /// included) clears every member shape's drawn rect, or it is being edited; else paint none.
     pub show_title: bool,
     /// While its title is edited: the text selection highlight (top-left, bottom-right), the
     /// IME marked text's underline (from, to: `Theme.caret.marked_underline` screen px thick,
@@ -155,7 +155,7 @@ impl Session {
         let z = &t.zoom;
         let fade = ((vp.zoom - z.fade_end) / (z.fade_start - z.fade_end)).clamp(0.0, 1.0);
         let deepen = z.block_mix * (1.0 - fade);
-        let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker[c as usize], deepen));
+        let fills = Color::ALL.map(|c| mix(t.pastel(c), t.picker(c), deepen));
         let (a, b) = (vp.to_canvas(from), vp.to_canvas(to));
         let (preview, resized) = (self.drag_preview(), self.resize_preview());
         let edited = self.editing().filter(|_| fade > 0.0);
@@ -227,6 +227,66 @@ impl Session {
                 hovered: self.connector_hovered(&p.id, &q.id),
             });
         }
+        let shapes: Vec<Visible<'a>> = (doc.shapes.iter().enumerate())
+            .filter_map(|(i, s)| {
+                let (s, x, y) = shown(i, s);
+                let (fx, fy) = (x as f32, y as f32);
+                // Cull on what's known without layout first: layout is the costly part.
+                if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {
+                    return None;
+                }
+                let height = self.shape_height(&s);
+                if fy + height < a.y {
+                    return None;
+                }
+                let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
+                let ring = if target == Some(&s.id) { 1.0 } else { ring };
+                let e = edited.filter(|e| e.id == s.id);
+                let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
+                    // `k` passes 1 on a curve that overshoots.
+                    opacity: k.min(1.0),
+                    dy: t.create.rise * (1.0 - k),
+                    scale: t.create.scale + (1.0 - t.create.scale) * k,
+                });
+                let rippling = self.rippling(&s.id, now);
+                Some(Visible {
+                    tab: match rippling {
+                        Some((from, p)) => mix(t.picker(from), t.picker(s.color), p),
+                        None => t.picker(s.color),
+                    },
+                    lift: self.lift(ring),
+                    fill: match rippling {
+                        Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
+                        None => fills[s.color as usize],
+                    },
+                    layout: self.layout(&s),
+                    shape: s,
+                    x,
+                    y,
+                    height,
+                    ring,
+                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
+                    marked: e.and_then(|e| e.marked.clone()),
+                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
+                    appear,
+                    slide,
+                })
+            })
+            .collect();
+        // Visible shapes' drawn rects, for titles running under a member (shapes paint later).
+        let rects: HashMap<&ShapeId, (Point, Point)> = match doc.zones.is_empty() {
+            true => HashMap::new(),
+            false => (shapes.iter())
+                .map(|v| {
+                    let (x, y) = (v.x as f32, v.y as f32);
+                    let to = Point {
+                        x: x + v.shape.width as f32,
+                        y: y + v.height,
+                    };
+                    (&v.shape.id, (Point { x, y }, to))
+                })
+                .collect(),
+        };
         let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
         let nested: HashSet<&ShapeId> = (doc.zones.iter())
             .flat_map(|z| &z.members)
@@ -259,27 +319,37 @@ impl Session {
                     zt.fill_mix
                 };
                 let source = match zt.fill_picker {
-                    true => t.picker[zone.color as usize],
+                    true => t.picker(zone.color),
                     false => pastel,
                 };
+                let (title_at, width) = (
+                    self.title_at(&zone),
+                    self.title_width(&zone.title, title_size),
+                );
+                let pill = self.title_pill(title_at, width, title_size);
+                // The title's box, pill included: hidden where a member shape would cover it.
+                let (from, to) = pill.unwrap_or((
+                    title_at,
+                    Point {
+                        x: title_at.x + width,
+                        y: title_at.y + t.line_height * title_size,
+                    },
+                ));
+                let covered = (zone.members.iter().filter_map(|m| rects.get(m)))
+                    .any(|(p, q)| p.x < to.x && q.x > from.x && p.y < to.y && q.y > from.y);
                 VisibleZone {
                     nested,
                     fill: mix(t.canvas, source, fill),
-                    edge: zt.edge_color.unwrap_or(mix(
-                        pastel,
-                        t.picker[zone.color as usize],
-                        zt.edge_mix,
-                    )),
-                    title_at: self.title_at(&zone),
+                    edge: zt
+                        .edge_color
+                        .unwrap_or(mix(pastel, t.picker(zone.color), zt.edge_mix)),
+                    title_at,
                     title_size,
                     text: title_text(zt, &zone.title).into_owned(),
                     title_spacing: zt.title_spacing * title_size,
-                    pill: (e.is_some() || !zone.title.is_empty())
-                        .then(|| self.title_pill(&zone, title_size))
-                        .flatten(),
+                    pill: pill.filter(|_| e.is_some() || !zone.title.is_empty()),
                     show_title: e.is_some()
-                        || self.title_width(&zone.title, title_size) + 2.0 * zt.title_x * k
-                            <= zone.width as f32,
+                        || (!covered && width + 2.0 * zt.title_x * k <= zone.width as f32),
                     selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
                     marked: e.and_then(|e| self.title_underline(e.marked.clone()?)),
                     caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
@@ -287,57 +357,11 @@ impl Session {
                 }
             })
             .collect();
-        let shapes = (doc.shapes.iter().enumerate())
-            .filter_map(|(i, s)| {
-                let (s, x, y) = shown(i, s);
-                let (fx, fy) = (x as f32, y as f32);
-                // Cull on what's known without layout first: layout is the costly part.
-                if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {
-                    return None;
-                }
-                let height = self.shape_height(&s);
-                if fy + height < a.y {
-                    return None;
-                }
-                let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
-                let ring = if target == Some(&s.id) { 1.0 } else { ring };
-                let e = edited.filter(|e| e.id == s.id);
-                let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
-                    // `k` passes 1 on a curve that overshoots.
-                    opacity: k.min(1.0),
-                    dy: t.create.rise * (1.0 - k),
-                    scale: t.create.scale + (1.0 - t.create.scale) * k,
-                });
-                let picker = |c: Color| t.picker[c as usize];
-                Some(Visible {
-                    tab: match self.rippling(&s.id, now) {
-                        Some((from, p)) => mix(picker(from), picker(s.color), p),
-                        None => picker(s.color),
-                    },
-                    lift: self.lift(ring),
-                    fill: match self.rippling(&s.id, now) {
-                        Some((from, p)) => mix(fills[from as usize], fills[s.color as usize], p),
-                        None => fills[s.color as usize],
-                    },
-                    layout: self.layout(&s),
-                    shape: s,
-                    x,
-                    y,
-                    height,
-                    ring,
-                    selection: e.map(|_| self.selection_rects()).unwrap_or_default(),
-                    marked: e.and_then(|e| e.marked.clone()),
-                    caret: e.and_then(|_| self.caret(now)).filter(|c| c.visible),
-                    appear,
-                    slide,
-                })
-            })
-            .collect();
         let full = vp.zoom >= z.fade_end;
         let border = t.border_min_screen / vp.zoom;
         Frame {
             zones,
-            zone_ring: self.drop_zone().or(self.band_ring()),
+            zone_ring: self.drop_target().or(self.band_ring()),
             zone_ring_width: t.zone.ring / vp.zoom.min(1.0),
             connectors,
             connector_width: t.connector.width.max(t.connector.min_screen / vp.zoom),
@@ -383,13 +407,13 @@ impl Session {
         }
     }
 
-    /// The capsule around `zone`'s title at `size`: top-left and bottom-right in canvas units.
-    fn title_pill(&self, zone: &Zone, size: f32) -> Option<(Point, Point)> {
+    /// The capsule around a title at `at`, `width` wide at `size`: top-left and bottom-right in
+    /// canvas units.
+    fn title_pill(&self, at: Point, width: f32, size: f32) -> Option<(Point, Point)> {
         let t = self.theme();
         let pill = t.zone.pill?;
-        let (at, k) = (self.title_at(zone), 1.0 / self.viewport().zoom.min(1.0));
+        let k = 1.0 / self.viewport().zoom.min(1.0);
         let (x, y) = (pill.pad_x * k, pill.pad_y * k);
-        let width = self.title_width(&zone.title, size);
         let from = Point {
             x: at.x - x,
             y: at.y - y,
@@ -407,12 +431,11 @@ impl Session {
     pub(crate) fn title_width(&self, title: &str, size: f32) -> f32 {
         let t = self.theme();
         // One cluster per grapheme of the title as drawn, so capitals can change its length.
-        let (mut shown, mut clusters, mut letters) = (String::new(), Vec::new(), 0);
+        let (mut shown, mut clusters) = (String::new(), Vec::new());
         for g in title.graphemes(true) {
             let start = shown.len();
             shown.push_str(&title_text(&t.zone, g));
             clusters.push(start..shown.len());
-            letters += 1;
         }
         let para = Paragraph {
             runs: vec![Run {
@@ -422,7 +445,7 @@ impl Session {
             }],
         };
         let w: f32 = self.measure.advances(&para, &clusters, t).iter().sum();
-        w * size / t.font_size + letters as f32 * t.zone.title_spacing * size
+        w * size / t.font_size + clusters.len() as f32 * t.zone.title_spacing * size
     }
 }
 

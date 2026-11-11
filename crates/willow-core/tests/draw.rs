@@ -1,16 +1,12 @@
 mod common;
 
-use common::{doc_with, session_of};
+use common::{doc_with, pt, session_of};
 use willow_core::{
     Color, Document, Input, Modifiers, Point, Rgba, Session, Shape, ShapeId, Side, Viewport,
     VisibleZone, Zone,
 };
 
 const T: std::time::Duration = std::time::Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// The screen shows canvas (0, 0) at its top-left at zoom `z`.
 fn look_at(s: &mut Session, z: f32) {
@@ -293,7 +289,8 @@ fn a_generated_document_draws_its_connectors_and_zones() {
         w * 120.0 / 15.0 + 320.0 > v.zone.width as f32
     };
     assert!(f.zones.iter().any(wide), "some titles must not fit");
-    assert!(f.zones.iter().all(|v| v.show_title != wide(v)));
+    // (Titles that fit may still hide, under a member shape.)
+    assert!(f.zones.iter().all(|v| !(v.show_title && wide(v))));
 }
 
 #[test]
@@ -365,7 +362,7 @@ fn the_connector_hit_test_follows_the_straightened_line() {
         );
         s.draw(SCREEN.0, SCREEN.1, T).connectors[0].hovered
     };
-    // The line is x = 180; the old slanted one passed x = 161 at this height.
+    // The line is x = 180, so 186 hits and 160 does not.
     assert!(hovered(186.0));
     assert!(!hovered(160.0));
 }

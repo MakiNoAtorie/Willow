@@ -31,9 +31,7 @@ impl Willow {
             .ok();
         }));
     }
-}
 
-impl Willow {
     /// Waits for the panel text's check to be due; call after every input. Each keystroke
     /// restarts the wait.
     pub(crate) fn arm_text_check(&mut self, cx: &mut Context<Self>) {
@@ -183,7 +181,7 @@ fn shape_rows(
     window: &mut Window,
 ) -> (Vec<(ShapedLine, gpui::Point<Pixels>)>, Vec<Bounds<Pixels>>) {
     let (t, text) = (session.theme(), session.panel().text());
-    let (c, size) = (&t.code, px(t.code.font_size));
+    let (c, font_size) = (&t.code, px(t.code.font_size));
     let font = |bold: bool| {
         let mut f = gpui::font(c.font);
         f.weight = if bold {
@@ -211,15 +209,12 @@ fn shape_rows(
         let top = bounds.origin.y + px(r.y);
         if r.invalid {
             let at = point(bounds.origin.x, top);
-            tints.push(Bounds::new(
-                at,
-                gpui::size(bounds.size.width, px(c.row_height())),
-            ));
+            tints.push(Bounds::new(at, size(bounds.size.width, px(c.row_height()))));
         }
         if let Some(n) = r.number {
             let n = n.to_string();
             let runs = [run(n.len(), c.gutter, false, false)];
-            let line = ts.shape_line(n.into(), size, &runs, None);
+            let line = ts.shape_line(n.into(), font_size, &runs, None);
             let x = bounds.origin.x + px(c.gutter_width - c.gutter_gap) - line.width;
             out.push((line, point(x, top)));
         }
@@ -229,9 +224,8 @@ fn shape_rows(
         let runs: Vec<TextRun> = (r.spans.iter())
             .map(|s| run(s.range.len(), s.color, s.bold, r.invalid))
             .collect();
-        let line = ts.shape_line(text[r.range].to_string().into(), size, &runs, None);
-        let x = bounds.origin.x + px(c.gutter_width);
-        out.push((line, point(x, top)));
+        let line = ts.shape_line(text[r.range].to_string().into(), font_size, &runs, None);
+        out.push((line, point(bounds.origin.x + px(r.x), top)));
     }
     (out, tints)
 }

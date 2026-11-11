@@ -1,6 +1,6 @@
 //! Zone resizing: dragging a zone's edges and corners. Members and nesting never change.
 
-use super::{DRAG_START, EDGE_GRAB, Gesture, Session};
+use super::{EDGE_GRAB, Gesture, Session, past_drag_start};
 use crate::input::Cursor;
 use crate::{Point, Shape, ShapeId, Zone};
 
@@ -23,7 +23,7 @@ impl Grab {
 }
 
 /// A zone's previewed x, y, width and height, in canvas units.
-pub(super) type Rect = (i32, i32, u32, u32);
+pub(super) type ZoneBox = (i32, i32, u32, u32);
 
 impl Session {
     /// The topmost zone whose edge or corner is within `EDGE_GRAB` of screen point `p`, and
@@ -73,7 +73,7 @@ impl Session {
             return;
         };
         let (d, z) = (pos - from, self.viewport.zoom);
-        if to.is_none() && d.x.hypot(d.y) < DRAG_START {
+        if to.is_none() && !past_drag_start(d) {
             return;
         }
         let min = self.zone_min() as i32;
@@ -122,7 +122,7 @@ impl Session {
     }
 
     /// Resizes zone `index` to `r` as one undo step. Members, nesting and shapes stay.
-    pub(super) fn resize_zone(&mut self, index: usize, (x, y, width, height): Rect) {
+    pub(super) fn resize_zone(&mut self, index: usize, (x, y, width, height): ZoneBox) {
         let id = self.doc.zones[index].id.clone();
         self.history.step(&mut self.doc, |h, doc| {
             h.change_zone(doc, &id, |z| {

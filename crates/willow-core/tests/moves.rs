@@ -5,16 +5,13 @@ mod common;
 
 use std::time::Duration;
 
+use common::id;
 use willow_core::{
     Button, Color, Document, Input, Link, Modifiers, Point, Session, Shape, ShapeId, Side,
     Viewport, Zone,
 };
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 /// Shapes `(id, x, y)` linked as `links`, canvas (0, 0) at the screen's corner.
 fn session(shapes: &[(&str, i32, i32)], links: &[(&str, &str)]) -> Session {

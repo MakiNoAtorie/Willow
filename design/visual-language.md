@@ -1,6 +1,6 @@
 # Willow visual language
 
-The reference every phase builds against. **Paper** is the default theme and the one Phases 2–7 build; **Desk** and **Poster** arrive in Phase 8 (see the spec's Themes section).
+The reference every phase builds against. **Paper** is the default theme; **Desk** and **Poster** are the other two.
 
 Status: approved by the owner on 2026-10-24, closing Phase 1. Desk and Poster below list only what differs from Paper; anything not mentioned works as in Paper.
 

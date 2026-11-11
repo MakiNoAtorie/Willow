@@ -2,6 +2,7 @@
 
 mod common;
 
+use common::settle;
 use std::time::Duration;
 use willow_core::{Button, Input, Modifiers, Motion, PAPER, Point, Session, ShapeId, load};
 
@@ -93,13 +94,6 @@ fn long() -> Session {
     s.handle(Input::Escape, T);
     assert!(s.panel().open && !s.panel().focused);
     s
-}
-
-fn settle(s: &mut Session) {
-    if let Some(job) = s.take_regeneration() {
-        let done = job.run();
-        s.regenerated(done);
-    }
 }
 
 /// The line number of the first line starting with `start`, counted from 1.

@@ -1,13 +1,10 @@
 mod common;
 
+use common::pt;
 use std::time::Duration;
-use willow_core::{Button, Cursor, Document, Input, Modifiers, PAPER, Point, Session};
+use willow_core::{Button, Cursor, Document, Input, Modifiers, Point, Session};
 
 const T: Duration = Duration::ZERO;
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// A session over a 1000 x 800 canvas with the new document's shape centered.
 fn session() -> Session {
@@ -15,7 +12,7 @@ fn session() -> Session {
 }
 
 // The new shape is 210 wide at screen x 395..605, y 376..424.5 at zoom 1. Edges are grabbed
-// away from their midpoints, which win within 10 px.
+// away from their midpoints, which win within 10 px. These numbers assume Paper's metrics.
 const RIGHT_EDGE: Point = Point { x: 605.0, y: 385.0 };
 const LEFT_EDGE: Point = Point { x: 395.0, y: 385.0 };
 const BOTTOM_EDGE: Point = Point { x: 450.0, y: 424.5 };
@@ -143,9 +140,4 @@ fn resize_previews_live_and_lands_on_release() {
     );
     assert_eq!(s.resize_preview().map(|p| p.width), Some(250));
     assert_eq!(shape(&s), (0, 210, 0));
-}
-
-#[test]
-fn paper_is_the_theme_under_test() {
-    assert_eq!(PAPER.shape.pad_x, 16.0);
 }

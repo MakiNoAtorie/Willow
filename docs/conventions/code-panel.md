@@ -9,3 +9,4 @@ Binding rules for the panel, reached from `docs/CONVENTIONS.md`.
 - `History.text` changes only through `settle_text`: every path that makes panel text hold the document calls it. Save and recovery write `held_text()`.
 - Line kinds come from `format::check(text)` (`Loaded.lines`, one per `str::lines()`); `Panel.lines` is always filled. Files go through `Session::take_file`, recovery through `Session::recover`.
 - `Panel.words` is the last text's direction words; re-placing goes through `replace_by_word` before `place`.
+- A wrapped row's text starts at `PanelRow.x` (gutter plus the hanging indent from `panel::hang`); paint and hit geometry read it, and `panel_row_col`/`panel_caret_at` columns include the hang.

@@ -9,6 +9,13 @@ pub struct Point {
     pub y: f32,
 }
 
+impl Point {
+    /// Distance from the origin: `(a - b).len()` is how far apart `a` and `b` are.
+    pub(crate) fn len(self) -> f32 {
+        self.x.hypot(self.y)
+    }
+}
+
 impl Sub for Point {
     type Output = Point;
 
@@ -231,6 +238,4 @@ pub enum Cursor {
 pub struct Response {
     pub redraw: bool,
     pub cursor: Cursor,
-    /// An animation is running: keep requesting frames.
-    pub animating: bool,
 }

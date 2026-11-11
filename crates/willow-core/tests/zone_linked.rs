@@ -4,13 +4,10 @@ mod common;
 
 use std::time::Duration;
 
+use common::{id, saved_text};
 use willow_core::{Color, Document, Input, Link, Session, Shape, ShapeId, Side, Zone};
 
 const T: Duration = Duration::ZERO;
-
-fn id(s: &str) -> ShapeId {
-    ShapeId(s.into())
-}
 
 fn zone(name: &str, members: &[&str]) -> Zone {
     Zone {
@@ -97,13 +94,7 @@ fn undo_removes_the_shape_and_its_membership_in_one_step_and_the_save_shows_it()
     s.create_linked(&id("a"), Side::Right);
     let n = new_id(&s);
     s.handle(Input::Escape, T);
-    let mut saved = Vec::new();
-    s.save(|b| {
-        saved = b.to_vec();
-        Ok(())
-    })
-    .unwrap();
-    let text = String::from_utf8(saved).unwrap();
+    let text = saved_text(&mut s);
     let block = (text.split("zone z").nth(1).unwrap().split("\n}"))
         .next()
         .unwrap();

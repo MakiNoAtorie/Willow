@@ -3,7 +3,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{doc_with, session_of};
+use common::{doc_with, plain, pt, session_of};
 use willow_core::{Button, Input, Modifiers, Motion, Point, Session};
 
 const T: Duration = Duration::ZERO;
@@ -14,10 +14,6 @@ const LH: f32 = 22.5;
 /// Line 0 "aaaa bbbb cccc dddd " (0..20) is justified to 178: words at x 0, 46, 92, 138;
 /// line 1 "eeee ffff" (20..29).
 const TWO_LINES: &str = "aaaa bbbb cccc dddd eeee ffff";
-
-fn pt(x: f32, y: f32) -> Point {
-    Point { x, y }
-}
 
 /// Screen point `x` across and `line` lines down the text, a little below the line's top.
 /// The shape is at the canvas origin, so its text starts at canvas (16, 13).
@@ -194,10 +190,6 @@ fn a_selection_past_the_end_or_inside_a_character_is_clamped() {
     let (anchor, caret) = (7, 2);
     s.set_text_selection(anchor..caret);
     assert_eq!(sel(&s), (4, 1), "caret before the anchor");
-}
-
-fn plain(s: &Session) -> String {
-    s.document().shapes[0].text.plain()
 }
 
 #[test]
