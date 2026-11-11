@@ -9,7 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::Session;
 use super::clipboard::{clean, strip_controls};
 use super::editing::CaretView;
-use super::panel::{Panel, columns, line_end, wrap};
+use super::panel::{Panel, columns, hang, line_end, wrap};
 use crate::edit::{next_cluster, prev_cluster, word_left, word_right};
 use crate::input::{Button, Input, Motion, Point, Response};
 use crate::layout::Caret;
@@ -245,7 +245,7 @@ impl Session {
             if a > b || (a == b && !newline) {
                 continue;
             }
-            let x = |col: usize| c.gutter_width + col as f32 * cw;
+            let x = |col: usize| r.x + col as f32 * cw;
             let from = cols(r.range.start, a);
             let to = from + cols(a, b) + newline as usize;
             out.push((
@@ -330,8 +330,9 @@ impl Session {
         if c.upstream && k > 0 && wrapped[k].start == i {
             k -= 1;
         }
-        let col = line[wrapped[k].start..i].graphemes(true).map(columns).sum();
-        (first + k, col)
+        let col: usize = line[wrapped[k].start..i].graphemes(true).map(columns).sum();
+        let hung = if k > 0 { hang(line, rows.cols) } else { 0 };
+        (first + k, hung + col)
     }
 
     /// The caret stop on row `row` (clamped to the text's rows) `nearest` column `col`, else
@@ -341,10 +342,12 @@ impl Session {
         let row = row.min(rows.total - 1);
         let n = rows.lines.partition_point(|&(_, first)| first <= row) - 1;
         let (start, first) = rows.lines[n];
-        let wrapped = wrap(&s[start..line_end(s, start)], rows.cols);
+        let line = &s[start..line_end(s, start)];
+        let wrapped = wrap(line, rows.cols);
         let k = row - first;
         let r = &wrapped[k];
-        let (mut at, mut x) = (start + r.start, 0.0);
+        let hung = if k > 0 { hang(line, rows.cols) } else { 0 };
+        let (mut at, mut x) = (start + r.start, hung as f32);
         for g in s[start + r.start..start + r.end].graphemes(true) {
             let w = columns(g) as f32;
             if col < x + if nearest { w / 2.0 } else { w } {

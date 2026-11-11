@@ -225,8 +225,7 @@ fn shape_rows(
             .map(|s| run(s.range.len(), s.color, s.bold, r.invalid))
             .collect();
         let line = ts.shape_line(text[r.range].to_string().into(), font_size, &runs, None);
-        let x = bounds.origin.x + px(c.gutter_width);
-        out.push((line, point(x, top)));
+        out.push((line, point(bounds.origin.x + px(r.x), top)));
     }
     (out, tints)
 }
