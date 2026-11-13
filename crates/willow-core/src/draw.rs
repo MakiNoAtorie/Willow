@@ -273,19 +273,9 @@ impl Session {
                 })
             })
             .collect();
-        // Visible shapes' drawn rects, for titles running under a member (shapes paint later).
-        let rects: HashMap<&ShapeId, (Point, Point)> = match doc.zones.is_empty() {
+        let index = match doc.zones.is_empty() {
             true => HashMap::new(),
-            false => (shapes.iter())
-                .map(|v| {
-                    let (x, y) = (v.x as f32, v.y as f32);
-                    let to = Point {
-                        x: x + v.shape.width as f32,
-                        y: y + v.height,
-                    };
-                    (&v.shape.id, (Point { x, y }, to))
-                })
-                .collect(),
+            false => doc.shape_index(),
         };
         let zone_ids: HashSet<&ShapeId> = doc.zones.iter().map(|z| &z.id).collect();
         let nested: HashSet<&ShapeId> = (doc.zones.iter())
@@ -335,8 +325,17 @@ impl Session {
                         y: title_at.y + t.line_height * title_size,
                     },
                 ));
-                let covered = (zone.members.iter().filter_map(|m| rects.get(m)))
-                    .any(|(p, q)| p.x < to.x && q.x > from.x && p.y < to.y && q.y > from.y);
+                // Members count on or off screen, so the title doesn't flip with the pan; layout
+                // (height) runs only for those overlapping the title box in x and starting above it.
+                let covered = (zone.members.iter())
+                    .filter_map(|m| index.get(m).map(|&i| shown(i, &doc.shapes[i])))
+                    .any(|(s, x, y, _)| {
+                        let (x, y) = (x as f32, y as f32);
+                        x < to.x
+                            && x + s.width as f32 > from.x
+                            && y < to.y
+                            && y + self.shape_height(&s) > from.y
+                    });
                 VisibleZone {
                     nested,
                     fill: mix(t.canvas, source, fill),

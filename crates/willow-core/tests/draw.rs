@@ -366,3 +366,23 @@ fn the_connector_hit_test_follows_the_straightened_line() {
     assert!(hovered(186.0));
     assert!(!hovered(160.0));
 }
+
+#[test]
+fn a_zone_title_hides_under_a_member_whether_or_not_the_member_is_on_screen() {
+    let mut doc = Document::default();
+    let mut m = Shape::new(ShapeId("m".into()), -100, 0);
+    m.width = 130;
+    doc.shapes.push(m);
+    doc.zones.push(Zone {
+        width: 100,
+        ..zone("z", 0, 0, Color::Sky, &["m"])
+    });
+    let mut s = session_of(doc);
+    look_at(&mut s, 1.0);
+    // The member ends at x 30, inside the title box (16..62.8): on screen it hides the title.
+    assert!(!s.draw(SCREEN.0, SCREEN.1, T).zones[0].show_title);
+    // Panned so the member is culled (off screen), the title stays hidden.
+    let f = s.draw(pt(40.0, 0.0), SCREEN.1, T);
+    assert!(f.shapes.is_empty());
+    assert!(!f.zones[0].show_title);
+}
