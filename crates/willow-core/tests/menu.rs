@@ -331,3 +331,31 @@ fn menu_cut_never_leaves_editing_on_a_missing_shape() {
         "editing a missing shape"
     );
 }
+
+#[test]
+fn typing_or_f2_closes_the_menu_and_the_picker_as_editing_starts() {
+    for input in [
+        Input::Text {
+            text: "x".into(),
+            replace: None,
+        },
+        Input::StartEditing,
+    ] {
+        let mut s = session_of(doc_with("a"));
+        right_click(&mut s, pt(0.0, 0.0));
+        assert!(s.menu().is_some());
+        s.handle(input.clone(), T);
+        assert!(s.editing().is_some() && s.menu().is_none());
+    }
+    let mut s = session_of(doc_with("a"));
+    s.select([ShapeId("a".into())]);
+    s.handle(Input::OpenColorPicker, T);
+    s.handle(
+        Input::Text {
+            text: "x".into(),
+            replace: None,
+        },
+        T,
+    );
+    assert!(s.editing().is_some() && s.menu().is_none());
+}

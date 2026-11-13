@@ -337,6 +337,8 @@ impl Session {
                 None => return,
             },
         };
+        // Editing owns the keyboard: a menu or picker left open would act on a stale target.
+        self.menu = None;
         self.history.begin();
         self.editing = Some(Editing {
             zone: shape.is_none(),
