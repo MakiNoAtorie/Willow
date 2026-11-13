@@ -402,3 +402,30 @@ fn an_insert_in_a_pushed_chain_slides_the_subtree_from_where_it_was_drawn() {
         (was.0 as f32, was.1 as f32)
     );
 }
+
+#[test]
+fn a_shape_sliding_across_the_screen_edge_stays_drawn_from_the_first_frame() {
+    let mut s = session(&[("n", 0, 0)], &[]);
+    let at = drag_by(&mut s, "n", (600, 0));
+    release(&mut s, at);
+    slide(&s, "n"); // a frame, as the app draws one after every input
+    let shown = |s: &Session, (x0, x1): (f32, f32)| {
+        let (from, to) = (Point { x: x0, y: 0.0 }, Point { x: x1, y: 300.0 });
+        s.draw(from, to, T)
+            .shapes
+            .iter()
+            .any(|v| v.shape.id.0 == "n")
+    };
+    s.handle(Input::Undo, T);
+    // Rest at x 0, drawn at 600: sliding in from the right of a 0..300 screen.
+    assert!(
+        shown(&s, (500.0, 900.0)),
+        "drawn where it starts, off its rest"
+    );
+    s.handle(Input::Redo, Duration::from_millis(300));
+    // Rest at x 600, drawn at 0: sliding out past the edge of a 0..300 screen.
+    assert!(
+        shown(&s, (0.0, 300.0)),
+        "drawn where it starts, off its rest"
+    );
+}

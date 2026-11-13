@@ -169,7 +169,7 @@ impl Session {
             None => (None, HashSet::new()),
         };
         let doc = self.document();
-        // A shape as the gesture in progress previews it: its shape and drawn top-left.
+        // A shape as the gesture in progress previews it: its shape, drawn top-left and slide.
         let shown = |i: usize, s: &'a Shape| {
             let s = match &resized {
                 Some(r) if r.id == s.id => Cow::Owned(r.clone()),
@@ -181,7 +181,8 @@ impl Session {
                 (_, Some(p)) if *p.id == s.id => (p.x, p.y),
                 _ => (x, y),
             };
-            (s, x, y)
+            let o = self.sliding(&s.id, now);
+            (s, x, y, o)
         };
         let creating = self.creating(now);
         let link_drag = self.link_drag();
@@ -191,25 +192,24 @@ impl Session {
             let (Some(p), Some(q)) = (doc.shapes.get(i), doc.shapes.get(j)) else {
                 continue;
             };
-            let ((p, px, py), (q, qx, qy)) = (shown(i, p), shown(j, q));
+            let ((p, px, py, po), (q, qx, qy, qo)) = (shown(i, p), shown(j, q));
+            // A sliding shape's connector end slides with it, a previewed one with the preview.
+            let (px, py) = (px as f32 + po.x, py as f32 + po.y);
+            let (qx, qy) = (qx as f32 + qo.x, qy as f32 + qo.y);
             // Cull on what's known without layout first.
-            let (left, right) = (px.min(qx), (px + p.width as i32).max(qx + q.width as i32));
-            if left as f32 > b.x || (right as f32) < a.x || py.min(qy) as f32 > b.y {
+            let (left, right) = (px.min(qx), (px + p.width as f32).max(qx + q.width as f32));
+            if left > b.x || right < a.x || py.min(qy) > b.y {
                 continue;
             }
             let (ph, qh) = (self.shape_height(&p), self.shape_height(&q));
-            if (py as f32 + ph).max(qy as f32 + qh) < a.y {
+            if (py + ph).max(qy + qh) < a.y {
                 continue;
             }
-            // A sliding shape's connector end slides with it, a previewed one with the preview.
-            let rect = |s: &Shape, x: i32, y: i32, h: f32| {
-                let o = self.sliding(&s.id, now);
-                DrawnRect {
-                    x: x as f32 + o.x,
-                    y: y as f32 + o.y,
-                    width: s.width as f32,
-                    height: h,
-                }
+            let rect = |s: &Shape, x: f32, y: f32, h: f32| DrawnRect {
+                x,
+                y,
+                width: s.width as f32,
+                height: h,
             };
             let ((mut from, from_side), (mut to, to_side)) =
                 connector_ends(rect(&p, px, py, ph), rect(&q, qx, qy, qh));
@@ -229,8 +229,8 @@ impl Session {
         }
         let shapes: Vec<Visible<'a>> = (doc.shapes.iter().enumerate())
             .filter_map(|(i, s)| {
-                let (s, x, y) = shown(i, s);
-                let (fx, fy) = (x as f32, y as f32);
+                let (s, x, y, slide) = shown(i, s);
+                let (fx, fy) = (x as f32 + slide.x, y as f32 + slide.y);
                 // Cull on what's known without layout first: layout is the costly part.
                 if fx > b.x || fx + (s.width as f32) < a.x || fy > b.y {
                     return None;
@@ -239,7 +239,7 @@ impl Session {
                 if fy + height < a.y {
                     return None;
                 }
-                let (ring, slide) = (self.ring(&s.id, now), self.sliding(&s.id, now));
+                let ring = self.ring(&s.id, now);
                 let ring = if target == Some(&s.id) { 1.0 } else { ring };
                 let e = edited.filter(|e| e.id == s.id);
                 let appear = (creating.filter(|(id, _)| **id == s.id)).map(|(_, k)| Appear {
