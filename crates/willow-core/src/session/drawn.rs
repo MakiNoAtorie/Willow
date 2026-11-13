@@ -169,8 +169,17 @@ impl Spaced {
             return None;
         }
         let was = |x: &Shape| self.index.get(&x.id).map(|&i| self.rects[i]);
+        // A width change moves x without moving the shape: only a same-width x change counts.
+        let dx = |r: &Rect, o: Rect| {
+            if r.r - r.l == o.r - o.l {
+                r.l - o.l
+            } else {
+                0.0
+            }
+        };
+        let by = |r: &Rect, o: Rect| (dx(r, o) as i32, (r.t - o.t) as i32);
         let moved = (shapes.iter().zip(&rects))
-            .map(|(x, r)| was(x).map_or((0, 0), |o| ((r.l - o.l) as i32, (r.t - o.t) as i32)))
+            .map(|(x, r)| was(x).map_or((0, 0), |o| by(r, o)))
             .collect();
         self.order = spacing::order(shapes, &ends);
         self.rects = rects;

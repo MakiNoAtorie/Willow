@@ -417,3 +417,21 @@ fn the_view_stays_put_when_the_shape_being_typed_in_moves() {
     assert_eq!(s.viewport(), view);
     assert!(!s.animating(t));
 }
+
+#[test]
+fn widening_a_pushed_shape_keeps_it_drawn_where_it_was() {
+    let mut s = pair();
+    type_into(&mut s, "a", "word word word word word");
+    s.handle(Input::Escape, T);
+    assert_eq!(at(&s, "b"), (0, 119));
+    s.tick(Duration::from_millis(300));
+    assert_eq!(slide(&s, "b", 300), (0.0, 0.0));
+    let r = ResizeTo {
+        x: -10,
+        width: 230,
+        extra_height: 0,
+    };
+    s.resize_shape(&id("b"), r);
+    assert_eq!(at(&s, "b"), (-10, 119));
+    assert_eq!(slide(&s, "b", 300), (0.0, 0.0));
+}
