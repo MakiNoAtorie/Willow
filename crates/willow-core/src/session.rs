@@ -795,12 +795,16 @@ impl Session {
             }
             Input::Undo | Input::Redo => {
                 self.keep_typing();
+                let before = self.history.revision();
                 if input == Input::Undo {
                     self.history.undo(&mut self.doc);
                 } else {
                     self.history.redo(&mut self.doc);
                 }
-                self.spaced.get_mut().undone = true;
+                // A no-op leaves the revision, so nothing would clear the flag.
+                if self.history.revision() != before {
+                    self.spaced.get_mut().undone = true;
+                }
                 self.restore_text();
                 self.stop_editing();
                 self.drop_missing_selection();
