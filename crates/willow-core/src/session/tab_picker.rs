@@ -23,7 +23,7 @@ impl Session {
         self.tab_picker
     }
 
-    /// `input` while the picker is open: an arrow creates, a press or an Edit-menu click closes
+    /// `input` while the picker is open: an arrow creates, a press or an Edit- or View-menu click closes
     /// it and goes on (`None`), pointer motion, wheel, pinch and key-ups go on, anything else
     /// (any other key) closes it and is consumed.
     pub(super) fn tab_picker_input(&mut self, input: &Input) -> Option<Response> {
@@ -37,12 +37,15 @@ impl Session {
             | Input::FocusLost
             | Input::ModifiersChanged => None,
             // Keys never get here as these (the app takes every key while it is open), so they
-            // come from clicks on the app's Edit menu.
+            // come from clicks on the app's Edit and View menus.
             Input::PointerDown { .. }
             | Input::Undo
             | Input::Redo
             | Input::Cut
-            | Input::Paste(_) => {
+            | Input::Paste(_)
+            | Input::ZoomIn
+            | Input::ZoomOut
+            | Input::ResetZoom => {
                 self.tab_picker = false;
                 None
             }

@@ -222,3 +222,23 @@ fn a_modifier_change_leaves_the_picker_open() {
     input(&mut s, Input::ModifiersChanged);
     assert!(s.tab_picker_open());
 }
+
+#[test]
+fn view_menu_zoom_inputs_close_the_picker_and_act_as_usual() {
+    for (zoom, bigger) in [(Input::ZoomIn, true), (Input::ZoomOut, false)] {
+        let mut s = session();
+        input(&mut s, Input::Tab);
+        input(&mut s, zoom);
+        s.tick(Duration::from_secs(1));
+        assert!(!s.tab_picker_open());
+        assert_eq!(s.viewport().zoom > 1.0, bigger);
+    }
+    let mut s = session();
+    input(&mut s, Input::ZoomIn);
+    s.tick(Duration::from_secs(1));
+    input(&mut s, Input::Tab);
+    s.handle(Input::ResetZoom, Duration::from_secs(2));
+    s.tick(Duration::from_secs(3));
+    assert!(!s.tab_picker_open());
+    assert_eq!(s.viewport().zoom, 1.0);
+}
