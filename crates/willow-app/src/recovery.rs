@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use gpui::{App, Context, Task};
-use willow_core::{Document, Recovery, RecoveryFile, launch_plan, load};
+use willow_core::{Document, Recovery, RecoveryFile, check, launch_plan};
 
 use crate::{Content, Willow, file, open_window};
 
@@ -199,10 +199,12 @@ pub(crate) fn launch(cx: &mut App) {
         }
         for r in plan.open {
             // An unreadable recovery file stays where it is.
-            let bytes = fs::read(file_of(dir, &r.id, "willow")).ok();
-            let Some((loaded, bytes)) = bytes.and_then(|b| Some((load(&b).ok()?, b))) else {
+            // Read as the panel reads text: a bad header is an invalid line, held in the panel.
+            let Ok(text) = fs::read_to_string(file_of(dir, &r.id, "willow")) else {
                 continue;
             };
+            let loaded = check(&text);
+            let bytes = text.into_bytes();
             open_window(Content::new(loaded, bytes, r.path, Some(r.id)), None, cx);
             opened = true;
         }

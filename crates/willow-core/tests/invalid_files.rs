@@ -3,7 +3,7 @@ mod common;
 use std::time::Duration;
 
 use common::{open, saved};
-use willow_core::{Input, PAPER, Recovery, Session, ShapeId, load};
+use willow_core::{Input, PAPER, Recovery, Session, ShapeId, check, load};
 
 fn ids(s: &Session) -> Vec<&str> {
     (s.document().shapes.iter())
@@ -81,6 +81,18 @@ fn an_invalid_recovery_reopens_the_same_way_marked_unsaved() {
     assert_eq!(ids(&s), ["a", "b", "c"]);
     // Nothing read from the document's file yet: any bytes there count as a change.
     assert_eq!(s.bytes(), b"");
+}
+
+#[test]
+fn a_recovery_with_a_broken_header_reopens_with_its_text_held() {
+    let text = b"wilow 1\n\na: \"Gates\"\n\n@layout a 0,0 w210\n";
+    assert!(load(text).is_err());
+    let loaded = check(std::str::from_utf8(text).unwrap());
+    let s = Session::recover(loaded, text, &PAPER, Box::new(common::Fake));
+    assert!(s.panel().open);
+    assert_eq!(s.panel().text().as_bytes(), text);
+    assert!(!s.is_saved());
+    assert_eq!(ids(&s), ["a"]);
 }
 
 #[test]
