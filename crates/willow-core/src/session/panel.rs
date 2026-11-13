@@ -475,6 +475,10 @@ impl Session {
     /// focus, only pointer input, view changes, undo and redo (pending text applied first)
     /// reach the canvas.
     pub(super) fn panel_input(&mut self, input: &Input) -> Option<Response> {
+        // The release may never arrive; the canvas still gets FocusLost.
+        if *input == Input::FocusLost {
+            self.panel.edit.drag = false;
+        }
         match input {
             Input::TogglePanel if self.panel.open => {
                 self.leave_panel();

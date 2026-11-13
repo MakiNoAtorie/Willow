@@ -317,6 +317,23 @@ fn a_press_puts_the_caret_there_and_a_drag_or_shift_press_selects() {
 }
 
 #[test]
+fn focus_lost_ends_a_panel_text_drag() {
+    let mut s = wrapped();
+    s.handle(Input::Escape, T);
+    press(&mut s, at(1.0, 3.0), false);
+    s.handle(Input::FocusLost, T);
+    let mods = Modifiers::default();
+    s.handle(
+        Input::PointerMove {
+            pos: at(2.0, 1.0),
+            mods,
+        },
+        T,
+    );
+    assert_eq!(s.panel().selection(), 14..14);
+}
+
+#[test]
 fn double_click_selects_a_word_and_triple_click_a_line() {
     let mut s = wrapped();
     press(&mut s, at(0.0, 9.0), false);
