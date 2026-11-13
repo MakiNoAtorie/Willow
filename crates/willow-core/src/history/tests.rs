@@ -102,3 +102,18 @@ fn a_group_mixing_shape_edits_with_a_new_linked_shape_is_one_step() {
     h.redo(&mut doc);
     assert_eq!(doc, after);
 }
+
+#[test]
+fn a_group_that_cancels_out_keeps_the_held_panel_text() {
+    let (mut doc, mut h) = (Document::new(), History::default());
+    let a = doc.shapes[0].id.clone();
+    h.text = Some("typed".into());
+
+    h.begin();
+    h.change(&mut doc, &a, |s| s.x = 5);
+    h.change(&mut doc, &a, |s| s.x = 0);
+    h.end(&doc);
+
+    assert!(!h.can_undo());
+    assert_eq!(h.text.as_deref(), Some("typed"));
+}

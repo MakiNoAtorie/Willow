@@ -353,6 +353,9 @@ impl History {
                     change: Change::Ops(ops),
                     text,
                 });
+            } else if self.text.is_none() {
+                // The group took the panel text on its first record; with no step to hold it, give it back.
+                self.text = g.text;
             }
         }
     }
