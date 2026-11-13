@@ -369,3 +369,21 @@ fn typing_on_two_lines_within_the_pause_is_two_steps() {
     assert_eq!(texts(&s), pair("Gates", "Fences"));
     assert!(!s.can_undo());
 }
+
+#[test]
+fn undo_applies_text_whose_check_is_in_flight() {
+    let mut s = panel_of(TWO);
+    caret_after(&mut s, "Gates", ms(0));
+    type_in(&mut s, "!", ms(0));
+    pause(&mut s, ms(150));
+    type_in(&mut s, "?", ms(1200));
+    let job = s.take_text_check(ms(1350)).expect("a check is due");
+    undo(&mut s, ms(1360));
+    assert_eq!(shape_text(&s, "a"), "Gates!");
+    // The stale result changes nothing.
+    s.text_checked(job.run());
+    settle(&mut s);
+    assert_eq!(shape_text(&s, "a"), "Gates!");
+    undo(&mut s, ms(1400));
+    assert_eq!(shape_text(&s, "a"), "Gates");
+}

@@ -17,11 +17,13 @@ const PAUSE: Duration = Duration::from_millis(150);
 const MERGE_PAUSE: Duration = Duration::from_secs(1);
 
 /// Versions of the panel text: `now` counts every change to it; the others are the version
-/// last checked, last saved (or loaded or regenerated) and last loaded or regenerated.
+/// last taken for a check, last whose check result landed, last saved (or loaded or
+/// regenerated) and last loaded or regenerated.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Versions {
     pub(super) now: u64,
     pub(super) checked: u64,
+    pub(super) applied: u64,
     pub(super) saved: u64,
     pub(super) shown: u64,
     /// The version `History.text` describes: the text the document's undo steps know.
@@ -89,17 +91,19 @@ impl Session {
     /// no line is invalid. Dropped when the text or the document changed since it was taken.
     pub fn text_checked(&mut self, r: TextChecked) {
         if r.version == self.panel.versions.now && r.revision == self.history.revision() {
+            self.panel.versions.applied = r.version;
             self.text_lines_checked(r.loaded);
         }
     }
 
-    /// Checks and applies pending panel text now, on the UI thread: at a step boundary, when
-    /// focus leaves the panel, on Undo, Redo and Save. IME text being composed is committed
-    /// first.
+    /// Checks and applies panel text not yet applied now, on the UI thread, even if its check
+    /// is in flight (that result is then stale): at a step boundary, when focus leaves the
+    /// panel, on Undo, Redo and Save. IME text being composed is committed first.
     pub(super) fn flush_text(&mut self) {
         self.panel_unmark();
-        if self.text_pending() {
-            self.panel.versions.checked = self.panel.versions.now;
+        let v = &mut self.panel.versions;
+        if v.now != v.applied {
+            (v.checked, v.applied) = (v.now, v.now);
             self.text_lines_checked(check(self.panel.text()));
         }
     }
@@ -107,7 +111,7 @@ impl Session {
     /// The panel text was just loaded or regenerated: nothing in it is pending or unsaved.
     pub(super) fn text_shown(&mut self) {
         let v = &mut self.panel.versions;
-        (v.checked, v.saved, v.shown) = (v.now, v.now, v.now);
+        (v.checked, v.applied, v.saved, v.shown) = (v.now, v.now, v.now, v.now);
     }
 
     /// Makes the panel text the document's canonical text now, on the UI thread, unless it
@@ -338,7 +342,7 @@ impl Session {
         p.words = words(&checked);
         (p.lines, p.regenerated) = (checked.lines, Some(self.history.revision()));
         let v = &mut p.versions;
-        (v.checked, v.state) = (v.now, v.now);
+        (v.checked, v.applied, v.state) = (v.now, v.now, v.now);
         if saved {
             v.saved = v.now;
         }
