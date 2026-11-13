@@ -274,10 +274,33 @@ pub(crate) fn quit(cx: &mut App) {
         if closing || QUITTING.swap(true, Relaxed) {
             return;
         }
-        for &w in &windows {
-            if !settle(w, cx).await {
-                QUITTING.store(false, Relaxed);
-                return;
+        // A window stays open while another prompts, so passes repeat until no unsaved window
+        // changed since its Don't Save.
+        let unsaved = |w: WindowHandle<Willow>, cx: &mut AsyncApp| {
+            (w.update(cx, |w, _, _| {
+                let s = &w.session;
+                (!s.is_saved()).then(|| (s.document().clone(), s.panel().text().to_owned()))
+            }))
+            .ok()
+            .flatten()
+        };
+        let mut dismissed = vec![None; windows.len()];
+        loop {
+            let mut asked = false;
+            for (i, &w) in windows.iter().enumerate() {
+                let Some(now) = unsaved(w, cx) else { continue };
+                if dismissed[i].as_ref() == Some(&now) {
+                    continue;
+                }
+                asked = true;
+                if !settle(w, cx).await {
+                    QUITTING.store(false, Relaxed);
+                    return;
+                }
+                dismissed[i] = unsaved(w, cx);
+            }
+            if !asked {
+                break;
             }
         }
         for w in windows {
