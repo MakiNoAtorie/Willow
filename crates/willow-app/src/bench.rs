@@ -140,7 +140,11 @@ impl Bench {
 fn scenario_name(base: &str, shapes: usize, theme: &str) -> String {
     let mut name = base.to_string();
     if shapes != 10_000 {
-        let size = format!("_{}k", shapes / 1000);
+        // Whole thousands only: truncating would give 1500 and 1999 the same name.
+        let size = match shapes >= 1000 && shapes.is_multiple_of(1000) {
+            true => format!("_{}k", shapes / 1000),
+            false => format!("_{shapes}"),
+        };
         name = match name.contains("_10k") {
             true => name.replace("_10k", &size),
             false => name + &size,
@@ -742,6 +746,14 @@ mod tests {
             scenario_name("typing_10k", 10_000, "Poster"),
             "typing_10k_poster"
         );
+    }
+
+    #[test]
+    fn a_size_that_is_not_whole_thousands_keeps_its_count() {
+        assert_eq!(scenario_name("typing_10k", 1_500, "Paper"), "typing_1500");
+        assert_eq!(scenario_name("typing_10k", 1_999, "Paper"), "typing_1999");
+        assert_eq!(scenario_name("zone_drag", 500, "Paper"), "zone_drag_500");
+        assert_eq!(scenario_name("zone_drag", 0, "Paper"), "zone_drag_0");
     }
 
     #[test]
