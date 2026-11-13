@@ -506,3 +506,14 @@ fn marked_text_is_underlined_just_under_its_em_box() {
         [(Point { x, y }, Point { x: x + 15.0, y })]
     );
 }
+
+#[test]
+fn keys_that_change_nothing_leave_the_document_saved() {
+    let mut s = common::open(b"willow 1\n\na: \"Gates\"\n\n@layout a 0,0 w210\n");
+    s.handle(Input::TogglePanel, T);
+    assert!(s.is_saved());
+    s.handle(Input::Delete(Motion::Left), T);
+    typed(&mut s, "");
+    assert!(s.is_saved());
+    assert!(!s.can_undo());
+}

@@ -383,10 +383,12 @@ impl Session {
     }
 
     /// Replaces `range` of the panel text with `text`, caret after it: a change the writer
-    /// typed, unless both are empty.
+    /// typed, unless both are empty, which leaves the text, its version and held state alone.
     fn panel_replace(&mut self, range: Range<usize>, text: &str) {
         let changed = !range.is_empty() || !text.is_empty();
-        self.splice_panel_text(range.clone(), text);
+        if changed {
+            self.splice_panel_text(range.clone(), text);
+        }
         let at = range.start + text.len();
         let e = &mut self.panel.edit;
         (e.caret, e.anchor, e.marked, e.goal) = (downstream(at), at, None, None);
