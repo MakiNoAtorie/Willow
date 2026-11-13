@@ -71,13 +71,14 @@ pub struct Caret {
 }
 
 impl Line {
-    /// Caret stops with their x: each cluster's start, then the line's end.
+    /// Caret stops with their x: each cluster's start, then the line's end. Hanging spaces
+    /// stop at the end: `end_x` is clamped to the width.
     fn stops(&self) -> impl Iterator<Item = (Caret, f32)> + '_ {
         let at = |offset, upstream| Caret { offset, upstream };
         (self
             .clusters
             .iter()
-            .map(move |c| (at(c.range.start, false), c.x)))
+            .map(move |c| (at(c.range.start, false), c.x.min(self.end_x))))
         .chain([(at(self.range.end, self.wraps), self.end_x)])
     }
 

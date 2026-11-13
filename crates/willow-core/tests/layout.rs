@@ -110,6 +110,33 @@ fn a_point_lands_on_the_nearest_caret_stop_of_its_line() {
 }
 
 #[test]
+fn hanging_trailing_spaces_never_pull_a_caret_past_the_width() {
+    let end = Caret {
+        offset: 0,
+        upstream: true,
+    };
+    for (align, spaces) in [
+        (Align::Justified, 1),
+        (Align::Justified, 2),
+        (Align::Left, 2),
+    ] {
+        let s = format!("aaaa bbbb cccc dddd{}eeee", " ".repeat(spaces));
+        let l = layout(&text(&s), W, &PAPER, align, &Fake);
+        let first = &l.lines[0];
+        assert!(first.wraps && s[first.range.clone()].ends_with(' '));
+        let end = Caret {
+            offset: first.range.end,
+            ..end
+        };
+        // A click far right and Up from the next line both land on the end stop.
+        assert_eq!(l.caret_at(Point { x: 500.0, y: 5.0 }), end);
+        assert_eq!(l.vertical(at(first.range.end), 500.0, false), end);
+        assert_eq!(l.caret_point(end).x, first.end_x);
+        assert!(first.end_x <= W);
+    }
+}
+
+#[test]
 fn caret_positions_tell_a_wrap_end_from_the_next_line_start() {
     let l = lay("aaaa bbbb cccc dddd eeee ffff");
     assert_eq!(l.caret_point(at(20)), Point { x: 0.0, y: 22.5 });
